@@ -181,7 +181,12 @@ class SafetyChecks(TempDirCase):
         signed = Path(sys.executable).resolve()
         unsigned = write(self.tmp / "fake.dll", b"MZ" + b"\0" * 200)
         got = rs.win_signatures([signed, unsigned])
-        self.assertEqual(got.get(os.path.normcase(str(signed)), ("missing",))[0], "signed", got)
+        if got.get(os.path.normcase(str(signed)), ("missing",))[0] != "signed":
+            import subprocess
+            raw = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                                  f"Get-AuthenticodeSignature -LiteralPath '{signed}' | Format-List *"],
+                                 capture_output=True, text=True)
+            self.fail(f"got={got!r}\nRAW={raw.stdout!r} ERR={raw.stderr!r}")
         self.assertIn(got[os.path.normcase(str(unsigned))][0], ("unsigned", "unknown"))
 
 
