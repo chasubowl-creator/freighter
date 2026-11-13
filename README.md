@@ -12,7 +12,7 @@ FL Studio and Ableton Live. Windows and Mac, in any direction. Free, and everyth
     python3 rig_mover.py pack --list    # what a move would take, and how big
     python3 rig_mover.py rehearse       # practise a full move on this computer, safely
 
-The full walkthrough for a real move is in [MOVING-FROM-WINDOWS.md](MOVING-FROM-WINDOWS.md).
+Testing on a Windows PC, step by step: [WINDOWS-TEST.md](WINDOWS-TEST.md). The full walkthrough for a real move is in [MOVING-FROM-WINDOWS.md](MOVING-FROM-WINDOWS.md).
 
 ## Files
 
