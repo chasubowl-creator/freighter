@@ -421,9 +421,17 @@ def parse_win_signatures(text):
         data = [data]
     out = {}
     for d in data:
-        if isinstance(d, dict) and d.get("Path"):
-            status = WIN_STATUS.get(str(d.get("Status")), "unknown")
-            out[os.path.normcase(d["Path"])] = (status, (d.get("Signer") or "") if status != "unsigned" else "")
+        if not isinstance(d, dict):
+            continue
+        path = d.get("Path")
+        if isinstance(path, dict):  # PowerShell can wrap a string with extra properties: {"value": ..., ...}
+            path = path.get("value")
+        if not isinstance(path, str) or not path:
+            continue
+        signer = d.get("Signer")
+        signer = signer.get("value", "") if isinstance(signer, dict) else (signer or "")
+        status = WIN_STATUS.get(str(d.get("Status")), "unknown")
+        out[os.path.normcase(path)] = (status, signer if status != "unsigned" else "")
     return out
 
 
@@ -440,7 +448,7 @@ def win_signatures(paths):
         f"Get-Content -LiteralPath '{listfile}' -Encoding UTF8 | ForEach-Object {{"
         " $s = Get-AuthenticodeSignature -LiteralPath $_;"
         " $n = ''; if ($s.SignerCertificate) { $n = $s.SignerCertificate.GetNameInfo('SimpleName', $false) };"
-        " [pscustomobject]@{Path=$_; Status=[string]$s.Status; Signer=$n} } | ConvertTo-Json -Compress"
+        " [pscustomobject]@{Path=[string]$_; Status=[string]$s.Status; Signer=[string]$n} } | ConvertTo-Json -Compress"
     )
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],

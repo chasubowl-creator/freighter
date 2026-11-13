@@ -151,6 +151,8 @@ class SafetyChecks(TempDirCase):
         self.assertEqual(got[os.path.normcase("C:\\a.dll")][0], "broken")
         self.assertEqual(got[os.path.normcase("C:\\b.dll")][0], "unsigned")
         self.assertEqual(rs.parse_win_signatures("garbage"), {})
+        wrapped = '{"Path":{"value":"C:\\\\c.dll","PSPath":"x"},"Status":"Valid","Signer":"Y"}'
+        self.assertEqual(rs.parse_win_signatures(wrapped), {os.path.normcase("C:\\c.dll"): ("signed", "Y")})
 
     def test_parse_clamscan(self):
         out = "/x/Evil.vst3/Contents/MacOS/Evil: Osx.Trojan.Generic FOUND\n/x/ok.wav: OK\n"
