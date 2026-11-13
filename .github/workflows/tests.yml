@@ -1,0 +1,33 @@
+# Runs Freighter's tests on real Windows and Mac machines (free on GitHub) for every change.
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python: ["3.8", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit and full-move tests
+        run: python -m unittest discover -s tests -v
+      - name: Scanner runs on a real machine
+        run: python rig_scanner.py --no-open --quick --out scan-output
+      - name: Mover lists what it would pack
+        run: python rig_mover.py pack --list
+      - name: Keep the scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-${{ matrix.os }}-py${{ matrix.python }}
+          path: scan-output

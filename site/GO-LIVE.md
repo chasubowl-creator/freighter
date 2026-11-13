@@ -1,0 +1,47 @@
+# Putting the Freighter page online (about 10 minutes, free)
+
+Netlify hosts the page and collects sign-ups. Free plan: 100 sign-ups a month, which is plenty for a beta list.
+
+## 1. Create the site
+
+1. Make a free account at https://app.netlify.com/signup (signing up with GitHub or email both work).
+2. Go to **Sites → Add new site → Deploy manually** (or open https://app.netlify.com/drop).
+3. Drag the **`deploy`** folder (inside `site/`) onto the page. In a few seconds you get a link like
+   `https://random-name-123.netlify.app`.
+4. **Site configuration → Change site name** → `freighter` (or whatever's free) → your page is at
+   `https://freighter.netlify.app`.
+
+## 2. Turn on sign-ups
+
+New Netlify sites have form collection switched off.
+
+1. **Site configuration → Forms → Enable form detection.**
+2. Deploy again so Netlify sees the form: **Deploys** tab → drag the `deploy` folder onto the
+   "Need to update your site?" box.
+3. Check: **Forms** now lists a form called **waitlist**.
+
+## 3. Test it
+
+1. Open your live page and sign up with your own email.
+2. In Netlify, **Forms → waitlist** should show the entry with all answers.
+3. Get an email for each sign-up: **Forms → Form notifications → Add notification → Email notification**.
+4. Delete your test entry afterwards so your numbers stay clean.
+
+## 4. Read your results
+
+**Forms → waitlist → Download as CSV.** The columns that matter for the demand test:
+- `when`: how many are moving soon (your first beta testers)
+- `next`: what people want Freighter to handle next
+- `daw`, `from`, `to`: which setups to support first
+
+Rule of thumb: **200+ emails and 30+ people moving within 3 months** means there's real demand for a 1.0.
+
+## Changing the page later
+
+Edit `landing.html` (or ask Claude), run `python3 build.py`, then drag the `deploy` folder onto the
+Deploys tab again. Sign-ups already collected stay put.
+
+## Later: your own domain
+
+Buy a domain (about $10–15/year, e.g. at Namecheap or Cloudflare), then in Netlify:
+**Domain management → Add a domain**, and follow its steps. Pick the product name first.

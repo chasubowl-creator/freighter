@@ -1,0 +1,17 @@
+# Personal output: lists your own plugins, projects and folders. Never commit.
+rig-report-*/
+rehearsal/
+rehearsal-report-*.txt
+RigMover-*/
+scan-output/
+
+# Business research notes (kept local)
+research_notes/
+reports/
+
+# Python and OS clutter
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+*.rigmover-part
