@@ -242,7 +242,8 @@ class FullMove(TempDirCase):
         self.snare = write(old / "Desktop" / "DrumKits" / "Snares" / "snare.wav", os.urandom(3000))
         self.vox = write(old / "Downloads" / "vox.wav", os.urandom(2000))
         write(old / "Downloads" / "unrelated.zip", os.urandom(50000))
-        make_als(old / "Music" / "Ableton" / "User Library" / "Song Project" / "Song.als",
+        self.user_library = rm.known_roots(rm.THIS_OS, old)["ableton_user_library"][1]  # differs per OS
+        make_als(self.user_library / "Song Project" / "Song.als",
                  [str(self.kick), str(self.vox), "/nowhere/gone.wav"])
         make_flp(old / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp",
                  [str(self.snare), "%FLStudioFactoryData%/Data/x.wav"])
@@ -268,7 +269,7 @@ class FullMove(TempDirCase):
             rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
             rm.cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
             maps = rm.load_pathmaps(None)
-        song = new / "Music" / "Ableton" / "User Library" / "Song Project" / "Song.als"
+        song = rm.known_roots(rm.THIS_OS, new)["ableton_user_library"][1] / "Song Project" / "Song.als"
         text = gzip.decompress(song.read_bytes()).decode()
         for v in [m.group(2) for m in rm.PATH_RE.finditer(text)]:
             if v != "/nowhere/gone.wav":

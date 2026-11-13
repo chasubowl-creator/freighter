@@ -260,7 +260,11 @@ def project_sample_folders(items):
 def cmd_pack(args):
     items = pack_items(args.include, set(args.skip))
     if not items:
-        sys.exit("Nothing to pack: no standard music folders found. Add folders with --include FOLDER.")
+        msg = "Nothing to pack: no standard music folders found. Add folders with --include FOLDER."
+        if args.list or not args.to:
+            print(msg)
+            return 0
+        sys.exit(msg)
 
     print("Measuring folders...", flush=True)
     for it in items:
