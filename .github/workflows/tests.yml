@@ -31,3 +31,40 @@ jobs:
         with:
           name: scan-${{ matrix.os }}-py${{ matrix.python }}
           path: scan-output
+
+  # Builds double-click programs (no Python needed) once the tests pass.
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller==6.11.1
+      - name: Build freighter and manifest
+        run: |
+          pyinstaller --onefile --name freighter rig_mover.py
+          pyinstaller --onefile --name manifest rig_scanner.py
+      - name: The built programs run
+        shell: bash
+        run: |
+          ./dist/freighter pack --list
+          ./dist/manifest --no-open --quick --out smoke-scan
+          printf 'q\n' | ./dist/freighter
+      - name: Add the Windows test guide
+        shell: bash
+        run: cp WINDOWS-TEST.md dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freighter-${{ matrix.name }}
+          path: dist/

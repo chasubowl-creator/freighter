@@ -37,6 +37,13 @@ HOME = Path.home()
 
 # --------------------------------------------------------------------------- helpers
 
+def app_dir():
+    """Folder to write reports next to: the program's own folder, also when packaged as an .exe/app."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 def human_size(n):
     n = float(n)
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -921,6 +928,8 @@ def main():
                                safety=not args.no_safety, virus=args.virus_scan)
     if not args.no_open:
         webbrowser.open(html_path.as_uri())
+    if getattr(sys, "frozen", False) and len(sys.argv) == 1:
+        input("\nYour report is open in the browser. Press Enter to close this window...")
     return 0
 
 
@@ -932,7 +941,7 @@ def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_h
     """Scan, write rig-report.html + plugins.csv, and return their paths."""
     host = host_name()
     today = dt.date.today().isoformat()
-    out_dir = Path(out_dir) if out_dir else Path(__file__).resolve().parent / f"rig-report-{host}-{today}"
+    out_dir = Path(out_dir) if out_dir else app_dir() / f"rig-report-{host}-{today}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("Scanning plugin folders...", flush=True)

@@ -886,7 +886,7 @@ def cmd_rehearse(args):
     """A full move on one computer: pack, unpack into a stand-in 'new computer' folder, repair,
     then check every project's samples. Your real folders are only read, never changed."""
     global HIDE
-    base = (Path(args.to).expanduser() if args.to else Path(__file__).resolve().parent / "rehearsal").resolve()
+    base = (Path(args.to).expanduser() if args.to else rs.app_dir() / "rehearsal").resolve()
     drive, new_home = base / "drive", base / "new-computer"
     real_home = home()
     items = pack_items(args.include, set(args.skip))
@@ -963,6 +963,70 @@ def cmd_rehearse(args):
     return 0 if not totals["lost"] else 2
 
 
+# --------------------------------------------------------------------------- menu (double-click)
+
+MENU = """
+  _Freighter  move your studio to a new computer
+
+  On the OLD computer
+    1  Scan my plugins (_Manifest report)
+    2  See what a move would take
+    3  Rehearse the move here, safely (nothing is changed)
+    4  Pack for the move onto a drive
+
+  On the NEW computer
+    5  Unpack a bundle from the drive
+    6  Repair projects after unpacking
+
+    q  Quit
+"""
+
+
+def ask_path(prompt):
+    """Ask for a folder. Dragging a folder into the window types its path, sometimes quoted or escaped."""
+    raw = input(prompt).strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
+        raw = raw[1:-1]
+    if not rs.IS_WIN:
+        raw = re.sub(r"\\(.)", r"\1", raw)  # Terminal escapes spaces when you drag a folder in
+    return raw
+
+
+def interactive_menu():
+    while True:
+        print(MENU)
+        choice = input("  Choose 1-6 (or q): ").strip().lower()
+        try:
+            if choice == "1":
+                html_path, _ = rs.run_scan()
+                import webbrowser
+                webbrowser.open(html_path.as_uri())
+            elif choice == "2":
+                cmd_pack(argparse.Namespace(to=None, list=True, include=[], skip=[], include_programs=False))
+            elif choice == "3":
+                cmd_rehearse(argparse.Namespace(to=None, include=[], skip=[]))
+            elif choice == "4":
+                drive = ask_path("  Drag the drive (or a folder on it) into this window, then press Enter: ")
+                if drive:
+                    cmd_pack(argparse.Namespace(to=drive, list=False, include=[], skip=[], include_programs=False))
+            elif choice == "5":
+                bundle = ask_path("  Drag the RigMover-... folder from the drive into this window, then press Enter: ")
+                if bundle:
+                    cmd_unpack(argparse.Namespace(bundle=bundle, dest_for=[]))
+            elif choice == "6":
+                cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
+                cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
+            elif choice in ("q", "quit", "exit", ""):
+                return 0
+            else:
+                print("  Type a number from 1 to 6, or q to quit.")
+                continue
+        except SystemExit as e:  # commands exit with a message on problems; show it and keep the menu
+            if e.code not in (None, 0):
+                print(f"\n  {e.code}")
+        input("\n  Press Enter to go back to the menu...")
+
+
 # --------------------------------------------------------------------------- main
 
 def main():
@@ -1010,6 +1074,8 @@ def main():
     s.add_argument("--skip", action="append", default=[], metavar="ID")
     s.set_defaults(fn=cmd_rehearse)
 
+    if len(sys.argv) == 1:  # double-clicked, or run with no options
+        return interactive_menu()
     args = ap.parse_args()
     return args.fn(args)
 
