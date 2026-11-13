@@ -131,13 +131,57 @@ def hash_file(p):
     return h.hexdigest()
 
 
-def walk_files(root):
-    """Yield (relative posix path, absolute path, size) for every real file under root."""
+# Programs, installers and plugin binaries. They don't belong in a move: plugins get reinstalled from
+# their makers, and installers tucked into sample folders are a common way cracked software spreads malware.
+# Only checked in sample, Desktop and Downloads folders, never inside a DAW's own user-data folder
+# (FL Studio keeps settings as .scr files; Ableton's User Library holds Max for Live .js devices).
+PROGRAM_EXTS = {
+    ".exe", ".msi", ".msix", ".bat", ".cmd", ".ps1", ".vbs", ".jar", ".dll", ".sys",
+    ".dmg", ".pkg", ".mpkg", ".app", ".command", ".dylib",
+    ".vst", ".vst3", ".component", ".clap", ".aaxplugin",
+}
+# Extensions other software also uses for ordinary files: a program only if the header says so.
+MAYBE_PROGRAM_EXTS = {".scr", ".com", ".bundle", ".so"}
+EXEC_MAGIC = (b"MZ", b"\x7fELF", b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+              b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce")
+
+
+def is_program(path):
+    ext = os.path.splitext(str(path))[1].lower()
+    if ext in PROGRAM_EXTS:
+        return True
+    if ext in MAYBE_PROGRAM_EXTS:
+        p = Path(path)
+        if p.is_dir():
+            return (p / "Contents" / "MacOS").is_dir()
+        try:
+            with open(p, "rb") as f:
+                head = f.read(4)
+        except OSError:
+            return False
+        return any(head.startswith(m) for m in EXEC_MAGIC)
+    return False
+
+
+def walk_files(root, left_behind=None):
+    """Yield (relative posix path, absolute path, size) for every real file under root.
+    With a left_behind list, programs and installers are skipped and recorded there instead."""
     root = Path(root)
     for cur, dirs, files in os.walk(root, onerror=lambda e: None):
-        dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS and not os.path.islink(os.path.join(cur, d))]
+        keep = []
+        for d in dirs:
+            if d.lower() in SKIP_DIRS or os.path.islink(os.path.join(cur, d)):
+                continue
+            if left_behind is not None and is_program(os.path.join(cur, d)):  # app and plugin bundles are folders
+                left_behind.append(os.path.join(cur, d))
+                continue
+            keep.append(d)
+        dirs[:] = keep
         for fn in files:
             if fn.lower() in JUNK_FILES or fn.endswith(".rigmover-part"):
+                continue
+            if left_behind is not None and is_program(os.path.join(cur, fn)):
+                left_behind.append(os.path.join(cur, fn))
                 continue
             ap = Path(cur) / fn
             if ap.is_symlink():
@@ -267,6 +311,7 @@ def cmd_pack(args):
         sys.exit(msg)
 
     print("Measuring folders...", flush=True)
+    left_behind = None if getattr(args, "include_programs", False) else []
     for it in items:
         if "only" in it:
             files = []
@@ -275,7 +320,8 @@ def cmd_pack(args):
                 if ap.is_file():
                     files.append((name, ap, ap.stat().st_size))
         else:
-            files = list(walk_files(it["source_path"]))
+            # DAW user-data folders move whole; sample folders leave programs and installers behind
+            files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None))
         it["_files"] = files
         it["files"] = len(files)
         it["bytes"] = sum(f[2] for f in files)
@@ -286,6 +332,9 @@ def cmd_pack(args):
         for it in items:
             print(f"{it['id']:<22} {rs.human_size(it['bytes']):>10} {it['files']:>8}  {it['label']}  ({it['source_path']})")
         print(f"\nTotal {rs.human_size(total)}. Pack with: --to DRIVE   (leave one out with --skip ID)")
+        if left_behind:
+            print(f"{len(left_behind)} programs or installers will be left behind (reinstall software from its "
+                  "maker). Keep them with --include-programs.")
         if not args.to:
             return 0
         if args.list:
@@ -305,7 +354,7 @@ def cmd_pack(args):
                  f"have {rs.human_size(free)}. Leave something out with --skip ID.")
 
     print("\nSaving the plugin list...", flush=True)
-    rs.run_scan(bundle / "rig-report", quick=True)
+    rs.run_scan(bundle / "rig-report", quick=True, safety=False)  # the list is what a move needs
     shutil.copy2(bundle / "rig-report" / "plugins.csv", bundle / "plugins.csv")
 
     manifest = {
@@ -343,7 +392,14 @@ def cmd_pack(args):
                 index.flush()
                 prog.add(size)
 
+    if left_behind:
+        (bundle / "left-behind.txt").write_text(
+            "Programs, installers and plugin files left out of this move. Reinstall software from its maker;\n"
+            "installers found in sample folders are a common way malware spreads.\n\n" + "\n".join(left_behind),
+            encoding="utf-8")
     print(f"\nBundle ready: {bundle}")
+    if left_behind:
+        print(f"{len(left_behind)} programs or installers were left behind; see left-behind.txt.")
     if errors:
         (bundle / "pack-errors.txt").write_text("\n".join(errors), encoding="utf-8")
         print(f"{len(errors)} files couldn't be copied; see pack-errors.txt. Run the same command again to retry.")
@@ -836,7 +892,7 @@ def cmd_rehearse(args):
     items = pack_items(args.include, set(args.skip))
     need = sum(size for it in items
                for _r, _a, size in ([(n, None, (Path(it["source_path"]) / n).stat().st_size)
-                                     for n in it["only"]] if "only" in it else walk_files(it["source_path"])))
+                                     for n in it["only"]] if "only" in it else walk_files(it["source_path"], [])))
     base.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(base).free
     print(f"Rehearsal needs about {rs.human_size(need * 2)} (a bundle plus an unpacked copy); "
@@ -845,7 +901,8 @@ def cmd_rehearse(args):
         sys.exit("Not enough space. Leave big items out with --skip ID, or use --to on a bigger drive.")
 
     print("\n== 1/4  Pack, as the old computer")
-    cmd_pack(argparse.Namespace(to=str(drive), list=False, include=args.include, skip=args.skip))
+    cmd_pack(argparse.Namespace(to=str(drive), list=False, include=args.include, skip=args.skip,
+                                include_programs=False))
     bundles = sorted(drive.glob("RigMover-*"), key=lambda p: p.stat().st_mtime)
     if not bundles:
         sys.exit("Packing produced no bundle.")
@@ -925,6 +982,8 @@ def main():
     s.add_argument("--list", action="store_true", help="only show what would be packed")
     s.add_argument("--include", action="append", default=[], metavar="FOLDER", help="also pack this folder")
     s.add_argument("--skip", action="append", default=[], metavar="ID", help="leave out this item")
+    s.add_argument("--include-programs", action="store_true",
+                   help="also pack programs and installers found in your folders (left out by default)")
     s.set_defaults(fn=cmd_pack)
 
     s = sub.add_parser("unpack", help="put a bundle's files in place on this computer")

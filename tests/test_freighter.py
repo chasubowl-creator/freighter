@@ -134,6 +134,81 @@ class ScannerBinaries(TempDirCase):
             self.assertEqual(rs.pe_arch(write(self.tmp / name, bytes(b))), [name])
 
 
+class SafetyChecks(TempDirCase):
+    def test_parse_codesign(self):
+        signed = "Identifier=com.xfer.serum2\nAuthority=Developer ID Application: Steve Duda (42K3SNWUP7)\nAuthority=Apple Root CA\n"
+        self.assertEqual(rs.parse_codesign(signed, 0, ""), ("signed", "Steve Duda"))
+        self.assertEqual(rs.parse_codesign(signed, 1, "a sealed resource is missing or invalid"), ("broken", "Steve Duda"))
+        self.assertEqual(rs.parse_codesign("Signature=adhoc\nTeamIdentifier=not set\n", 0, ""), ("adhoc", ""))
+        self.assertEqual(rs.parse_codesign("x: code object is not signed at all\n", 1, ""), ("unsigned", ""))
+
+    def test_parse_windows_signatures(self):
+        one = '{"Path":"C:\\\\VST\\\\a.dll","Status":"Valid","Signer":"Xfer Records"}'
+        self.assertEqual(rs.parse_win_signatures(one), {os.path.normcase("C:\\VST\\a.dll"): ("signed", "Xfer Records")})
+        many = ('[{"Path":"C:\\\\a.dll","Status":"HashMismatch","Signer":"X"},'
+                '{"Path":"C:\\\\b.dll","Status":"NotSigned","Signer":""}]')
+        got = rs.parse_win_signatures(many)
+        self.assertEqual(got[os.path.normcase("C:\\a.dll")][0], "broken")
+        self.assertEqual(got[os.path.normcase("C:\\b.dll")][0], "unsigned")
+        self.assertEqual(rs.parse_win_signatures("garbage"), {})
+
+    def test_parse_clamscan(self):
+        out = "/x/Evil.vst3/Contents/MacOS/Evil: Osx.Trojan.Generic FOUND\n/x/ok.wav: OK\n"
+        self.assertEqual(rs.parse_clamscan(out), {"/x/Evil.vst3/Contents/MacOS/Evil": "Osx.Trojan.Generic"})
+
+    def test_broken_signature_is_flagged(self):
+        plugins = [{"name": "X", "flags": [], "_check": None, "path": "x"}]
+        rs.apply_safety(plugins)  # no check target: unknown, not flagged
+        self.assertEqual((plugins[0]["signature"], plugins[0]["flags"]), ("unknown", []))
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS codesign")
+    def test_mac_detects_tampering(self):
+        copy = self.tmp / "ls-copy"
+        shutil.copyfile("/bin/ls", copy)
+        self.assertEqual(rs.mac_signature(copy)[0], "signed")
+        data = bytearray(copy.read_bytes())
+        data[len(data) // 2] ^= 0xFF  # change one byte, as a crack would
+        copy.write_bytes(bytes(data))
+        self.assertEqual(rs.mac_signature(copy)[0], "broken")
+        self.assertEqual(rs.mac_signature(write(self.tmp / "plain.txt", "hello"))[0], "unsigned")
+
+    @unittest.skipUnless(os.name == "nt", "Windows Authenticode")
+    def test_windows_signatures(self):
+        sysdir = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+        unsigned = write(self.tmp / "fake.dll", b"MZ" + b"\0" * 200)
+        got = rs.win_signatures([sysdir / "notepad.exe", unsigned])
+        self.assertEqual(got[os.path.normcase(str(sysdir / "notepad.exe"))][0], "signed")
+        self.assertIn(got[os.path.normcase(str(unsigned))][0], ("unsigned", "unknown"))
+
+
+class ProgramsLeftBehind(TempDirCase):
+    def test_is_program(self):
+        self.assertTrue(rm.is_program(write(self.tmp / "setup.exe", b"MZ")))
+        self.assertTrue(rm.is_program(write(self.tmp / "evil.scr", b"MZ\x90\x00")))
+        self.assertFalse(rm.is_program(write(self.tmp / "Recent files.scr", b"FL settings text")))
+        self.assertFalse(rm.is_program(write(self.tmp / "kick.wav", b"RIFF")))
+
+    def test_pack_leaves_programs_in_sample_folders_only(self):
+        home = self.tmp / "home"
+        kick = write(home / "Desktop" / "Kits" / "Kicks" / "kick.wav", os.urandom(500))
+        write(home / "Desktop" / "Kits" / "Serum_crack_installer.exe", b"MZ" + os.urandom(500))
+        write(home / "Desktop" / "Kits" / "Cool.vst3" / "Contents" / "x.bin", os.urandom(100))
+        fl = home / "Documents" / "Image-Line"
+        write(fl / "FL Studio" / "Settings" / "Browser" / "Recent files.scr", b"settings")
+        write(fl / "FL Studio" / "Settings" / "make.bat", b"echo hi")
+        make_flp(fl / "FL Studio" / "Projects" / "B" / "B.flp", [str(kick)])
+        with as_home(home), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(self.tmp / "d"), list=False, include=[], skip=[]))
+        bundle = next((self.tmp / "d").glob("RigMover-*"))
+        packed = {p.name for p in (bundle / "data").rglob("*")}
+        self.assertNotIn("Serum_crack_installer.exe", packed)
+        self.assertNotIn("Cool.vst3", packed)
+        self.assertIn("kick.wav", packed)
+        self.assertIn("Recent files.scr", packed, "DAW settings must move whole")
+        self.assertIn("make.bat", packed, "DAW settings must move whole")
+        self.assertIn("Serum_crack_installer.exe", (bundle / "left-behind.txt").read_text())
+
+
 # --------------------------------------------------------------------------- project readers
 
 class FLParser(TempDirCase):
@@ -251,7 +326,7 @@ class FullMove(TempDirCase):
 
     def pack(self, old, drive):
         with as_home(old), quiet():
-            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[]))
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
         return next(drive.glob("RigMover-*"))
 
     def test_pack_unpack_repair(self):

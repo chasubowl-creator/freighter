@@ -365,6 +365,179 @@ def win_entry(path, fmt):
     return name, vendor, version, archs, flags
 
 
+# --------------------------------------------------------------------------- safety checks
+
+SIG_LABEL = {
+    "signed": "Signed",
+    "adhoc": "Self-signed (no maker ID)",
+    "unsigned": "Not signed",
+    "untrusted": "Signed, not trusted",
+    "broken": "SIGNATURE BROKEN",
+    "unknown": "Couldn't check",
+}
+FLAG_BROKEN = ("Signature broken: its files were changed after the maker signed it, which is what "
+               "cracked plugins look like. Don't carry it over; reinstall from the maker.")
+
+
+def parse_codesign(display_err, verify_rc, verify_err):
+    """Turn `codesign -dv` and `codesign --verify` output into (status, signer)."""
+    if "not signed at all" in display_err:
+        return "unsigned", ""
+    signer = ""
+    for line in display_err.splitlines():
+        if line.startswith("Authority="):
+            a = line.split("=", 1)[1].strip()
+            signer = a.split(":", 1)[1].strip() if ":" in a else a
+            signer = re.sub(r"\s*\([A-Z0-9]{10}\)$", "", signer)
+            break
+    if verify_rc != 0:
+        return "broken", signer
+    if "Signature=adhoc" in display_err:
+        return "adhoc", ""
+    return ("signed", signer) if signer else ("unknown", "")
+
+
+def mac_signature(path):
+    try:
+        d = subprocess.run(["codesign", "-dv", "--verbose=2", str(path)], capture_output=True, text=True, timeout=60)
+        if "not signed at all" in d.stderr:
+            return "unsigned", ""
+        v = subprocess.run(["codesign", "--verify", str(path)], capture_output=True, text=True, timeout=120)
+        return parse_codesign(d.stderr, v.returncode, v.stderr)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown", ""
+
+
+WIN_STATUS = {"Valid": "signed", "NotSigned": "unsigned", "HashMismatch": "broken", "NotTrusted": "untrusted"}
+
+
+def parse_win_signatures(text):
+    """Parse the JSON our PowerShell Get-AuthenticodeSignature call prints: {path: (status, signer)}."""
+    try:
+        data = json.loads(text) if text.strip() else []
+    except ValueError:
+        return {}
+    if isinstance(data, dict):
+        data = [data]
+    out = {}
+    for d in data:
+        if isinstance(d, dict) and d.get("Path"):
+            status = WIN_STATUS.get(str(d.get("Status")), "unknown")
+            out[os.path.normcase(d["Path"])] = (status, (d.get("Signer") or "") if status != "unsigned" else "")
+    return out
+
+
+def win_signatures(paths):
+    """Check Authenticode signatures for many files in one PowerShell call."""
+    if not paths:
+        return {}
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        f.write("\n".join(str(p) for p in paths))
+        listfile = f.name
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        f"Get-Content -LiteralPath '{listfile}' -Encoding UTF8 | ForEach-Object {{"
+        " $s = Get-AuthenticodeSignature -LiteralPath $_;"
+        " $n = ''; if ($s.SignerCertificate) { $n = $s.SignerCertificate.GetNameInfo('SimpleName', $false) };"
+        " [pscustomobject]@{Path=$_; Status=[string]$s.Status; Signer=$n} } | ConvertTo-Json -Compress"
+    )
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                           capture_output=True, text=True, timeout=900)
+        return parse_win_signatures(r.stdout)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    finally:
+        try:
+            os.remove(listfile)
+        except OSError:
+            pass
+
+
+def find_virus_scanner():
+    """(name, how to run) for a virus scanner already on this computer, or (None, hint)."""
+    if IS_WIN:
+        cands = sorted(Path(os.environ.get("ProgramData", r"C:\ProgramData"), "Microsoft", "Windows Defender",
+                            "Platform").glob("*/MpCmdRun.exe"), reverse=True)
+        cands.append(Path(os.environ.get("ProgramFiles", r"C:\Program Files"), "Windows Defender", "MpCmdRun.exe"))
+        for c in cands:
+            if c.is_file():
+                return "Microsoft Defender", str(c)
+        return None, "Microsoft Defender wasn't found."
+    import shutil as _sh
+    clam = _sh.which("clamscan")
+    if clam:
+        return "ClamAV", clam
+    return None, "No virus scanner found. On a Mac, install the free ClamAV with: brew install clamav"
+
+
+def parse_clamscan(output):
+    """{file: threat name} from `clamscan --infected` output lines like '/path: Name FOUND'."""
+    hits = {}
+    for line in output.splitlines():
+        if line.endswith(" FOUND") and ": " in line:
+            f, name = line[:-6].rsplit(": ", 1)
+            hits[f] = name
+    return hits
+
+
+def virus_scan(paths):
+    """{plugin path: threat name} for plugins a virus scanner flags, plus a one-line status."""
+    name, how = find_virus_scanner()
+    if not name:
+        return {}, how
+    hits = {}
+    if name == "Microsoft Defender":
+        for p in paths:
+            try:
+                r = subprocess.run([how, "-Scan", "-ScanType", "3", "-File", str(p), "-DisableRemediation"],
+                                   capture_output=True, text=True, timeout=600)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if r.returncode == 2:
+                m = re.search(r"Threat\s*:\s*(.+)", r.stdout)
+                hits[str(p)] = m.group(1).strip() if m else "threat found"
+    else:
+        try:
+            r = subprocess.run([how, "-r", "--infected", "--no-summary"] + [str(p) for p in paths],
+                               capture_output=True, text=True, timeout=3600)
+        except (OSError, subprocess.SubprocessError):
+            return {}, "ClamAV couldn't run."
+        for f, threat in parse_clamscan(r.stdout).items():
+            owner = next((str(p) for p in paths if f == str(p) or f.startswith(str(p) + os.sep)), f)
+            hits[owner] = threat
+    return hits, f"{name} scanned {len(paths)} plugins"
+
+
+def apply_safety(plugins, virus=False):
+    """Add signature status (and optionally virus-scan results) to each plugin."""
+    targets = [p.get("_check") for p in plugins if p.get("_check")]
+    if IS_WIN:
+        sigs = win_signatures(targets)
+    for i, p in enumerate(plugins, 1):
+        if IS_MAC and i % 25 == 0:
+            print(f"  checked signatures of {i}/{len(plugins)} plugins...", flush=True)
+        t = p.get("_check")
+        if not t:
+            status, signer = "unknown", ""
+        elif IS_MAC:
+            status, signer = mac_signature(t)
+        else:
+            status, signer = sigs.get(os.path.normcase(str(t)), ("unknown", ""))
+        p["signature"], p["signer"] = status, signer
+        if status == "broken":
+            p["flags"].append(FLAG_BROKEN)
+    status_line = "Virus scan not run (add --virus-scan)"
+    if virus:
+        print("Scanning plugins for viruses (this can take a few minutes)...", flush=True)
+        hits, status_line = virus_scan([p["path"] for p in plugins])
+        for p in plugins:
+            if p["path"] in hits:
+                p["flags"].append(f"Virus scanner flagged it ({hits[p['path']]}). Delete it; don't reinstall this copy.")
+    return status_line
+
+
 # --------------------------------------------------------------------------- scan
 
 def scan(extra_dirs):
@@ -404,6 +577,8 @@ def scan(extra_dirs):
             "name": name, "vendor": vendor or "Unknown maker", "format": fmt, "version": version,
             "archs": ", ".join(archs), "path": str(path), "size": size, "modified": modified,
             "flags": flags, "key": match_key(name),
+            "signature": "", "signer": "",
+            "_check": path if IS_MAC else win_binary(path),  # what the signature check looks at
         })
 
     # Tidy vendor spelling (e.g. "fabfilter" vs "FabFilter") using the best-looking variant.
@@ -607,7 +782,7 @@ def vendor_checklist(groups, title_note=""):
     return "".join(out)
 
 
-def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title):
+def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title, safety_line=None):
     os_name = "macOS " + platform.mac_ver()[0] if IS_MAC else platform.platform() if IS_WIN else platform.platform()
     if IS_MAC and is_apple_silicon():
         os_name += " (Apple Silicon)"
@@ -656,6 +831,17 @@ def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title):
     else:
         h.append("<p>Nothing to fix.</p>")
 
+    if safety_line is not None:
+        counts = {}
+        for p in plugins:
+            counts[p.get("signature") or "unknown"] = counts.get(p.get("signature") or "unknown", 0) + 1
+        order = ["signed", "adhoc", "untrusted", "unsigned", "broken", "unknown"]
+        chips = " ".join(f"<span class=chip>{e(SIG_LABEL[k])}: {counts[k]}</span>" for k in order if counts.get(k))
+        h.append("<h2>Safety check</h2><p class=sub>A maker's digital signature proves a plugin came from them and "
+                 "hasn't been changed since. <b>Signature broken</b> is the warning sign: cracked plugins have "
+                 "their files altered. Plenty of honest free plugins, and anything you built yourself, simply "
+                 f"aren't signed.</p><p>{chips}</p><p class=sub>{e(safety_line)}</p>")
+
     groups = {}
     for p in plugins:
         groups.setdefault(p["vendor"], []).append(p)
@@ -677,10 +863,10 @@ def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title):
 
     h.append(f"<h2>All plugins ({len(plugins)})</h2><input id=q type=search placeholder='Filter by name, maker, format...'>")
     h.append("<div class=tablewrap><table id=all><thead><tr><th>Plugin</th><th>Maker</th><th>Format</th><th>Version</th>"
-             "<th>Chip</th><th>Size</th><th>Modified</th><th>Location</th></tr></thead><tbody>")
+             "<th>Chip</th><th>Signed by</th><th>Size</th><th>Modified</th><th>Location</th></tr></thead><tbody>")
     for p in sorted(plugins, key=lambda p: (p["vendor"].lower(), p["name"].lower(), p["format"])):
         h.append(f"<tr><td>{e(p['name'])}</td><td>{e(p['vendor'])}</td><td>{e(p['format'])}</td>"
-                 f"<td>{e(p['version'])}</td><td>{e(p['archs'])}</td><td data-v={p['size']}>{e(human_size(p['size']))}</td>"
+                 f"<td>{e(p['version'])}</td><td>{e(p['archs'])}</td><td>{e(p.get('signer') or SIG_LABEL.get(p.get('signature') or '', ''))}</td><td data-v={p['size']}>{e(human_size(p['size']))}</td>"
                  f"<td>{e(p['modified'])}</td><td class=path>{e(p['path'])}</td></tr>")
     h.append("</tbody></table></div>")
     h.append("<footer>Made by Rig Scanner. It reads plugin info files only, never loads plugins, and sends nothing "
@@ -690,7 +876,8 @@ def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title):
 
 
 def write_csv(plugins, path):
-    cols = ["name", "vendor", "format", "version", "archs", "size_mb", "modified", "flags", "path", "key"]
+    cols = ["name", "vendor", "format", "version", "archs", "signature", "signer", "size_mb", "modified", "flags",
+            "path", "key"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -708,6 +895,9 @@ def main():
     ap.add_argument("--out", metavar="FOLDER", help="where to write the report (default: next to this script)")
     ap.add_argument("--quick", action="store_true", help="skip measuring backup folder sizes")
     ap.add_argument("--no-open", action="store_true", help="don't open the report when done")
+    ap.add_argument("--virus-scan", action="store_true",
+                    help="also scan plugins with Microsoft Defender (Windows) or ClamAV (Mac, if installed)")
+    ap.add_argument("--no-safety", action="store_true", help="skip the plugin signature check")
     args = ap.parse_args()
 
     if not (IS_MAC or IS_WIN):
@@ -715,7 +905,8 @@ def main():
         return 1
 
     out_dir = Path(args.out) if args.out else None
-    html_path, _csv = run_scan(out_dir, args.extra_dir, args.quick, args.compare)
+    html_path, _csv = run_scan(out_dir, args.extra_dir, args.quick, args.compare,
+                               safety=not args.no_safety, virus=args.virus_scan)
     if not args.no_open:
         webbrowser.open(html_path.as_uri())
     return 0
@@ -725,7 +916,7 @@ def host_name():
     return socket.gethostname().split(".")[0] or "this-computer"
 
 
-def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_html=""):
+def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_html="", safety=True, virus=False):
     """Scan, write rig-report.html + plugins.csv, and return their paths."""
     host = host_name()
     today = dt.date.today().isoformat()
@@ -735,6 +926,10 @@ def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_h
     print("Scanning plugin folders...", flush=True)
     plugins = scan(list(extra_dirs))
     print(f"Found {len(plugins)} plugin files.", flush=True)
+    safety_line = None
+    if safety:
+        print("Checking plugin signatures...", flush=True)
+        safety_line = apply_safety(plugins, virus)
     daws = find_daws()
     print("Looking for DAW and sample folders...", flush=True)
     folders = backup_folders(quick)
@@ -749,7 +944,7 @@ def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_h
     csv_path = out_dir / "plugins.csv"
     html_path = out_dir / "rig-report.html"
     write_csv(plugins, csv_path)
-    page = build_report(plugins, daws, folders, cmp_result, cmp_name, host, title)
+    page = build_report(plugins, daws, folders, cmp_result, cmp_name, host, title, safety_line)
     if extra_html:
         page = page.replace("<h2>All plugins", extra_html + "<h2>All plugins", 1)
     html_path.write_text(page, encoding="utf-8")
