@@ -176,10 +176,12 @@ class SafetyChecks(TempDirCase):
 
     @unittest.skipUnless(os.name == "nt", "Windows Authenticode")
     def test_windows_signatures(self):
-        sysdir = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+        # Plugins carry their signature inside the file, like python.exe (signed by the Python Software
+        # Foundation). Windows' own files are catalog-signed on some editions, so they're not used here.
+        signed = Path(sys.executable).resolve()
         unsigned = write(self.tmp / "fake.dll", b"MZ" + b"\0" * 200)
-        got = rs.win_signatures([sysdir / "notepad.exe", unsigned])
-        self.assertEqual(got[os.path.normcase(str(sysdir / "notepad.exe"))][0], "signed")
+        got = rs.win_signatures([signed, unsigned])
+        self.assertEqual(got.get(os.path.normcase(str(signed)), ("missing",))[0], "signed", got)
         self.assertIn(got[os.path.normcase(str(unsigned))][0], ("unsigned", "unknown"))
 
 
