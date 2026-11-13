@@ -1,88 +1,80 @@
-# Testing Freighter on your Windows PC (about 30 minutes)
+# Testing Freighter on your Windows PC (about 20 minutes)
 
 Nothing here changes your music files. Freighter only **reads** them, and writes its copies into its
-own folder, which you delete at the end.
+own folder, which you delete at the end. No Python or other installs needed.
 
 ---
 
-## Step 1: Get the code (2 min)
+## Step 1: Download the program (3 min)
 
-1. On the PC, open **https://github.com/chasubowl-creator/freighter** and sign in to GitHub.
-2. Click the green **`<> Code`** button, then **Download ZIP**.
-3. In your Downloads folder, right-click **freighter-main.zip** and choose **Extract All… → Extract**.
-4. Move the extracted **freighter-main** folder somewhere easy, like your **Desktop**.
+1. On the PC, sign in to GitHub and open
+   **https://github.com/chasubowl-creator/freighter/actions**
+2. Click the newest run with a **green check**.
+3. Scroll to **Artifacts** at the bottom and click **freighter-windows**. A zip downloads.
+4. In Downloads, right-click **freighter-windows.zip** → **Extract All… → Extract**.
+5. Move the extracted folder to your **Desktop**. Inside are `freighter.exe`, `manifest.exe` and this guide.
 
-## Step 2: Install Python (5 min)
+## Step 2: Open it (1 min)
 
-1. Go to **https://www.python.org/downloads/** and click the big yellow **Download Python** button.
-2. Run the installer. **On the first screen, tick "Add python.exe to PATH"** at the bottom.
-   This is the step people miss.
-3. Click **Install Now**, then **Close** when it's done.
+Double-click **freighter.exe**.
 
-## Step 3: Open a command window in the folder (1 min)
+Windows will probably show **"Windows protected your PC"**. That's because Freighter isn't paid-signed
+yet, not because anything is wrong. Click **More info → Run anyway**. Rarely, antivirus wrongly flags
+programs packaged this way. If that happens, take a photo of the warning and send it rather than
+forcing it.
 
-1. Open the **freighter-main** folder in File Explorer.
-2. Click the **address bar** at the top, where the folder path is shown, type `cmd`, and press **Enter**.
-3. A black window opens, already in the right folder. Check that Python works:
+A window opens with a numbered menu.
 
-       py --version
+## Step 3: Scan your plugins (2 min)
 
-   You should see `Python 3.x.x`. If you see "not recognized", re-run the Python installer and tick
-   "Add python.exe to PATH".
+Type **1** and press Enter. Your plugin report opens in the browser. Check:
+- Are your main plugins listed?
+- Look at the **Safety check** section. **Signature broken** means a plugin's files were changed after
+  its maker signed them. Note any of those.
 
-All the commands below are typed into this black window. Press **Enter** after each one.
+Press Enter to go back to the menu.
 
-## Step 4: Scan your plugins (2 min)
+## Step 4: See what a move would take (1 min)
 
-    py rig_scanner.py
-
-Your plugin report opens in the browser. Check it looks right: are your main plugins listed?
-**Do you keep VST plugins in a custom folder** (for example `D:\VST`)? If so, run it again with that folder:
-
-    py rig_scanner.py --extra-dir "D:\VST"
-
-## Step 5: See what a move would take (1 min)
-
-    py rig_mover.py pack --list
-
-This lists everything Freighter would move, with sizes and a **total** at the bottom. Check:
+Type **2** and press Enter. It lists everything Freighter would move, with a **total** at the bottom.
 - Are your FL Studio projects and sample folders there?
-- Is anything missing, like samples on another drive? Note it down: that's useful feedback.
+- Anything missing, like samples on another drive? Note it down. That's useful feedback.
 
-## Step 6: Rehearse the move (5–20 min)
+## Step 5: Rehearse the move (5–20 min)
 
-The rehearsal needs **free space of about twice the total** from Step 5. To check free space, open
-File Explorer → **This PC** and look at the C: drive.
+The rehearsal needs **free space of about twice the total** from Step 4. To check, open File Explorer →
+**This PC** and look at the C: drive.
 
-**If there's room:**
-
-    py rig_mover.py rehearse
-
-**If C: is too small,** plug in an external drive (say it's `E:`) and use it:
-
-    py rig_mover.py rehearse --to E:\freighter-rehearsal
-
-**Or leave the biggest item out** (use an ID from the Step 5 list):
-
-    py rig_mover.py rehearse --skip used2
-
-At the end it prints either:
+Type **3** and press Enter. At the end it prints either:
 - **PASS:** every sample your projects use survived the move, or
 - **FAIL:** lists the samples it lost. That's a Freighter bug, and exactly what we're looking for.
 
-## Step 7: Send the results back
+**If C: is too small,** use the command version instead, pointing at an external drive (see "Command
+version" below): `freighter.exe rehearse --to E:\freighter-rehearsal`
 
-Send these to the Mac, whichever way is easiest: Google Drive, email to yourself, or a USB stick.
-- `rehearsal\rehearsal-report.txt` (or `E:\freighter-rehearsal\rehearsal-report.txt`)
-- the `plugins.csv` file inside the new `rig-report-...` folder
-- a photo or copy of anything in the black window that looks like an error
+## Step 6: Send the results back
 
-Then tell Claude where they are. Google Drive works well, because Claude can read it directly.
+Send these to the Mac (Google Drive is easiest, because Claude can read it directly):
+- `rehearsal\rehearsal-report.txt` (in the same folder as freighter.exe)
+- the `plugins.csv` inside the new `rig-report-...` folder
+- a photo of anything in the window that looks like an error
 
-## Step 8: Clean up
+## Step 7: Clean up
 
-Delete the **rehearsal** folder (or `E:\freighter-rehearsal`). Your real files were never changed.
+Delete the **rehearsal** folder next to freighter.exe. Your real files were never changed.
 
 ---
 
-**Stuck?** Take a photo of the black window and send it. Error messages are the most useful thing.
+## Command version (for more options)
+
+In the folder with freighter.exe, click the address bar, type `cmd`, press Enter, then for example:
+
+    freighter.exe pack --list
+    freighter.exe rehearse --to E:\freighter-rehearsal
+    freighter.exe rehearse --skip used2
+    manifest.exe --extra-dir "D:\VST"
+    manifest.exe --virus-scan
+
+`--virus-scan` also checks every plugin with Microsoft Defender (slower).
+
+**Stuck?** Take a photo of the window and send it. Error messages are the most useful thing.
