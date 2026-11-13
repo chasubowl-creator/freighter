@@ -444,6 +444,7 @@ def win_signatures(paths):
         f.write("\n".join(str(p) for p in paths))
         listfile = f.name
     script = (
+        "Import-Module Microsoft.PowerShell.Security;"
         "$ErrorActionPreference='SilentlyContinue';"
         f"Get-Content -LiteralPath '{listfile}' -Encoding UTF8 | ForEach-Object {{"
         " $s = Get-AuthenticodeSignature -LiteralPath $_;"
@@ -451,8 +452,11 @@ def win_signatures(paths):
         " [pscustomobject]@{Path=[string]$_; Status=[string]$s.Status; Signer=[string]$n} } | ConvertTo-Json -Compress"
     )
     try:
+        # PowerShell 7 rewrites PSModulePath; Windows PowerShell then can't load its own Security module.
+        # Clearing it lets powershell.exe rebuild its default module path.
+        env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                           capture_output=True, text=True, timeout=900)
+                           capture_output=True, text=True, timeout=900, env=env)
         return parse_win_signatures(r.stdout)
     except (OSError, subprocess.SubprocessError):
         return {}
