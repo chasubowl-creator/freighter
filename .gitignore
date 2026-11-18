@@ -1,7 +1,10 @@
 # Personal output: lists your own plugins, projects and folders. Never commit.
+manifest-*/
+manifest-report/
 rig-report-*/
 rehearsal/
 rehearsal-report-*.txt
+Freighter-*/
 RigMover-*/
 scan-output/
 
@@ -14,4 +17,5 @@ __pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
+*.freighter-part
 *.rigmover-part

@@ -1,4 +1,4 @@
-"""Automated tests for the scanner (rig_scanner.py) and the mover (rig_mover.py).
+"""Automated tests for the scanner (manifest.py) and the mover (freighter.py).
 
 Run from the project folder:   python3 -m unittest discover -s tests -v
 Needs only Python. Every test works in its own temporary folders and never touches your real files.
@@ -19,8 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-import rig_scanner as rs  # noqa: E402
-import rig_mover as rm  # noqa: E402
+import manifest as rs  # noqa: E402
+import freighter as rm  # noqa: E402
 
 
 # --------------------------------------------------------------------------- fixtures
@@ -70,15 +70,15 @@ def quiet():
 
 @contextlib.contextmanager
 def as_home(h):
-    old = os.environ.get("RIGMOVER_HOME")
-    os.environ["RIGMOVER_HOME"] = str(h)
+    old = os.environ.get("FREIGHTER_HOME")
+    os.environ["FREIGHTER_HOME"] = str(h)
     try:
         yield
     finally:
         if old is None:
-            os.environ.pop("RIGMOVER_HOME", None)
+            os.environ.pop("FREIGHTER_HOME", None)
         else:
-            os.environ["RIGMOVER_HOME"] = old
+            os.environ["FREIGHTER_HOME"] = old
 
 
 class TempDirCase(unittest.TestCase):
@@ -208,7 +208,7 @@ class ProgramsLeftBehind(TempDirCase):
         make_flp(fl / "FL Studio" / "Projects" / "B" / "B.flp", [str(kick)])
         with as_home(home), quiet():
             rm.cmd_pack(argparse.Namespace(to=str(self.tmp / "d"), list=False, include=[], skip=[]))
-        bundle = next((self.tmp / "d").glob("RigMover-*"))
+        bundle = next((self.tmp / "d").glob("Freighter-*"))
         packed = {p.name for p in (bundle / "data").rglob("*")}
         self.assertNotIn("Serum_crack_installer.exe", packed)
         self.assertNotIn("Cool.vst3", packed)
@@ -260,7 +260,7 @@ class AbletonFix(TempDirCase):
         text = gzip.decompress(als.read_bytes()).decode()
         self.assertIn(f'Path Value="{new.as_posix().replace("&", "&amp;")}"', text)
         self.assertIn('Path Value="D:/gone.wav"', text)
-        self.assertTrue((als.parent / "Rig Mover backup" / "Song.als").is_file())
+        self.assertTrue((als.parent / "Freighter backup" / "Song.als").is_file())
 
     def test_live10_is_reported_not_changed(self):
         als = write(self.tmp / "old.als", gzip.compress(b'<Ableton Creator="Ableton Live 10.1"><FileRef Id="0">'
@@ -336,7 +336,7 @@ class FullMove(TempDirCase):
     def pack(self, old, drive):
         with as_home(old), quiet():
             rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
-        return next(drive.glob("RigMover-*"))
+        return next(drive.glob("Freighter-*"))
 
     def test_pack_unpack_repair(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
@@ -382,7 +382,7 @@ class FullMove(TempDirCase):
         damaged = bundle / "data" / "used1" / rec["stored"]
         damaged.write_bytes(b"\0" * damaged.stat().st_size)  # same size, wrong content
         # a different file already sits where the snare goes
-        landing = new / "Music" / "Rig Mover" / json.loads((bundle / "manifest.json").read_text())["source_host"]
+        landing = new / "Music" / "Freighter" / json.loads((bundle / "manifest.json").read_text())["source_host"]
         existing = write(landing / "DrumKits" / "Snares" / "snare.wav", b"mine")
         with as_home(new), quiet():
             rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
@@ -406,7 +406,7 @@ class FullMove(TempDirCase):
         old = self.build_old_computer()
         with as_home(old), quiet():
             code = rm.cmd_rehearse(argparse.Namespace(to=str(old / "rehearsal"), include=[], skip=[]))
-        os.environ.pop("RIGMOVER_HOME", None)
+        os.environ.pop("FREIGHTER_HOME", None)
         self.assertEqual(code, 0)
         report = (old / "rehearsal" / "rehearsal-report.txt").read_text()
         self.assertIn("LOST in the move: 0", report)

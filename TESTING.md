@@ -21,7 +21,7 @@ Each test works in its own temporary folder.
 
 ## 2. Rehearsal on your own computer (minutes)
 
-    python3 rig_mover.py rehearse
+    python3 freighter.py rehearse
 
 This does a full move on one machine. It packs your real setup, unpacks it into a stand-in "new computer"
 folder, and repairs the projects. Then it checks **every sample in every project**. While it checks, it
@@ -30,7 +30,7 @@ pretends the old computer's files are gone, so a pass means the moved copies are
 - **PASS:** every sample that worked before the move still works after it.
 - **FAIL:** lists each lost sample. That's a Freighter bug: send the `rehearsal-report.txt`.
 
-It needs about twice the size of what gets packed (`rig_mover.py pack --list` shows the total).
+It needs about twice the size of what gets packed (`freighter.py pack --list` shows the total).
 Leave big items out with `--skip ID`, or put it on another drive with `--to /Volumes/DRIVE`.
 Delete the `rehearsal` folder afterwards.
 

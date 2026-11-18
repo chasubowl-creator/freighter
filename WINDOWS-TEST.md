@@ -56,7 +56,7 @@ version" below): `freighter.exe rehearse --to E:\freighter-rehearsal`
 
 Send these to the Mac (Google Drive is easiest, because Claude can read it directly):
 - `rehearsal\rehearsal-report.txt` (in the same folder as freighter.exe)
-- the `plugins.csv` inside the new `rig-report-...` folder
+- the `plugins.csv` inside the new `manifest-...` folder
 - a photo of anything in the window that looks like an error
 
 ## Step 7: Clean up

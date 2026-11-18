@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Rig Mover - move a music production setup between computers (Windows <-> Mac, or same OS).
+Freighter - move a music production setup between computers (Windows <-> Mac, or same OS).
 
 Plugins move as a list (reinstall them from each maker). Your own files - projects,
 samples, presets - move as files, via a bundle folder on an external drive.
 
   OLD computer:
-    python3 rig_mover.py scan                         rig report + list of your projects
-    python3 rig_mover.py pack --list                  show what can be moved, with sizes
-    python3 rig_mover.py pack --to /Volumes/DRIVE     copy it to a bundle on the drive
+    python3 freighter.py scan                         _Manifest report + list of your projects
+    python3 freighter.py pack --list                  show what can be moved, with sizes
+    python3 freighter.py pack --to /Volumes/DRIVE     copy it to a bundle on the drive
         options: --include FOLDER (extra folders, e.g. sample libraries), --skip ID
 
   NEW computer:
-    python3 rig_mover.py unpack /Volumes/DRIVE/RigMover-PC-2026-11-12
-    python3 rig_mover.py fix-ableton                  repoint samples in Ableton projects
-    python3 rig_mover.py check-fl                     find moved/missing samples in FL projects
-    python3 rig_scanner.py --compare BUNDLE/plugins.csv   plugins still to reinstall
+    python3 freighter.py unpack /Volumes/DRIVE/Freighter-PC-2026-11-12
+    python3 freighter.py fix-ableton                  repoint samples in Ableton projects
+    python3 freighter.py check-fl                     find moved/missing samples in FL projects
+    python3 manifest.py --compare BUNDLE/plugins.csv   plugins still to reinstall
 
 Needs only Python 3.8+. Nothing leaves your computer. Use "py" instead of "python3" on Windows.
 """
@@ -35,17 +35,17 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import rig_scanner as rs  # noqa: E402
+import manifest as rs  # noqa: E402
 
 THIS_OS = "mac" if rs.IS_MAC else "windows" if rs.IS_WIN else "other"
 BUNDLE_VERSION = 1
 JUNK_FILES = {".ds_store", "thumbs.db", "desktop.ini", "icon\r"}
-SKIP_DIRS = {".trash", "$recycle.bin", "rig mover backup"}
+SKIP_DIRS = {".trash", "$recycle.bin", "freighter backup", "rig mover backup"}
 
 
 def home():
-    """Home folder. RIGMOVER_HOME overrides it (used for testing)."""
-    return Path(os.environ.get("RIGMOVER_HOME") or Path.home())
+    """Home folder. FREIGHTER_HOME overrides it (used for testing)."""
+    return Path(os.environ.get("FREIGHTER_HOME") or Path.home())
 
 
 # --------------------------------------------------------------------------- known folders
@@ -68,7 +68,7 @@ def known_roots(os_name, h):
 
 
 def moved_root(source_host):
-    return home() / "Music" / "Rig Mover" / source_host
+    return home() / "Music" / "Freighter" / source_host
 
 
 # --------------------------------------------------------------------------- file helpers
@@ -103,7 +103,7 @@ def copy_and_hash(src, dst):
     """Copy src to dst through a temporary name; return the SHA-256 of what was copied."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(dst.name + ".rigmover-part")
+    tmp = dst.with_name(dst.name + ".freighter-part")
     h = hashlib.sha256()
     with open(long_path(src), "rb") as f, open(long_path(tmp), "wb") as out:
         while True:
@@ -178,7 +178,7 @@ def walk_files(root, left_behind=None):
             keep.append(d)
         dirs[:] = keep
         for fn in files:
-            if fn.lower() in JUNK_FILES or fn.endswith(".rigmover-part"):
+            if fn.lower() in JUNK_FILES or fn.endswith(".freighter-part"):
                 continue
             if left_behind is not None and is_program(os.path.join(cur, fn)):
                 left_behind.append(os.path.join(cur, fn))
@@ -341,7 +341,7 @@ def cmd_pack(args):
             return 0
 
     host = rs.host_name()
-    bundle = Path(args.to).expanduser() / f"RigMover-{host}-{dt.date.today().isoformat()}"
+    bundle = Path(args.to).expanduser() / f"Freighter-{host}-{dt.date.today().isoformat()}"
     bundle.mkdir(parents=True, exist_ok=True)
     (bundle / "index").mkdir(exist_ok=True)
 
@@ -354,8 +354,8 @@ def cmd_pack(args):
                  f"have {rs.human_size(free)}. Leave something out with --skip ID.")
 
     print("\nSaving the plugin list...", flush=True)
-    rs.run_scan(bundle / "rig-report", quick=True, safety=False)  # the list is what a move needs
-    shutil.copy2(bundle / "rig-report" / "plugins.csv", bundle / "plugins.csv")
+    rs.run_scan(bundle / "manifest-report", quick=True, safety=False)  # the list is what a move needs
+    shutil.copy2(bundle / "manifest-report" / "plugins.csv", bundle / "plugins.csv")
 
     manifest = {
         "bundle_version": BUNDLE_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"),
@@ -403,7 +403,7 @@ def cmd_pack(args):
     if errors:
         (bundle / "pack-errors.txt").write_text("\n".join(errors), encoding="utf-8")
         print(f"{len(errors)} files couldn't be copied; see pack-errors.txt. Run the same command again to retry.")
-    print("Next, on the new computer:  python3 rig_mover.py unpack \"" + str(bundle) + "\"")
+    print("Next, on the new computer:  python3 freighter.py unpack \"" + str(bundle) + "\"")
     return 0
 
 
@@ -414,7 +414,7 @@ def cmd_unpack(args):
     try:
         manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        sys.exit(f"Not a Rig Mover bundle (no readable manifest.json): {bundle}")
+        sys.exit(f"Not a Freighter bundle (no readable manifest.json): {bundle}")
     src_host = manifest["source_host"]
     dest_known = known_roots(THIS_OS, home())
     landing = moved_root(src_host)
@@ -481,7 +481,7 @@ def cmd_unpack(args):
     if (bundle / "plugins.csv").is_file():
         shutil.copy2(bundle / "plugins.csv", landing / f"plugins-{src_host}.csv")
 
-    lines = [f"Rig Mover unpack from {src_host} ({manifest['source_os']}) on {pathmap['created']}", ""]
+    lines = [f"Freighter unpack from {src_host} ({manifest['source_os']}) on {pathmap['created']}", ""]
     lines += [f"{e['label']}: {e['old']} -> {e['new']}" for e in entries]
     if conflicts:
         lines += ["", "Files that already existed here with different contents. The moved copy was saved",
@@ -496,9 +496,9 @@ def cmd_unpack(args):
     if bad:
         print(f"{len(bad)} problems; see unpack-report.txt.")
     print("\nNext:")
-    print("  python3 rig_mover.py fix-ableton     (if you use Ableton)")
-    print("  python3 rig_mover.py check-fl        (if you use FL Studio)")
-    print(f"  python3 rig_scanner.py --compare \"{landing / f'plugins-{src_host}.csv'}\"   (plugins to reinstall)")
+    print("  python3 freighter.py fix-ableton     (if you use Ableton)")
+    print("  python3 freighter.py check-fl        (if you use FL Studio)")
+    print(f"  python3 manifest.py --compare \"{landing / f'plugins-{src_host}.csv'}\"   (plugins to reinstall)")
     return 0
 
 
@@ -510,7 +510,7 @@ def norm(p, fold_case):
 
 
 def load_pathmaps(explicit):
-    paths = [Path(explicit)] if explicit else sorted((home() / "Music" / "Rig Mover").glob("*/pathmap.json"))
+    paths = [Path(explicit)] if explicit else sorted((home() / "Music" / "Freighter").glob("*/pathmap.json"))
     maps = []
     for p in paths:
         try:
@@ -656,7 +656,7 @@ def fix_als(path, maps, dry_run=False):
 
     new_text = FILEREF_RE.sub(fix_ref, text)
     if result["fixed"] and not dry_run:
-        backup_dir = proj_dir / "Rig Mover backup"
+        backup_dir = proj_dir / "Freighter backup"
         backup_dir.mkdir(exist_ok=True)
         backup = backup_dir / Path(path).name
         if not backup.exists():
@@ -700,11 +700,11 @@ def cmd_fix_ableton(args):
     print(f"\n{totals['changed']} projects changed: {verb} {totals['fixed']} samples, "
           f"{totals['ok']} already fine, {totals['missing']} still missing.")
     if totals["changed"] and not args.dry_run:
-        print("Originals are saved in a 'Rig Mover backup' folder next to each changed project.")
+        print("Originals are saved in a 'Freighter backup' folder next to each changed project.")
     if totals["old"]:
         print(f"{totals['old']} projects are from Live 10 or older, which this can't rewrite. Open each in Live, "
               "then File > Manage Files > Locate, and point Live at the moved sample folder.")
-    out = (home() / "Music" / "Rig Mover")
+    out = (home() / "Music" / "Freighter")
     out.mkdir(parents=True, exist_ok=True)
     (out / "ableton-fix-report.txt").write_text("\n".join(report), encoding="utf-8")
     print(f"Full list: {out / 'ableton-fix-report.txt'}")
@@ -809,7 +809,7 @@ def cmd_check_fl(args):
         print("FL then finds moved samples when it opens a project. Save each project afterwards.")
     if unreadable:
         print(f"\n{len(unreadable)} projects couldn't be read (listed in the report).")
-    out = home() / "Music" / "Rig Mover"
+    out = home() / "Music" / "Freighter"
     out.mkdir(parents=True, exist_ok=True)
     (out / "fl-check-report.txt").write_text("\n".join(report + ["", "Unreadable:"] + unreadable),
                                              encoding="utf-8")
@@ -872,7 +872,7 @@ def project_refs(p):
             return "FL Studio", [s for s in dict.fromkeys(flp_samples(p)[1]) if not FL_PLACEHOLDER.match(s)]
         except (ValueError, OSError, struct.error):
             return "FL Studio", None
-    src = p.parent / "Rig Mover backup" / p.name  # the original, if fix-ableton rewrote it
+    src = p.parent / "Freighter backup" / p.name  # the original, if fix-ableton rewrote it
     try:
         text, _ = read_als(src if src.is_file() else p)
     except Exception:
@@ -903,11 +903,11 @@ def cmd_rehearse(args):
     print("\n== 1/4  Pack, as the old computer")
     cmd_pack(argparse.Namespace(to=str(drive), list=False, include=args.include, skip=args.skip,
                                 include_programs=False))
-    bundles = sorted(drive.glob("RigMover-*"), key=lambda p: p.stat().st_mtime)
+    bundles = sorted(drive.glob("Freighter-*"), key=lambda p: p.stat().st_mtime)
     if not bundles:
         sys.exit("Packing produced no bundle.")
 
-    os.environ["RIGMOVER_HOME"] = str(new_home)
+    os.environ["FREIGHTER_HOME"] = str(new_home)
     new_home.mkdir(parents=True, exist_ok=True)
     HIDE = (_norm_abs(real_home), _norm_abs(base))
     print("\n== 2/4  Unpack, as the new computer (the old computer's files now count as gone)")
@@ -1010,7 +1010,7 @@ def interactive_menu():
                 if drive:
                     cmd_pack(argparse.Namespace(to=drive, list=False, include=[], skip=[], include_programs=False))
             elif choice == "5":
-                bundle = ask_path("  Drag the RigMover-... folder from the drive into this window, then press Enter: ")
+                bundle = ask_path("  Drag the Freighter-... folder from the drive into this window, then press Enter: ")
                 if bundle:
                     cmd_unpack(argparse.Namespace(bundle=bundle, dest_for=[]))
             elif choice == "6":
@@ -1034,7 +1034,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("scan", help="rig report plus a list of your projects")
+    s = sub.add_parser("scan", help="plugin report plus a list of your projects")
     s.add_argument("--extra-dir", action="append", default=[], metavar="FOLDER")
     s.add_argument("--out", metavar="FOLDER")
     s.add_argument("--quick", action="store_true")

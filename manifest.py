@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Rig Scanner - lists the audio plugins installed on this computer and writes a report.
+_Manifest - lists the audio plugins installed on this computer and writes a report.
 
 * Reads plugin info files only. It never loads a plugin, so a broken plugin can't crash it.
 * Works on macOS and Windows. Needs only Python 3.8+ (no extra packages).
 * Nothing leaves your computer.
 
 Usage:
-  python3 rig_scanner.py                      scan and open the report
-  python3 rig_scanner.py --compare OTHER.csv  also show plugins from another computer's
+  python3 manifest.py                      scan and open the report
+  python3 manifest.py --compare OTHER.csv  also show plugins from another computer's
                                               scan that are missing here (for moving rigs)
-  python3 rig_scanner.py --extra-dir "D:\\VST"  also scan a custom plugin folder (repeatable)
-  python3 rig_scanner.py --quick              skip measuring backup folder sizes
-  python3 rig_scanner.py --no-open            don't open the report when done
+  python3 manifest.py --extra-dir "D:\\VST"  also scan a custom plugin folder (repeatable)
+  python3 manifest.py --quick              skip measuring backup folder sizes
+  python3 manifest.py --no-open            don't open the report when done
 """
 
 import argparse
@@ -775,7 +775,7 @@ document.querySelectorAll('#all th').forEach((th,i)=>th.addEventListener('click'
  [...tb.rows].sort((a,b)=>{const x=a.cells[i].dataset.v??a.cells[i].textContent,y=b.cells[i].dataset.v??b.cells[i].textContent;
  const nx=parseFloat(x),ny=parseFloat(y);const c=(!isNaN(nx)&&!isNaN(ny))?nx-ny:x.localeCompare(y,undefined,{sensitivity:'base'});return asc?c:-c})
  .forEach(r=>tb.appendChild(r))}));
-const KEY='rig-checklist-'+document.title;let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+const KEY='manifest-checklist-'+document.title;let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
 document.querySelectorAll('.vendor input').forEach(cb=>{cb.checked=!!saved[cb.dataset.v];cb.addEventListener('change',()=>{
  saved[cb.dataset.v]=cb.checked;try{localStorage.setItem(KEY,JSON.stringify(saved))}catch(e){}})});
 """
@@ -816,7 +816,7 @@ def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title, safe
     h = [f"<!doctype html><html lang=en><head><meta charset=utf-8>"
          f"<meta name=viewport content='width=device-width,initial-scale=1'><title>{e(title)}</title>"
          f"<style>{CSS}</style></head><body><main>"]
-    h.append(f"<h1>Rig report: {e(host)}</h1><p class=sub>{e(os_name)} · scanned "
+    h.append(f"<h1>_Manifest: {e(host)}</h1><p class=sub>{e(os_name)} · scanned "
              f"{dt.datetime.now().strftime('%B %d, %Y %H:%M')} · DAWs found: {e(', '.join(daws) or 'none')}</p>")
     fmt_line = " · ".join(f"{k} {v}" for k, v in sorted(fmts.items()))
     h.append("<div class=cards>"
@@ -888,7 +888,7 @@ def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title, safe
                  f"<td>{e(p['version'])}</td><td>{e(p['archs'])}</td><td>{e(p.get('signer') or SIG_LABEL.get(p.get('signature') or '', ''))}</td><td data-v={p['size']}>{e(human_size(p['size']))}</td>"
                  f"<td>{e(p['modified'])}</td><td class=path>{e(p['path'])}</td></tr>")
     h.append("</tbody></table></div>")
-    h.append("<footer>Made by Rig Scanner. It reads plugin info files only, never loads plugins, and sends nothing "
+    h.append("<footer>Made by _Manifest, part of Freighter. It reads plugin info files only, never loads plugins, and sends nothing "
              "anywhere. Plugins in custom folders: rerun with --extra-dir \"FOLDER\".</footer>")
     h.append(f"<script>{JS}</script></main></body></html>")
     return "".join(h)
@@ -908,7 +908,7 @@ def write_csv(plugins, path):
 # --------------------------------------------------------------------------- main
 
 def main():
-    ap = argparse.ArgumentParser(description="List installed audio plugins and write a rig report.")
+    ap = argparse.ArgumentParser(description="List installed audio plugins and write a plugin report.")
     ap.add_argument("--compare", metavar="CSV", help="plugins.csv from another computer's scan")
     ap.add_argument("--extra-dir", action="append", default=[], metavar="FOLDER", help="also scan this folder")
     ap.add_argument("--out", metavar="FOLDER", help="where to write the report (default: next to this script)")
@@ -920,7 +920,7 @@ def main():
     args = ap.parse_args()
 
     if not (IS_MAC or IS_WIN):
-        print("Rig Scanner supports macOS and Windows.")
+        print("_Manifest supports macOS and Windows.")
         return 1
 
     out_dir = Path(args.out) if args.out else None
@@ -938,10 +938,10 @@ def host_name():
 
 
 def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_html="", safety=True, virus=False):
-    """Scan, write rig-report.html + plugins.csv, and return their paths."""
+    """Scan, write manifest-report.html + plugins.csv, and return their paths."""
     host = host_name()
     today = dt.date.today().isoformat()
-    out_dir = Path(out_dir) if out_dir else app_dir() / f"rig-report-{host}-{today}"
+    out_dir = Path(out_dir) if out_dir else app_dir() / f"manifest-{host}-{today}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("Scanning plugin folders...", flush=True)
@@ -958,12 +958,12 @@ def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_h
     cmp_result, cmp_name = None, ""
     if compare_csv:
         rows = load_other(compare_csv)
-        cmp_name = Path(compare_csv).parent.name.replace("rig-report-", "") or "the other computer"
+        cmp_name = Path(compare_csv).parent.name.replace("manifest-", "") or "the other computer"
         cmp_result = compare(plugins, rows)
 
-    title = f"Rig report {host} {today}"
+    title = f"_Manifest {host} {today}"
     csv_path = out_dir / "plugins.csv"
-    html_path = out_dir / "rig-report.html"
+    html_path = out_dir / "manifest-report.html"
     write_csv(plugins, csv_path)
     page = build_report(plugins, daws, folders, cmp_result, cmp_name, host, title, safety_line)
     if extra_html:
