@@ -66,11 +66,11 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .pill.sm{padding:9px 16px;font-size:14px}
 
 /* hero: a desktop on a hill. Photo backdrop, a glass window for the pitch, pixel-art icons on the grass */
-.desk{position:relative;overflow:hidden;background:#3d86c6 url(assets/hills.jpg) center bottom/cover no-repeat;
+.desk{position:relative;overflow:hidden;background:#3d86c6 url(assets/hills.jpg) right bottom/cover no-repeat;
   display:flex;flex-direction:column}
 .desk::after{content:"";position:absolute;inset:auto 0 0 0;height:90px;pointer-events:none;
   background:linear-gradient(180deg,rgba(10,11,13,0),rgba(10,11,13,.35))}
-.desk-top{position:relative;z-index:2;padding-block:36px 8px;flex:1}
+.desk-top{position:relative;z-index:40;padding-block:36px 8px;flex:1;width:100%}
 .win{max-width:760px;background:rgba(13,15,18,.86);border:1px solid rgba(255,255,255,.14);border-radius:14px;
   box-shadow:0 30px 70px -20px rgba(4,20,45,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);overflow:hidden}
 .win-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;
@@ -88,13 +88,13 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .stats-note{font-size:12.5px;color:var(--dim);font-family:var(--font-mono)}
 
 .ground{position:relative;height:250px;flex:none}   /* room on the hills below the window */
-#yard{position:absolute;left:0;top:0;z-index:1;pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges}
-.desk .tag{position:absolute;z-index:1;transform:translateX(-50%);white-space:nowrap;font:600 11.5px/1.2 var(--font-body);
+.desk canvas.layer{position:absolute;left:0;top:0;pointer-events:none}
+.desk .tag{position:absolute;z-index:39;transform:translateX(-50%);white-space:nowrap;font:600 11.5px/1.2 var(--font-body);
   color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 5px rgba(0,0,0,.5);padding:1px 5px;border-radius:3px;
   transition:background .3s;pointer-events:none}
 .desk .tag.done{background:var(--cargo-fill);text-shadow:none;color:var(--cargo-ink)}
 .desk .tag.done::before{content:"\2713\00a0"}
-.photo-credit{position:absolute;right:max(10px,env(safe-area-inset-right,0px));bottom:8px;z-index:3;font-size:11px;color:rgba(255,255,255,.75)}
+.photo-credit{position:absolute;right:max(10px,env(safe-area-inset-right,0px));bottom:8px;z-index:42;font-size:11px;color:rgba(255,255,255,.75)}
 .photo-credit a{color:inherit}
 
 /* the _Manifest section */
@@ -260,9 +260,8 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
         </div>
       </div>
     </div>
-    <canvas id="yard" aria-hidden="true"></canvas>
-    <div class="ground" id="ground" role="img" aria-label="Far off on the hills, a pixel-art courier carries crates from an old PC to FL Studio, Ableton Live, Logic Pro and a samples folder."></div>
-    <span class="photo-credit">Photo: <a href="https://unsplash.com/photos/rolling-green-hills-in-tuscany-GnE3JdxgjeA" rel="noopener">Massimiliano Morosinotto / Unsplash</a></span>
+    <div class="ground" id="ground" role="img" aria-label="Across the rolling hills, a pixel-art courier carries crates from an old PC to FL Studio, Ableton Live, Logic Pro and a samples folder, walking over the ridges."></div>
+    <span class="photo-credit">Photo: <a href="https://unsplash.com/photos/panorama-photography-of-green-hills-L3sh5N6Lqzo" rel="noopener">Dawid Zawi&#322;a / Unsplash</a></span>
   </div>
 
   <div class="strip" aria-label="Supported">
@@ -476,9 +475,8 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
 /* _freighter yard: a pixel courier carries crates from the old PC to each program on the hill. */
 (function () {
   const ground = document.getElementById("ground");
-  const cv = document.getElementById("yard");
-  if (!ground || !cv || !cv.getContext) return;
-  const ctx = cv.getContext("2d");
+  if (!ground || !document.createElement("canvas").getContext) return;
+  let ctx;   // sprite helpers below draw into whichever small canvas this points at
   const still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const PAL = {
@@ -547,134 +545,209 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
     },
   };
 
-  // The courier and icons live in the photo: far off on the hills, following the slope.
+  // ---- the scene lives in the photo: depth layers cut along the hill crests --------------------
   const desk = ground.closest(".desk");
   const win = desk.querySelector(".win");
   const IW = 2400, IH = 1600;   // the photo's pixel size
-  // A walking line across the far slope, as fractions of the photo (x, y).
-  const PATH = [[0, .772], [.15, .760], [.3, .748], [.45, .738], [.6, .734], [.75, .739], [.9, .749], [1, .757]];
-  let S, L, H, stops, tags = [], st, map;
+  const photo = new Image();
+  photo.src = "assets/hills.jpg";
 
-  function photoMap() {   // where the photo sits: background-size: cover, anchored centre bottom
-    const cw = desk.clientWidth, ch = desk.clientHeight, k = Math.max(cw / IW, ch / IH);
-    return { k, ox: (cw - IW * k) / 2, oy: ch - IH * k };
+  // Hill crests traced on the photo (photo pixels). A nearer hill hides whatever walks behind it.
+  const RIDGE_MID = [[0,705],[200,722],[400,740],[600,755],[800,775],[1000,790],[1200,808],[1400,830],[1600,868],[1800,898],[2000,945],[2200,988],[2400,1030]];
+  const RIDGE_FRONT = [[0,1005],[200,1035],[400,1072],[600,1100],[800,1130],[1000,1168],[1200,1212],[1400,1262],[1550,1300],[1600,1298],[1800,1250],[2000,1205],[2050,1198],[2200,1184],[2400,1168]];
+  // Depth slots: 0 = back hill, 1 = middle band, 2 = front hills.
+  const Z_SLOT = [15, 25, 35];          // where things standing on each hill are drawn
+  const OCCLUDERS = [[RIDGE_MID, 20], [RIDGE_FRONT, 30]];
+
+  // Walking routes in photo pixels: [x, y, slot]. A point's slot is the hill he's on while walking TO it,
+  // so crossing a crest and going down its far side drops him behind that hill.
+  const ROUTES = {
+    wide: {
+      pts: [[1620,1420,2],[1800,1330,2],[1930,1236,2],[2000,1209,2],[2090,1270,1],[2240,1170,1],[2060,1060,1],
+            [1850,906,1],[1770,960,0],[1700,835,0],[1900,700,0],[2080,560,0],[2200,488,0]],
+      stops: [[0,"pc","Old PC"],[2,"fl","FL Studio"],[6,"live","Ableton Live"],[10,"logic","Logic Pro"],[12,"samples","Samples"]],
+    },
+    narrow: {
+      pts: [[2330,1430,2],[2200,1330,2],[2080,1222,2],[2120,1196,2],[2180,1265,1],[2300,1150,1],[2150,1095,1],[1960,1030,1]],
+      stops: [[0,"pc","Old PC"],[2,"fl","FL Studio"],[5,"live","Ableton Live"],[7,"logic","Logic Pro"]],
+    },
+  };
+
+  // nearer = bigger: art-pixel size in CSS px, from how low on the photo a point is
+  const depthScale = py => Math.min(3, Math.max(0.9, 0.9 + (py - 480) / 950 * 2.1));
+
+  // small pixel-art canvases, drawn once
+  function artCanvas(w, h, paint) {
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const keep = ctx; ctx = c.getContext("2d"); paint(); ctx = keep;
+    return c;
   }
-  function pathCssY(cssX) {
-    const fx = (cssX - map.ox) / (IW * map.k);
-    let fy = PATH[PATH.length - 1][1];
-    for (let i = 1; i < PATH.length; i++) {
-      if (fx <= PATH[i][0]) {
-        const [x0, y0] = PATH[i - 1], [x1, y1] = PATH[i];
-        fy = y0 + (y1 - y0) * Math.max(0, (fx - x0) / (x1 - x0));
-        break;
+  const ICON_ART = {};
+  Object.keys(ICONS).forEach(k => { ICON_ART[k] = artCanvas(16, 16, () => ICONS[k](0, 0)); });
+  const BOX_ART = artCanvas(8, 6, () => sprite(BOX, 0, 0));
+  function courierArt(frame, carrying, flip, moving) {
+    return artCanvas(16, 16, () => {
+      sprite(BODY, flip ? 4 : 0, 0, flip);
+      sprite(LEGS[moving ? frame : 1], flip ? 4 : 0, 12, flip);
+      if (carrying) {
+        sprite(BOX, flip ? 0 : 7, 6);
+        r(flip ? 8 : 7, 9, 1, 1, PAL.s);
+      } else {
+        r(flip ? 6 : 8, 8 + (moving ? frame : 0), 1, 2, PAL.s);
       }
-    }
-    return map.oy + fy * IH * map.k;
-  }
-  const groundAt = ax => Math.round(pathCssY(ax * S) / S);   // ground line, in art pixels
-
-  function place() {
-    const w = desk.clientWidth;
-    S = w >= 1500 ? 3 : 2;   // small pixels: they're a long way off
-    L = Math.ceil(w / S); H = Math.ceil(desk.clientHeight / S);
-    cv.width = L; cv.height = H;
-    cv.style.width = L * S + "px"; cv.style.height = H * S + "px";
-    map = photoMap();
-    const list = w < 640
-      ? [["pc", "Old PC", .12], ["fl", "FL Studio", .4], ["live", "Ableton Live", .63], ["logic", "Logic Pro", .86]]
-      : [["pc", "Old PC", .1], ["fl", "FL Studio", .3], ["live", "Ableton Live", .48], ["logic", "Logic Pro", .66], ["samples", "Samples", .84]];
-    stops = list.map(([icon, name, f]) => {
-      const x = Math.round(f * L) - 8;
-      return { icon, name, x, gy: groundAt(x + 8), bounce: 0 };
     });
   }
+  const FRAMES = {};
+  [0, 1].forEach(f => [true, false].forEach(c => [true, false].forEach(fl => [true, false].forEach(m => {
+    FRAMES[[f, c, fl, m].join()] = courierArt(f, c, fl, m);
+  }))));
 
+  // ---- layout ------------------------------------------------------------------------------------
+  const DPR = Math.min(2, window.devicePixelRatio || 1);
+  let layers = [], tags = [], route, map, W, Hc, st;
+  function makeLayer(z) {
+    const c = document.createElement("canvas");
+    c.className = "layer"; c.setAttribute("aria-hidden", "true");
+    c.width = Math.round(W * DPR); c.height = Math.round(Hc * DPR);
+    c.style.width = W + "px"; c.style.height = Hc + "px"; c.style.zIndex = z;
+    desk.appendChild(c);
+    layers.push(c);
+    const x = c.getContext("2d"); x.setTransform(DPR, 0, 0, DPR, 0, 0); x.imageSmoothingEnabled = false;
+    return { c, x };
+  }
+  function computeMap() {   // background-size: cover, anchored right bottom (matches the CSS)
+    W = desk.clientWidth; Hc = desk.clientHeight;
+    const k = Math.max(W / IW, Hc / IH);
+    map = { k, ox: W - IW * k, oy: Hc - IH * k };
+  }
+  const toScreen = (px, py) => [map.ox + px * map.k, map.oy + py * map.k];
+
+  function buildRoute() {
+    const def = W < 700 ? ROUTES.narrow : ROUTES.wide;
+    const zoom = map.k / 0.6;
+    const pts = def.pts.map(([px, py, slot]) => {
+      const [x, y] = toScreen(px, py);
+      return { x, y, py, slot, s: depthScale(py) * zoom };
+    });
+    const arc = [0];
+    for (let i = 1; i < pts.length; i++) arc.push(arc[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+    const wr = win.getBoundingClientRect(), dr = desk.getBoundingClientRect();
+    const winBottom = wr.bottom - dr.top, winLeft = wr.left - dr.left - 6, winRight = wr.right - dr.left + 6;
+    let stops = def.stops.map(([i, icon, name]) => ({ i, icon, name, p: pts[i], a: arc[i] }));
+    // a stop must be on screen and not under the window; the route ends at the last stop that is
+    const underWin = sp => sp.p.y - 18 * sp.p.s < winBottom + 6 && sp.p.x + 10 * sp.p.s > winLeft && sp.p.x - 10 * sp.p.s < winRight;
+    const okIdx = stops.findIndex(sp => sp.p.x < 4 || sp.p.x > W - 4 || underWin(sp));
+    if (okIdx >= 0) stops = stops.slice(0, okIdx);
+    return { pts, arc, stops, underWin, short: okIdx >= 0 };
+  }
+
+  function at(a) {   // where the courier is at arc length a
+    const { pts, arc } = route;
+    let i = 1;
+    while (i < arc.length - 1 && arc[i] < a) i++;
+    const t = Math.max(0, Math.min(1, (a - arc[i - 1]) / Math.max(1e-6, arc[i] - arc[i - 1])));
+    const p0 = pts[i - 1], p1 = pts[i];
+    return { x: p0.x + (p1.x - p0.x) * t, y: p0.y + (p1.y - p0.y) * t, s: p0.s + (p1.s - p0.s) * t,
+             slot: p1.slot, dx: p1.x - p0.x };
+  }
+
+  let icon = [], courier;
   function layout() {
+    if (!photo.complete || !photo.naturalWidth) return;
+    layers.forEach(c => c.remove()); layers = [];
+    tags.forEach(t => t.remove()); tags = [];
     ground.style.height = "";
-    place();
-    // keep the icons clear of the window: grow the hill area until they sit below it
-    for (let i = 0; i < 4; i++) {
-      const winBottom = win.getBoundingClientRect().bottom - desk.getBoundingClientRect().top;
-      const iconsTop = Math.min(...stops.map(sp => (sp.gy - 20) * S));
-      const overlap = winBottom + 10 - iconsTop;
-      if (overlap <= 0) break;
-      ground.style.height = ground.offsetHeight + Math.ceil(overlap / 0.7) + "px";
-      place();
+    computeMap(); route = buildRoute();
+    // grow the hill area until the stops sit below the window (and the route isn't cut short)
+    for (let n = 0; n < 16 && route.short; n++) {
+      if (ground.offsetHeight > 560) break;
+      ground.style.height = ground.offsetHeight + 32 + "px";
+      computeMap(); route = buildRoute();
     }
-    tags.forEach(t => t.remove());
-    tags = stops.map(sp => {
+    // occluders: the photo itself, cut along each crest, laid exactly over the background
+    OCCLUDERS.forEach(([ridge, z]) => {
+      const { x } = makeLayer(z);
+      x.beginPath();
+      ridge.forEach(([px, py], i) => { const [sx, sy] = toScreen(px, py); i ? x.lineTo(sx, sy) : x.moveTo(sx, sy); });
+      x.lineTo(W + 2, Hc + 2); x.lineTo(-2, Hc + 2); x.closePath(); x.clip();
+      x.imageSmoothingEnabled = true;
+      x.drawImage(photo, map.ox, map.oy, IW * map.k, IH * map.k);
+    });
+    if (route.stops.length < 2) route.stops = [];
+    // icons, each on its own hill's layer
+    icon = Z_SLOT.map(z => makeLayer(z));
+    route.stops.forEach(sp => {
+      const { x } = icon[sp.p.slot], s = sp.p.s;
+      x.fillStyle = "rgba(20,45,10,.32)";
+      x.beginPath(); x.ellipse(sp.p.x, sp.p.y, 6 * s, 1.4 * s, 0, 0, 7); x.fill();
+      x.drawImage(ICON_ART[sp.icon], Math.round(sp.p.x - 8 * s), Math.round(sp.p.y - 16 * s), 16 * s, 16 * s);
       const t = document.createElement("span");
       t.className = "tag"; t.textContent = sp.name;
-      t.style.left = (sp.x + 8) * S + "px";
-      t.style.top = (sp.gy + 5) * S + "px";
-      desk.appendChild(t);
-      return t;
+      t.style.left = sp.p.x + "px"; t.style.top = (sp.p.y + 3) + "px";
+      t.style.fontSize = Math.max(10, Math.min(12.5, 7 + 2 * s)) + "px";
+      desk.appendChild(t); tags.push(t);
     });
-    st = { phase: "carry", target: 1, x: stops[0].x + 14, dir: 1, t: 0, frame: 0, drop: null };
-    if (still) { st.x = stops[1].x - 9; tags[1].classList.add("done"); }
+    courier = makeLayer(Z_SLOT[2]);   // re-slotted every frame as he changes hills
+    const first = route.stops[0];
+    st = { phase: "carry", target: 1, a: first.a + 12 * first.p.s, t: 0, frame: 0, drop: null, dir: 1 };
+    if (still && route.stops[1]) { st.a = route.stops[1].a - 11 * route.stops[1].p.s; tags[1].classList.add("done"); }
     draw();
   }
 
+  // ---- drawing -------------------------------------------------------------------------------------
   function draw() {
-    ctx.clearRect(0, 0, L, H);
-    stops.forEach(sp => {
-      r(sp.x + 2, sp.gy, 12, 1, "rgba(20,40,10,.35)");
-      ICONS[sp.icon](sp.x, sp.gy - 16 - Math.round(sp.bounce));
-    });
-    if (st.drop) sprite(BOX, Math.round(st.drop.x), Math.round(st.drop.y));
-    // courier: 12 wide, 15 tall; walks a step in front of the icons and follows the slope
+    if (!courier || route.stops.length < 2) return;
+    const { x, c } = courier;
+    x.clearRect(0, 0, W, Hc);
+    const p = at(st.a);
+    c.style.zIndex = Z_SLOT[p.slot];
     const moving = st.phase === "carry" || st.phase === "back";
-    const x = Math.round(st.x);
-    const feet = groundAt(x + 6) + 3;
-    const bob = moving && st.frame === 0 ? 1 : 0;
-    const top = feet - 15 + bob;
-    const flip = st.dir < 0;
-    r(x + 2, feet, 8, 1, "rgba(20,40,10,.4)");
-    sprite(BODY, x, top, flip);
-    sprite(LEGS[moving ? st.frame : 1], x, top + 12, flip);
-    if (st.phase === "carry") {
-      sprite(BOX, x + 7, top + 6);
-      r(x + 7, top + 9, 1, 1, PAL.s);
-    } else {
-      r(flip ? x + 2 : x + 8, top + 8 + (moving ? st.frame : 0), 1, 2, PAL.s);
+    const flip = (moving ? (st.phase === "back" ? -p.dx : p.dx) : st.dir) < 0;
+    const s = p.s, bob = moving && st.frame === 0 ? s : 0;
+    x.fillStyle = "rgba(20,45,10,.35)";
+    x.beginPath(); x.ellipse(p.x, p.y, 4.5 * s, 1.2 * s, 0, 0, 7); x.fill();
+    const art = FRAMES[[st.frame, st.phase === "carry", flip, moving].join()];
+    x.drawImage(art, Math.round(p.x - 8 * s), Math.round(p.y - 15 * s + bob), 16 * s, 16 * s);
+    if (st.drop) {
+      const d = st.drop;
+      x.drawImage(BOX_ART, Math.round(d.x - 4 * d.s), Math.round(d.y - 3 * d.s), 8 * d.s, 6 * d.s);
     }
   }
 
-  const SPEED = { carry: 22, back: 38 };   // art pixels a second: an unhurried walk
+  // ---- motion --------------------------------------------------------------------------------------
+  const SPEED = 24;   // CSS px a second per unit of depth scale: far away looks slower
   let last = 0, acc = 0;
   function tick(now) {
     const dt = Math.min(0.05, (now - (last || now)) / 1000);
     last = now;
     acc += dt;
     if (acc > 0.2) { acc = 0; st.frame ^= 1; }
-    stops.forEach(sp => { if (sp.bounce) sp.bounce = Math.max(0, sp.bounce - dt * 8); });
-    const tgt = stops[st.target];
+    const tgt = route.stops[st.target];
+    const p = at(st.a);
     if (st.phase === "carry") {
-      st.dir = 1;
-      const goal = tgt.x - 9;
-      st.x = Math.min(goal, st.x + SPEED.carry * dt);
-      if (st.x >= goal) {
-        const feet = groundAt(Math.round(st.x) + 6) + 3;
-        st.phase = "drop"; st.t = 0; st.drop = { x: tgt.x - 1, y: feet - 15 + 6 };
+      const goal = tgt.a - 11 * tgt.p.s;
+      st.a = Math.min(goal, st.a + SPEED * p.s * dt);
+      if (st.a >= goal) {
+        const q = at(st.a);
+        st.dir = tgt.p.x >= q.x ? 1 : -1;
+        st.phase = "drop"; st.t = 0;
+        st.drop = { x: q.x + st.dir * 5 * q.s, y: q.y - 8 * q.s, s: q.s, fx: q.x + st.dir * 5 * q.s, fy: q.y - 8 * q.s };
       }
     } else if (st.phase === "drop") {
       st.t += dt;
-      st.drop.y = Math.max(tgt.gy - 12, st.drop.y - dt * 20);   // lift the crate into the program
-      if (st.t > 0.45) st.drop.x += dt * 8;
-      if (st.t > 0.9) {
-        st.drop = null; tgt.bounce = 2; tags[st.target].classList.add("done");
-        st.phase = "wait"; st.t = 0;
-      }
+      const k = Math.min(1, st.t / 0.7), e = k * k * (3 - 2 * k);
+      const d = st.drop, tx = tgt.p.x, ty = tgt.p.y - 9 * tgt.p.s;
+      d.x = d.fx + (tx - d.fx) * e; d.y = d.fy + (ty - d.fy) * e - Math.sin(Math.PI * k) * 6 * d.s;
+      if (k >= 1) { st.drop = null; tags[st.target].classList.add("done"); st.phase = "wait"; st.t = 0; }
     } else if (st.phase === "wait") {
       st.t += dt;
-      if (st.t > 0.4) st.phase = "back";
+      if (st.t > 0.45) st.phase = "back";
     } else if (st.phase === "back") {
-      st.dir = -1;
-      const home = stops[0].x + 14;
-      st.x = Math.max(home, st.x - SPEED.back * dt);
-      if (st.x <= home) {
+      const home = route.stops[0].a + 12 * route.stops[0].p.s;
+      st.a = Math.max(home, st.a - SPEED * 1.9 * p.s * dt);
+      if (st.a <= home) {
         st.target += 1;
-        if (st.target >= stops.length) { st.phase = "rest"; st.t = 0; st.dir = 1; }
+        if (st.target >= route.stops.length) { st.phase = "rest"; st.t = 0; }
         else st.phase = "carry";
       }
     } else if (st.phase === "rest") {
@@ -686,16 +759,17 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
   }
 
   let running = false;
-  function start() { if (!running && !still) { running = true; last = 0; requestAnimationFrame(tick); } }
+  function start() { if (!running && !still && route && route.stops.length > 1) { running = true; last = 0; requestAnimationFrame(tick); } }
   function stop() { running = false; }
 
-  layout();
+  function boot() { layout(); start(); }
+  if (photo.complete && photo.naturalWidth) boot(); else photo.addEventListener("load", boot);
   let rt;
-  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(layout, 150); });
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);   // the window's height settles once fonts load
+  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { stop(); layout(); start(); }, 150); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { stop(); layout(); start(); });
   if ("IntersectionObserver" in window) {
     new IntersectionObserver(es => es.forEach(e => (e.isIntersecting ? start() : stop()))).observe(desk);
-  } else start();
+  }
   document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
 })();
 </script>
