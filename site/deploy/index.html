@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Freighter</title>
-<meta name="description" content="Freighter moves your whole music studio to a new computer: projects, samples, presets, and a reinstall checklist for every plugin. Windows and Mac.">
+<meta name="description" content="Move your music studio to a new computer. Projects, samples and presets come with you. Free, for FL Studio and Ableton on Windows and Mac.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
@@ -137,7 +137,7 @@ section{padding-block:96px}
 .card p{color:var(--muted)}
 .card .label{margin-bottom:4px}
 
-.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;counter-reset:step}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;counter-reset:step}
 .step{border-top:2px solid var(--line-2);padding-top:20px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .step:first-child{border-top-color:var(--cargo)}
 .step .u{font-size:22px;color:var(--ink)}
@@ -204,7 +204,6 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
 
 @media (max-width:960px){
   .join,.mani-grid{grid-template-columns:minmax(0,1fr)}
-  .steps{grid-template-columns:repeat(2,minmax(0,1fr))}
   .links{display:none}
 }
 @media (max-width:640px){
@@ -232,7 +231,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
   <div class="wrap nav">
     <a class="logo" href="#top" aria-label="Freighter home"><span><span class="us">_</span>freighter</span></a>
     <nav class="links" aria-label="Sections">
-      <a href="#how">_how it works</a><a href="#what">_what moves</a><a href="#pricing">_pricing</a><a href="#faq">_faq</a>
+      <a href="#how">_how it works</a><a href="#faq">_faq</a>
     </nav>
     <a class="pill pill-cargo sm" href="#join">Join the beta</a>
   </div>
@@ -244,19 +243,13 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
       <div class="win">
         <div class="win-bar"><b><span class="us">_</span>freighter.exe</b><span class="win-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
         <div class="win-body">
-          <span class="label">Studio migration for producers</span>
-          <h1>Your whole studio, on the next computer.</h1>
-          <p class="lead">Freighter moves your projects, presets and every sample they use, then repairs your projects so nothing opens silent. Plugins get a reinstall checklist, grouped by maker.</p>
+          <span class="label">Free &middot; FL Studio &amp; Ableton &middot; Windows &amp; Mac</span>
+          <h1>Move your studio to a new computer.</h1>
+          <p class="lead">Your projects, samples and presets come with you, and every project opens with its sounds.</p>
           <div class="actions">
             <a class="pill pill-cargo" href="#join">Join the beta</a>
-            <a class="pill pill-ghost" href="#how">See how it works</a>
+            <a class="pill pill-ghost" href="#how">How it works</a>
           </div>
-          <div class="stats" aria-label="From one beta scan">
-            <div class="stat"><div class="n">196</div><div class="l">projects read</div></div>
-            <div class="stat"><div class="n">5.4 GB</div><div class="l">packed to move</div></div>
-            <div class="stat"><div class="n">5</div><div class="l">sample spots a plain copy misses</div></div>
-          </div>
-          <span class="stats-note">from one producer's FL Studio scan</span>
         </div>
       </div>
     </div>
@@ -270,139 +263,24 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
     </div>
   </div>
 
-  <section class="wrap" aria-labelledby="mani-h">
-    <div class="mani-grid">
-      <div class="mani-copy">
-        <span class="label">_manifest</span>
-        <h2 id="mani-h">See the whole cargo before you move.</h2>
-        <p>The free scan reads every project and finds each folder your beats pull samples from, including the drum kit on your Desktop and the one-shot sitting in Downloads.</p>
-        <p>It also checks every plugin's maker signature, so tampered copies don't follow you to a clean machine.</p>
-      </div>
-      <figure class="manifest" aria-label="Example cargo manifest">
-        <div class="m-head">
-          <span class="u"><span class="us">_</span>Manifest</span>
-          <span class="m-id">FRTU 482913-6<br>Windows &rarr; Mac</span>
-        </div>
-        <div class="m-rows">
-          <div class="m-row"><span class="crate">C-01</span><span class="what">FL Studio user data</span><span class="size">624 MB</span></div>
-          <div class="m-row flag"><span class="crate">C-02</span><span class="what">Desktop / drum kits</span><span class="size">2.3 GB</span></div>
-          <div class="m-row flag"><span class="crate">C-03</span><span class="what">Desktop / sample packs</span><span class="size">2.1 GB</span></div>
-          <div class="m-row flag"><span class="crate">C-04</span><span class="what">Downloads / 12 loose one-shots</span><span class="size">62 MB</span></div>
-          <div class="m-row"><span class="crate">P-01</span><span class="what">23 plugins &middot; reinstall list</span><span class="size">7 makers</span></div>
-        </div>
-        <div class="m-foot"><span>5 crates &middot; checked on arrival</span><b>5.4 GB</b></div>
-        <p class="m-key"><b>Blue crates</b> are what a plain copy of the DAW folder leaves behind.</p>
-      </figure>
-    </div>
-  </section>
-
-  <section class="wrap" aria-labelledby="why">
-    <div class="sec-head">
-      <span class="label">_the problem</span>
-      <h2 id="why">Copying the DAW folder isn't a move.</h2>
-    </div>
-    <div class="grid-3">
-      <div class="card"><h3>Samples live everywhere</h3><p>Drum kits on the Desktop, one-shots in Downloads, a pack on an old drive. Your projects point to all of them. A folder copy misses them.</p></div>
-      <div class="card"><h3>Projects open silent</h3><p>A project saved on Windows looks for <span class="mono">C:\Users\…</span>. On the new machine, half the sounds are gone and you're hunting files one by one.</p></div>
-      <div class="card"><h3>Plugins don't copy</h3><p>Licenses are tied to machines and accounts, and Windows plugins won't run on a Mac. You need a list of what to reinstall, not a folder of files.</p></div>
-    </div>
-  </section>
-
   <section class="wrap" id="how" aria-labelledby="how-h">
     <div class="sec-head">
       <span class="label">_how it works</span>
-      <h2 id="how-h">Four commands. One drive.</h2>
-      <p>Run Freighter on the old computer, carry a drive across, run it on the new one.</p>
+      <h2 id="how-h">Three steps.</h2>
     </div>
     <div class="steps">
-      <div class="step"><span class="u"><span class="us">_</span>scan</span><p>Reads your plugins, DAW folders and every project, and finds each folder your projects pull samples from.</p><span class="where">old computer</span></div>
-      <div class="step"><span class="u"><span class="us">_</span>pack</span><p>Loads it all onto a drive. Every file is checked, and an interrupted copy picks up where it stopped.</p><span class="where">old computer</span></div>
-      <div class="step"><span class="u"><span class="us">_</span>unpack</span><p>Puts files where the new computer's DAW expects them, Windows or Mac, and logs where everything went.</p><span class="where">new computer</span></div>
-      <div class="step"><span class="u"><span class="us">_</span>repair</span><p>Repoints samples inside your projects and lists the plugins still to install, ticking makers off as you go.</p><span class="where">new computer</span></div>
-    </div>
-    <p class="soon">_next: moving over your home network, no drive needed. In development.</p>
-  </section>
-
-  <section class="wrap" id="what" aria-labelledby="what-h">
-    <div class="sec-head">
-      <span class="label">_what moves</span>
-      <h2 id="what-h">Your files ship. Plugins get a checklist.</h2>
-    </div>
-    <div class="grid-2">
-      <div class="card">
-        <span class="label">_cargo</span>
-        <h3>Moves as files</h3>
-        <ul class="ticks">
-          <li><span class="mark ok">+</span><span>FL Studio and Ableton projects<small>.flp and .als, with their folders</small></span></li>
-          <li><span class="mark ok">+</span><span>Every sample your projects use<small>found wherever it lives, not just in DAW folders</small></span></li>
-          <li><span class="mark ok">+</span><span>Presets, recordings and the Ableton User Library</span></li>
-          <li><span class="mark ok">+</span><span>Splice and Native Instruments user folders</span></li>
-          <li><span class="mark todo">&minus;</span><span>Installers and programs stay behind<small>.exe, .dmg and plugin files hiding in sample folders aren't carried over; reinstall software from its maker</small></span></li>
-        </ul>
-      </div>
-      <div class="card">
-        <span class="label">_checklist</span>
-        <h3>Reinstalls from a list</h3>
-        <ul class="ticks">
-          <li><span class="mark todo">[ ]</span><span>VST, VST3, AU, AAX and CLAP plugins<small>grouped by maker, so you know which accounts to sign in to</small></span></li>
-          <li><span class="mark todo">[ ]</span><span>Licenses<small>reminders to deactivate iLok, Waves and Native Access on the old machine</small></span></li>
-          <li><span class="mark todo">[ ]</span><span>Problem plugins<small>duplicates, 32-bit leftovers, Intel-only versions on Apple Silicon</small></span></li>
-          <li><span class="mark todo">[ ]</span><span>Tampered plugins<small>checks each plugin's maker signature and flags broken ones, the mark of cracked copies, so they don't follow you to a clean machine</small></span></li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <section class="wrap" aria-labelledby="works">
-    <div class="sec-head">
-      <span class="label">_compatibility</span>
-      <h2 id="works">Built for FL Studio and Ableton.</h2>
-    </div>
-    <div class="grid-3">
-      <div class="card"><h3>FL Studio</h3><p>Finds every sample your projects use, moves it, and tells you which folders to add to FL's search paths so projects open complete.</p><div class="chips"><span class="chip">windows</span><span class="chip">mac</span></div></div>
-      <div class="card"><h3>Ableton Live</h3><p>Live 11 and 12 projects are repaired automatically, with each original kept as a backup. Live 10 and older get guided steps.</p><div class="chips"><span class="chip">windows</span><span class="chip">mac</span></div></div>
-      <div class="card"><h3>Any other DAW</h3><p>The plugin scan and reinstall checklist work with Logic, Bitwig, Reaper, Studio One and the rest.</p><div class="chips"><span class="chip">_manifest only</span></div></div>
-    </div>
-  </section>
-
-  <section class="wrap" id="pricing" aria-labelledby="price-h">
-    <div class="sec-head">
-      <span class="label">_pricing</span>
-      <h2 id="price-h">Free. All of it.</h2>
-      <p>No subscription, no trial, no paid tier. Freighter and _Manifest are free while we build them with producers.</p>
-    </div>
-    <div class="price">
-      <div class="card">
-        <span class="name"><span class="us">_</span>Manifest</span>
-        <div class="amt">Free</div>
-        <ul class="ticks">
-          <li><span class="mark ok">+</span><span>Every plugin, by maker and format</span></li>
-          <li><span class="mark ok">+</span><span>Flags duplicates and problem plugins</span></li>
-          <li><span class="mark ok">+</span><span>Safety check: flags tampered plugins</span></li>
-          <li><span class="mark ok">+</span><span>Reinstall checklist for a new computer</span></li>
-        </ul>
-      </div>
-      <div class="card hl">
-        <span class="badge">In beta</span>
-        <span class="name"><span class="us">_</span>Freighter</span>
-        <div class="amt">Free</div>
-        <ul class="ticks">
-          <li><span class="mark ok">+</span><span>Everything in _Manifest</span></li>
-          <li><span class="mark ok">+</span><span>Pack and unpack projects, samples and presets</span></li>
-          <li><span class="mark ok">+</span><span>Project repair for FL Studio and Ableton</span></li>
-          <li><span class="mark ok">+</span><span>Every direction: Windows and Mac</span></li>
-        </ul>
-      </div>
+      <div class="step"><span class="u"><span class="us">_</span>pack</span><p>On your old computer, Freighter finds every project and every sample it uses, wherever it lives, and packs it all onto a drive.</p><span class="where">old computer</span></div>
+      <div class="step"><span class="u"><span class="us">_</span>unpack</span><p>On the new one, it puts everything where your DAW expects it.</p><span class="where">new computer</span></div>
+      <div class="step"><span class="u"><span class="us">_</span>repair</span><p>It reconnects your projects to their samples and gives you a list of plugins to reinstall.</p><span class="where">new computer</span></div>
     </div>
   </section>
 
   <section class="wrap" id="join" aria-labelledby="join-h">
     <div class="join">
       <div class="copy">
-        <span class="label">_beta list</span>
-        <h2 id="join-h">Moving soon? Get on board.</h2>
-        <p>Freighter is free. Beta testers get it first and help decide what it handles next. Tell us what you're moving and we'll email you when your setup is supported.</p>
-        <p class="fine">One email when the beta opens, then only Freighter news. Unsubscribe anytime.</p>
+        <span class="label">_beta</span>
+        <h2 id="join-h">Get it first.</h2>
+        <p>Freighter is free. Join the beta and we'll email you when it's ready.</p>
       </div>
       <form id="waitlist" name="waitlist" method="POST" data-netlify="true" netlify-honeypot="company" novalidate>
         <input type="hidden" name="form-name" value="waitlist">
@@ -411,43 +289,17 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
           <label for="email">Email</label>
           <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
         </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="from">Moving from</label>
-            <select id="from" name="from"><option>Windows</option><option>Mac</option></select>
-          </div>
-          <div class="field">
-            <label for="to">Moving to</label>
-            <select id="to" name="to"><option>Windows</option><option selected>Mac</option></select>
-          </div>
-        </div>
         <fieldset>
           <span class="legend" id="daw-l">Your DAW</span>
           <div class="opts" role="group" aria-labelledby="daw-l">
             <label class="opt"><input id="daw-fl" type="checkbox" name="daw" value="FL Studio"><span>FL Studio</span></label>
             <label class="opt"><input id="daw-live" type="checkbox" name="daw" value="Ableton Live"><span>Ableton Live</span></label>
-            <label class="opt"><input id="daw-logic" type="checkbox" name="daw" value="Logic Pro"><span>Logic Pro</span></label>
             <label class="opt"><input id="daw-other" type="checkbox" name="daw" value="Other"><span>Other</span></label>
           </div>
         </fieldset>
-        <div class="field">
-          <label for="when">When are you moving?</label>
-          <select id="when" name="when">
-            <option value="">Choose one</option>
-            <option>In the next month</option><option>In 1–3 months</option><option>Later this year</option><option>No plans, just curious</option>
-          </select>
-        </div>
-        <fieldset>
-          <span class="legend" id="next-l">What should Freighter handle next?</span>
-          <div class="opts" role="radiogroup" aria-labelledby="next-l">
-            <label class="opt"><input id="next-net" type="radio" name="next" value="network transfer"><span>Move over Wi-Fi</span></label>
-            <label class="opt"><input id="next-logic" type="radio" name="next" value="Logic Pro"><span>Logic Pro</span></label>
-            <label class="opt"><input id="next-daws" type="radio" name="next" value="Bitwig / Reaper / Studio One"><span>Bitwig, Reaper, Studio One</span></label>
-            <label class="opt"><input id="next-presets" type="radio" name="next" value="plugin presets"><span>Plugin presets</span></label>
-          </div>
-        </fieldset>
-        <button class="pill pill-cargo" id="submit" type="submit" style="align-self:flex-start">Join the beta list</button>
+        <button class="pill pill-cargo" id="submit" type="submit" style="align-self:flex-start">Join the beta</button>
         <div id="form-msg" class="form-msg" role="status" hidden></div>
+        <p class="fine">Only Freighter news. Unsubscribe anytime.</p>
       </form>
     </div>
   </section>
@@ -455,11 +307,9 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
   <section class="wrap" id="faq" aria-labelledby="faq-h">
     <div class="sec-head"><span class="label">_faq</span><h2 id="faq-h">Questions</h2></div>
     <div class="faq">
-      <details><summary>Does Freighter copy my plugins?</summary><p>No. Plugin files don't survive a copy: licenses are tied to machines and accounts, and Windows plugins don't run on a Mac. Freighter lists every plugin by maker so you can reinstall the right version, and confirms each one once it's installed.</p></details>
-      <details><summary>Are my files uploaded anywhere?</summary><p>No. Everything runs on your two computers, and files travel on your own drive. Nothing is sent to our servers.</p></details>
-      <details><summary>What if a project still has missing samples?</summary><p>You get a list of each missing file and the project that uses it, usually samples on a drive you didn't include. Add that folder and run the move again; files already moved are skipped.</p></details>
-      <details><summary>Do I need to be technical?</summary><p>The beta runs from a short set of commands with step-by-step instructions. The released version is a normal app with buttons.</p></details>
-      <details><summary>What about Logic, Bitwig or Reaper?</summary><p>_Manifest, the plugin scan and reinstall checklist, works with any DAW today. Project repair starts with FL Studio and Ableton; tell us on the form which DAW you'd want next.</p></details>
+      <details><summary>Does it copy my plugins?</summary><p>No. Plugin licenses are tied to each computer, so you reinstall them from the maker. Freighter tells you exactly which ones, and flags tampered copies.</p></details>
+      <details><summary>Is my music uploaded anywhere?</summary><p>No. Everything stays on your computers and your own drive.</p></details>
+      <details><summary>What does it cost?</summary><p>Nothing. Freighter is free.</p></details>
     </div>
   </section>
 </main>
@@ -802,11 +652,7 @@ const FORM_ENDPOINT = "";
     }
     const data = {
       email,
-      from: form.from.value,
-      to: form.to.value,
       daw: [...form.querySelectorAll('input[name="daw"]:checked')].map(i => i.value).join(", "),
-      when: form.when.value,
-      next: (form.querySelector('input[name="next"]:checked') || {}).value || "",
     };
     if (FORM_MODE === "preview" || (FORM_MODE === "endpoint" && !FORM_ENDPOINT)) {
       show("Preview only: sign-ups start once this page is live on its own site. Your answers weren't saved.");

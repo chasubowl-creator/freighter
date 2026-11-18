@@ -30,11 +30,9 @@ New Netlify sites have form collection switched off.
 ## 4. Read your results
 
 **Forms → waitlist → Download as CSV.** The columns that matter for the demand test:
-- `when`: how many are moving soon (your first beta testers)
-- `next`: what people want Freighter to handle next
-- `daw`, `from`, `to`: which setups to support first
+- `daw`: which DAWs to support first
 
-Rule of thumb: **200+ emails and 30+ people moving within 3 months** means there's real demand for a 1.0.
+Rule of thumb: **200+ emails** means there's real demand for a 1.0.
 
 ## Changing the page later
 
