@@ -8,8 +8,8 @@ Netlify hosts the page and collects sign-ups. Free plan: 100 sign-ups a month, w
 2. Go to **Sites → Add new site → Deploy manually** (or open https://app.netlify.com/drop).
 3. Drag the **`deploy`** folder (inside `site/`) onto the page. In a few seconds you get a link like
    `https://random-name-123.netlify.app`.
-4. **Site configuration → Change site name** → `freighter` (or whatever's free) → your page is at
-   `https://freighter.netlify.app`.
+4. **Site configuration → Change site name** → `freighter-studio` (plain `freighter` is already taken by someone else) → your page is at
+   `https://freighter-studio.netlify.app`.
 
 ## 2. Turn on sign-ups
 
