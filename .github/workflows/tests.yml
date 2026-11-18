@@ -25,6 +25,8 @@ jobs:
         run: python manifest.py --no-open --quick --out scan-output
       - name: Mover lists what it would pack
         run: python freighter.py pack --list
+      - name: Sorter previews a folder
+        run: python crate.py preview tests --no-open --out crate-output
       - name: Keep the scan report
         if: always()
         uses: actions/upload-artifact@v4
@@ -55,11 +57,13 @@ jobs:
         run: |
           pyinstaller --onefile --name freighter freighter.py
           pyinstaller --onefile --name manifest manifest.py
+          pyinstaller --onefile --name crate crate.py
       - name: The built programs run
         shell: bash
         run: |
           ./dist/freighter pack --list
           ./dist/manifest --no-open --quick --out smoke-scan
+          ./dist/crate preview tests --no-open --out smoke-crate
           printf 'q\n' | ./dist/freighter
       - name: Add the Windows test guide
         shell: bash

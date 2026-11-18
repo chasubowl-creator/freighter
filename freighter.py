@@ -978,6 +978,9 @@ MENU = """
     5  Unpack a bundle from the drive
     6  Repair projects after unpacking
 
+  Tidy up
+    7  Sort my sample folders into one library (_Crate)
+
     q  Quit
 """
 
@@ -995,7 +998,7 @@ def ask_path(prompt):
 def interactive_menu():
     while True:
         print(MENU)
-        choice = input("  Choose 1-6 (or q): ").strip().lower()
+        choice = input("  Choose 1-7 (or q): ").strip().lower()
         try:
             if choice == "1":
                 html_path, _ = rs.run_scan()
@@ -1016,10 +1019,23 @@ def interactive_menu():
             elif choice == "6":
                 cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
                 cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
+            elif choice == "7":
+                import crate
+                folder = ask_path("  Drag a sample folder (or drum kit) into this window, then press Enter: ")
+                if folder:
+                    items = crate.plan([folder])
+                    if items:
+                        lib = crate.default_library()
+                        page = crate.write_report(items, lib.parent / "Freighter Crate preview", "_Crate preview")
+                        import webbrowser
+                        webbrowser.open(page.as_uri())
+                        if input(f"  The preview is open. Build the library in {lib}? (y/n): ").strip().lower().startswith("y"):
+                            made, links, copies, skipped = crate.build(items, lib, False)
+                            print(f"  {made} files added to {lib} ({skipped} duplicates skipped). Originals untouched.")
             elif choice in ("q", "quit", "exit", ""):
                 return 0
             else:
-                print("  Type a number from 1 to 6, or q to quit.")
+                print("  Type a number from 1 to 7, or q to quit.")
                 continue
         except SystemExit as e:  # commands exit with a message on problems; show it and keep the menu
             if e.code not in (None, 0):

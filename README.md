@@ -11,6 +11,7 @@ FL Studio and Ableton Live. Windows and Mac, in any direction. Free, and everyth
     python3 manifest.py              # _Manifest: plugin report (use "py" on Windows)
     python3 freighter.py pack --list    # what a move would take, and how big
     python3 freighter.py rehearse       # practise a full move on this computer, safely
+    python3 crate.py preview ~/Desktop/DrumKits   # _Crate: see how your samples would be sorted
 
 Testing on a Windows PC, step by step: [WINDOWS-TEST.md](WINDOWS-TEST.md). The full walkthrough for a real move is in [MOVING-FROM-WINDOWS.md](MOVING-FROM-WINDOWS.md).
 
@@ -20,6 +21,7 @@ Testing on a Windows PC, step by step: [WINDOWS-TEST.md](WINDOWS-TEST.md). The f
 |---|---|
 | `manifest.py` | _Manifest: finds installed plugins, flags problems, compares two computers |
 | `freighter.py` | Freighter: `scan`, `pack`, `unpack`, `fix-ableton`, `check-fl`, `rehearse` |
+| `crate.py` | _Crate: sorts drum kits and sample packs into one library (`preview`, `build`, `undo`). Never moves your originals |
 | `tests/` | Automated tests: `python3 -m unittest discover -s tests -v` |
 | `.github/workflows/tests.yml` | Runs the tests on Windows and macOS for every change |
 | `site/` | Landing page: `landing.html` is the source, `python3 build.py` makes `deploy/` for Netlify |

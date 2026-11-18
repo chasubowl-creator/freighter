@@ -19,3 +19,5 @@ __pycache__/
 Thumbs.db
 *.freighter-part
 *.rigmover-part
+crate-preview/
+crate-output/
