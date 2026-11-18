@@ -7,7 +7,7 @@
 <style>
 /* Layout: dark-first product page. Big confident type and a stat row up top, mono "_names" for
    every product and section, cargo-manifest panels as the one recurring object,
-   container orange as Freighter's product colour. Single dark look by design. */
+   bright blue as Freighter's product colour. Single dark look by design. */
 :root{
   --bg:#0a0b0d;
   --bg-2:#111317;
@@ -17,9 +17,10 @@
   --ink:#f1f2f4;
   --muted:#9aa0aa;
   --dim:#666d78;
-  --cargo:#ff6b1a;          /* Freighter: shipping-container orange */
-  --cargo-ink:#140700;
-  --cargo-soft:rgba(255,107,26,.12);
+  --cargo:#3d8bff;          /* Freighter: bright blue, for text and marks on dark */
+  --cargo-fill:#1671f0;     /* the same blue for filled buttons and tags, deep enough for white text */
+  --cargo-ink:#ffffff;
+  --cargo-soft:rgba(61,139,255,.14);
   --manifest:#7fd1c7;       /* _Manifest: the free scan's own colour */
   --ok:#62d38f;
   --font-display:"Sora","Segoe UI",system-ui,sans-serif;
@@ -54,8 +55,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .links a:hover{color:var(--ink)}
 .pill{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;font:600 15px/1 var(--font-body);
   padding:13px 22px;text-decoration:none;border:1px solid transparent;cursor:pointer;white-space:nowrap}
-.pill-cargo{background:var(--cargo);color:var(--cargo-ink)}
-.pill-cargo:hover{background:#ff8340}
+.pill-cargo{background:var(--cargo-fill);color:var(--cargo-ink)}
+.pill-cargo:hover{background:#2f85ff}
 .pill-ghost{background:transparent;color:var(--ink);border-color:var(--line-2)}
 .pill-ghost:hover{border-color:var(--muted)}
 .pill.sm{padding:9px 16px;font-size:14px}
@@ -87,7 +88,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .desk .tag{position:absolute;z-index:1;transform:translateX(-50%);white-space:nowrap;font:600 11.5px/1.2 var(--font-body);
   color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 5px rgba(0,0,0,.5);padding:1px 5px;border-radius:3px;
   transition:background .3s;pointer-events:none}
-.desk .tag.done{background:rgba(255,107,26,.92);text-shadow:none;color:var(--cargo-ink)}
+.desk .tag.done{background:var(--cargo-fill);text-shadow:none;color:var(--cargo-ink)}
 .desk .tag.done::before{content:"\2713\00a0"}
 .photo-credit{position:absolute;right:max(10px,env(safe-area-inset-right,0px));bottom:8px;z-index:3;font-size:11px;color:rgba(255,255,255,.75)}
 .photo-credit a{color:inherit}
@@ -154,7 +155,7 @@ ul.ticks li small{display:block;color:var(--dim);font-size:14px}
 /* pricing */
 .price{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .price .card{padding:30px;gap:16px}
-.price .card.hl{border-color:rgba(255,107,26,.55);background:linear-gradient(180deg,rgba(255,107,26,.08),var(--panel) 45%)}
+.price .card.hl{border-color:rgba(61,139,255,.6);background:linear-gradient(180deg,rgba(61,139,255,.10),var(--panel) 45%)}
 .price .name{font-family:var(--font-mono);font-size:24px;font-weight:700}
 .price .name .us{color:var(--manifest)}
 .price .hl .name .us{color:var(--cargo)}
@@ -254,7 +255,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
     </div>
     <canvas id="yard" aria-hidden="true"></canvas>
     <div class="ground" id="ground" role="img" aria-label="Far off on the hills, a pixel-art courier carries crates from an old PC to FL Studio, Ableton Live, Logic Pro and a samples folder."></div>
-    <span class="photo-credit">Photo: <a href="https://unsplash.com/photos/rolling-green-hills-in-tuscany-GnE3JdxgjeA" rel="noopener">Massimiliano Morosinotto / Unsplash</a> (sky recolored)</span>
+    <span class="photo-credit">Photo: <a href="https://unsplash.com/photos/rolling-green-hills-in-tuscany-GnE3JdxgjeA" rel="noopener">Massimiliano Morosinotto / Unsplash</a></span>
   </div>
 
   <div class="strip" aria-label="Supported">
@@ -284,7 +285,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
           <div class="m-row"><span class="crate">P-01</span><span class="what">23 plugins &middot; reinstall list</span><span class="size">7 makers</span></div>
         </div>
         <div class="m-foot"><span>5 crates &middot; checked on arrival</span><b>5.4 GB</b></div>
-        <p class="m-key"><b>Orange crates</b> are what a plain copy of the DAW folder leaves behind.</p>
+        <p class="m-key"><b>Blue crates</b> are what a plain copy of the DAW folder leaves behind.</p>
       </figure>
     </div>
   </section>
@@ -474,8 +475,8 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
   const still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const PAL = {
-    k: "#1b1c20", c: "#ff6b1a", C: "#c44d0b", s: "#f2c39b", S: "#d79c74", e: "#1b1c20",
-    b: "#2d5aa6", B: "#1f3f78", p: "#3a3b46", o: "#7a4c22", O: "#c98c4f", L: "#e2ae6e", t: "#f1e4bb",
+    k: "#1b1c20", c: "#2f8cff", C: "#1659c7", s: "#f2c39b", S: "#d79c74", e: "#1b1c20",
+    b: "#eef1f5", B: "#c3cad3", p: "#3a3b46", o: "#7a4c22", O: "#c98c4f", L: "#e2ae6e", t: "#f1e4bb",
   };
   const BODY = [
     "...kkkkk....",
