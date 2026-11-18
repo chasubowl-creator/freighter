@@ -64,18 +64,42 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .pill-ghost:hover{border-color:var(--muted)}
 .pill.sm{padding:9px 16px;font-size:14px}
 
-/* hero */
-.hero{position:relative;overflow:hidden}
-.hero::before{content:"";position:absolute;inset:-20% -10% auto auto;width:780px;height:780px;max-width:100%;
-  background:radial-gradient(closest-side,rgba(255,107,26,.16),rgba(255,107,26,0));pointer-events:none}
-.hero .wrap{position:relative;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:56px;align-items:end;padding-block:88px 72px}
-.hero-copy{display:flex;flex-direction:column;gap:26px;min-width:0}
-.hero-copy .lead{font-size:19px;color:var(--muted);max-width:52ch}
+/* hero: a desktop on a hill. Photo backdrop, a glass window for the pitch, pixel-art icons on the grass */
+.desk{position:relative;overflow:hidden;background:#3d86c6 url(assets/hill.jpg) center bottom/cover no-repeat;
+  display:flex;flex-direction:column}
+.desk::after{content:"";position:absolute;inset:auto 0 0 0;height:90px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(10,11,13,0),rgba(10,11,13,.35))}
+.desk-top{position:relative;z-index:2;padding-block:36px 8px;flex:1}
+.win{max-width:760px;background:rgba(13,15,18,.86);border:1px solid rgba(255,255,255,.14);border-radius:14px;
+  box-shadow:0 30px 70px -20px rgba(4,20,45,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);overflow:hidden}
+.win-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;
+  border-bottom:1px solid rgba(255,255,255,.08);font-family:var(--font-mono);font-size:13px;color:var(--muted)}
+.win-bar b{color:var(--ink);font-weight:500}.win-bar b .us{color:var(--cargo)}
+.win-dots{display:flex;gap:6px}.win-dots i{width:11px;height:11px;border-radius:3px;background:var(--line-2);display:block}
+.win-dots i:last-child{background:var(--cargo)}
+.win-body{padding:24px 28px 22px;display:flex;flex-direction:column;gap:16px}
+.win-body h1{font-size:clamp(38px,5vw,60px)}
+.win-body .lead{font-size:17px;color:var(--muted);max-width:60ch}
 .actions{display:flex;flex-wrap:wrap;gap:12px}
-.stats{display:flex;flex-wrap:wrap;gap:36px;padding-top:8px}
-.stat .n{font-family:var(--font-display);font-weight:700;font-size:26px;letter-spacing:-.02em}
+.stats{display:flex;flex-wrap:wrap;gap:32px;padding-top:4px}
+.stat .n{font-family:var(--font-display);font-weight:700;font-size:24px;letter-spacing:-.02em}
 .stat .l{font-size:13px;color:var(--dim)}
 .stats-note{font-size:12.5px;color:var(--dim);font-family:var(--font-mono)}
+
+.ground{position:relative;z-index:1;height:240px;flex:none}
+.ground canvas{position:absolute;left:0;bottom:0;image-rendering:pixelated;image-rendering:crisp-edges}
+.ground .tag{position:absolute;transform:translateX(-50%);white-space:nowrap;font:600 13px/1.2 var(--font-body);
+  color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.85),0 0 6px rgba(0,0,0,.45);padding:1px 6px;border-radius:3px;
+  transition:background .3s}
+.ground .tag.done{background:rgba(255,107,26,.92);text-shadow:none;color:var(--cargo-ink)}
+.ground .tag.done::before{content:"\2713\00a0"}
+.photo-credit{position:absolute;right:max(10px,env(safe-area-inset-right,0px));bottom:8px;z-index:3;font-size:11px;color:rgba(255,255,255,.75)}
+.photo-credit a{color:inherit}
+
+/* the _Manifest section */
+.mani-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:center}
+.mani-copy{display:flex;flex-direction:column;gap:16px}
+.mani-copy p{color:var(--muted);font-size:18px}
 
 /* manifest panel: the recurring object */
 .manifest{background:linear-gradient(180deg,var(--panel),var(--bg-2));border:1px solid var(--line-2);border-radius:16px;
@@ -178,13 +202,16 @@ footer{border-top:1px solid var(--line);padding-block:36px;color:var(--dim);font
 footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
 
 @media (max-width:960px){
-  .hero .wrap,.join{grid-template-columns:minmax(0,1fr)}
+  .join,.mani-grid{grid-template-columns:minmax(0,1fr)}
   .steps{grid-template-columns:repeat(2,minmax(0,1fr))}
   .links{display:none}
 }
 @media (max-width:640px){
   section{padding-block:64px}
-  .hero .wrap{padding-block:56px 48px;gap:40px}
+  .desk{min-height:0}
+  .desk-top{padding-block:28px 12px}
+  .win-body{padding:22px 20px}
+  .ground{height:190px}
   .grid-3,.grid-2,.price,.steps,.field-row{grid-template-columns:minmax(0,1fr)}
   .join{padding:24px}
   .stats{gap:24px}
@@ -211,24 +238,47 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
 </header>
 
 <main id="top">
-  <div class="hero">
-    <div class="wrap">
-      <div class="hero-copy">
-        <span class="label">Studio migration for producers</span>
-        <h1>Your whole studio, on the next computer.</h1>
-        <p class="lead">Freighter moves your projects, presets and every sample they use, then repairs your projects so nothing opens silent. Plugins get a reinstall checklist, grouped by maker.</p>
-        <div class="actions">
-          <a class="pill pill-cargo" href="#join">Join the beta</a>
-          <a class="pill pill-ghost" href="#how">See how it works</a>
+  <div class="desk">
+    <div class="wrap desk-top">
+      <div class="win">
+        <div class="win-bar"><b><span class="us">_</span>freighter.exe</b><span class="win-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+        <div class="win-body">
+          <span class="label">Studio migration for producers</span>
+          <h1>Your whole studio, on the next computer.</h1>
+          <p class="lead">Freighter moves your projects, presets and every sample they use, then repairs your projects so nothing opens silent. Plugins get a reinstall checklist, grouped by maker.</p>
+          <div class="actions">
+            <a class="pill pill-cargo" href="#join">Join the beta</a>
+            <a class="pill pill-ghost" href="#how">See how it works</a>
+          </div>
+          <div class="stats" aria-label="From one beta scan">
+            <div class="stat"><div class="n">196</div><div class="l">projects read</div></div>
+            <div class="stat"><div class="n">5.4 GB</div><div class="l">packed to move</div></div>
+            <div class="stat"><div class="n">5</div><div class="l">sample spots a plain copy misses</div></div>
+          </div>
+          <span class="stats-note">from one producer's FL Studio scan</span>
         </div>
-        <div class="stats" aria-label="From one beta scan">
-          <div class="stat"><div class="n">196</div><div class="l">projects read</div></div>
-          <div class="stat"><div class="n">5.4 GB</div><div class="l">packed to move</div></div>
-          <div class="stat"><div class="n">5</div><div class="l">sample spots a plain copy misses</div></div>
-        </div>
-        <span class="stats-note">from one producer's FL Studio scan</span>
       </div>
+    </div>
+    <div class="ground" id="ground" role="img" aria-label="A pixel-art courier carries packages from an old PC to FL Studio, Ableton Live, Logic Pro and a samples folder.">
+      <canvas id="yard" aria-hidden="true"></canvas>
+    </div>
+    <span class="photo-credit">Photo: <a href="https://unsplash.com/photos/landscape-of-grass-field-under-blue-sky-3LsocYqXWpM" rel="noopener">Scott Webb / Unsplash</a></span>
+  </div>
 
+  <div class="strip" aria-label="Supported">
+    <div class="wrap">
+      <span class="on">FL Studio</span><span class="on">Ableton Live</span><span>Windows</span><span>macOS</span><span>VST3</span><span>AU</span><span>AAX</span><span>CLAP</span>
+    </div>
+  </div>
+
+  <section class="wrap" aria-labelledby="mani-h">
+    <div class="mani-grid">
+      <div class="mani-copy">
+        <span class="label">_manifest</span>
+        <h2 id="mani-h">See the whole cargo before you move.</h2>
+        <p>The free scan reads every project and finds each folder your beats pull samples from, including the drum kit on your Desktop and the one-shot sitting in Downloads.</p>
+        <p>It also checks every plugin's maker signature, so tampered copies don't follow you to a clean machine.</p>
+      </div>
       <figure class="manifest" aria-label="Example cargo manifest">
         <div class="m-head">
           <span class="u"><span class="us">_</span>Manifest</span>
@@ -245,13 +295,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
         <p class="m-key"><b>Orange crates</b> are what a plain copy of the DAW folder leaves behind.</p>
       </figure>
     </div>
-  </div>
-
-  <div class="strip" aria-label="Supported">
-    <div class="wrap">
-      <span class="on">FL Studio</span><span class="on">Ableton Live</span><span>Windows</span><span>macOS</span><span>VST3</span><span>AU</span><span>AAX</span><span>CLAP</span>
-    </div>
-  </div>
+  </section>
 
   <section class="wrap" aria-labelledby="why">
     <div class="sec-head">
@@ -427,6 +471,197 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
     <span>Made by a producer, for producers moving computers.</span>
   </div>
 </footer>
+
+<script>
+/* _freighter yard: a pixel courier carries crates from the old PC to each program on the hill. */
+(function () {
+  const ground = document.getElementById("ground");
+  const cv = document.getElementById("yard");
+  if (!ground || !cv || !cv.getContext) return;
+  const ctx = cv.getContext("2d");
+  const still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const PAL = {
+    k: "#1b1c20", c: "#ff6b1a", C: "#c44d0b", s: "#f2c39b", S: "#d79c74", e: "#1b1c20",
+    b: "#2d5aa6", B: "#1f3f78", p: "#3a3b46", o: "#7a4c22", O: "#c98c4f", L: "#e2ae6e", t: "#f1e4bb",
+  };
+  const BODY = [
+    "...kkkkk....",
+    "..kcccccck..",
+    "..kccccccCCk",
+    "..ksssssk...",
+    "..ksssesk...",
+    "..kSssssk...",
+    "...kkkkk....",
+    "..kbbbbbk...",
+    ".kbbbbbbbk..",
+    ".kbBbbbbbk..",
+    ".kbbbbbbbk..",
+    "..kpppppk...",
+  ];
+  const LEGS = [
+    ["..kpk.kpk...", ".kpk...kpk..", ".kkk...kkk.."],
+    ["...kpppk....", "...kp.pk....", "...kk.kk...."],
+  ];
+  const BOX = ["oooooooo", "oLLttLLo", "oOOttOOo", "oOOttOOo", "oOOttOOo", "oooooooo"];
+
+  function sprite(rows, x, y, flip) {
+    const w = rows[0].length;
+    rows.forEach((row, j) => {
+      for (let i = 0; i < w; i++) {
+        const ch = row[i];
+        if (ch === ".") continue;
+        ctx.fillStyle = PAL[ch];
+        ctx.fillRect(flip ? x + (w - 1 - i) : x + i, y + j, 1, 1);
+      }
+    });
+  }
+  function r(x, y, w, h, col) { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); }
+
+  // Original 16x16 icons: generic shapes in each program's colour family, not their logos.
+  const ICONS = {
+    pc(x, y) {
+      r(x + 1, y + 1, 14, 10, "#1b1c20"); r(x + 2, y + 2, 12, 8, "#d8d1bc");
+      r(x + 3, y + 3, 10, 6, "#3d86c6"); r(x + 3, y + 7, 10, 2, "#4c9a3a"); r(x + 5, y + 4, 2, 1, "#fff");
+      r(x + 6, y + 11, 4, 2, "#b9b19a"); r(x + 2, y + 13, 12, 2, "#1b1c20"); r(x + 3, y + 13, 10, 1, "#d8d1bc");
+    },
+    fl(x, y) {
+      r(x + 1, y + 1, 14, 14, "#1b1c20"); r(x + 2, y + 2, 12, 12, "#f39a1f"); r(x + 2, y + 2, 12, 2, "#ffc35a");
+      for (let i = 0; i < 4; i++) r(x + 3 + i * 3, y + 9, 2, 3, i % 2 ? "#7a3d00" : "#fff");
+      r(x + 4, y + 5, 7, 2, "#fff");
+    },
+    live(x, y) {
+      r(x + 1, y + 1, 14, 14, "#0d0d0f"); r(x + 2, y + 2, 12, 12, "#26272b");
+      const cols = ["#e3b13a", "#6fb6d9", "#e05a5a", "#7ac46b", "#26272b", "#e3b13a", "#26272b", "#6fb6d9", "#e05a5a"];
+      cols.forEach((c, i) => r(x + 3 + (i % 3) * 4, y + 3 + Math.floor(i / 3) * 4, 3, 3, c));
+    },
+    logic(x, y) {
+      r(x + 1, y + 1, 14, 14, "#1b1c20"); r(x + 2, y + 2, 12, 12, "#c9ced6"); r(x + 2, y + 2, 12, 2, "#e6e9ee");
+      const h = [2, 4, 7, 3, 6, 8, 4, 2, 5, 3];
+      h.forEach((v, i) => r(x + 3 + i, y + 8 - Math.floor(v / 2), 1, v, "#1f8a8a"));
+    },
+    samples(x, y) {
+      r(x + 1, y + 3, 6, 2, "#1b1c20"); r(x + 1, y + 4, 14, 11, "#1b1c20"); r(x + 2, y + 5, 12, 9, "#f4c542");
+      r(x + 2, y + 4, 5, 1, "#f4c542"); r(x + 2, y + 5, 12, 1, "#ffe08a");
+      [1, 3, 5, 2, 4, 2, 1].forEach((v, i) => r(x + 4 + i, y + 10 - Math.floor(v / 2), 1, v, "#8a6a10"));
+    },
+  };
+
+  const S_FOR = () => (ground.clientWidth < 640 ? 3 : ground.clientWidth >= 1200 ? 5 : 4);
+  let S, L, H, GY, LANE, stops, tags = [], st;
+
+  function layout() {
+    S = S_FOR();
+    L = Math.ceil(ground.clientWidth / S);
+    H = Math.ceil(ground.clientHeight / S);
+    cv.width = L; cv.height = H;
+    cv.style.width = L * S + "px"; cv.style.height = H * S + "px";
+    GY = H - (S === 3 ? 26 : 22);            // icon baseline, in pixels of the art
+    LANE = GY + 5;                         // the courier walks just in front of the icons
+    const narrow = ground.clientWidth < 640;
+    const list = narrow
+      ? [["pc", "Old PC", .1], ["fl", "FL Studio", .4], ["live", "Ableton Live", .63], ["logic", "Logic Pro", .86]]
+      : [["pc", "Old PC", .07], ["fl", "FL Studio", .3], ["live", "Ableton Live", .49], ["logic", "Logic Pro", .68], ["samples", "Samples", .87]];
+    stops = list.map(([icon, name, f]) => ({ icon, name, x: Math.round(f * L) - 8, bounce: 0 }));
+    tags.forEach(t => t.remove());
+    tags = stops.map(sp => {
+      const t = document.createElement("span");
+      t.className = "tag"; t.textContent = sp.name;
+      t.style.left = (sp.x + 8) * S + "px";
+      t.style.top = (GY + 7) * S + "px";
+      ground.appendChild(t);
+      return t;
+    });
+    st = { phase: "carry", target: 1, x: stops[0].x + 14, dir: 1, t: 0, frame: 0, drop: null };
+    if (still) {  // a calm, complete still frame
+      st.x = stops[1].x - 9;
+      tags[1].classList.add("done");
+    }
+    draw();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, L, H);
+    // soft shadows under icons, then the icons
+    stops.forEach(sp => {
+      r(sp.x + 2, GY, 12, 1, "rgba(0,0,0,.22)");
+      ICONS[sp.icon](sp.x, GY - 16 - sp.bounce);
+    });
+    if (st.drop) sprite(BOX, st.drop.x, Math.round(st.drop.y));
+    // courier: 12 wide, 15 tall, feet on GY
+    const moving = st.phase === "carry" || st.phase === "back";
+    const legs = LEGS[moving ? st.frame : 1];
+    const bob = moving && st.frame === 0 ? 1 : 0;
+    const top = LANE - 15 + bob;
+    const flip = st.dir < 0;
+    const x = Math.round(st.x);
+    r(x + 2, LANE, 8, 1, "rgba(0,0,0,.25)");
+    sprite(BODY, x, top, flip);
+    sprite(legs, x, top + 12, flip);
+    if (st.phase === "carry") {
+      sprite(BOX, x + 7, top + 6);                 // crate held out in front
+      r(x + 7, top + 9, 1, 1, PAL.s);              // hand
+    } else {
+      const ay = top + 8 + (moving ? st.frame : 0);
+      r(flip ? x + 2 : x + 8, ay, 1, 2, PAL.s);    // swinging arm
+    }
+  }
+
+  const SPEED = { carry: 34, back: 60 };
+  let last = 0, acc = 0;
+  function tick(now) {
+    const dt = Math.min(0.05, (now - (last || now)) / 1000);
+    last = now;
+    acc += dt;
+    if (acc > 0.16) { acc = 0; st.frame ^= 1; }
+    stops.forEach(sp => { if (sp.bounce) sp.bounce = Math.max(0, sp.bounce - dt * 8); });
+    const tgt = stops[st.target];
+    if (st.phase === "carry") {
+      st.dir = 1;
+      const goal = tgt.x - 9;
+      st.x = Math.min(goal, st.x + SPEED.carry * dt);
+      if (st.x >= goal) { st.phase = "drop"; st.t = 0; st.drop = { x: tgt.x - 1, y: LANE - 15 + 6 }; }
+    } else if (st.phase === "drop") {
+      st.t += dt;
+      st.drop.y = Math.max(GY - 12, st.drop.y - dt * 24);   // lift the crate up into the program
+      if (st.t > 0.45) st.drop.x += dt * 10;
+      if (st.t > 0.85) {
+        st.drop = null; tgt.bounce = 2; tags[st.target].classList.add("done");
+        st.phase = "wait"; st.t = 0;
+      }
+    } else if (st.phase === "wait") {
+      st.t += dt;
+      if (st.t > 0.4) { st.phase = "back"; }
+    } else if (st.phase === "back") {
+      st.dir = -1;
+      const home = stops[0].x + 14;
+      st.x = Math.max(home, st.x - SPEED.back * dt);
+      if (st.x <= home) {
+        st.target += 1;
+        if (st.target >= stops.length) { st.phase = "rest"; st.t = 0; st.dir = 1; }
+        else { st.phase = "carry"; }
+      }
+    } else if (st.phase === "rest") {
+      st.t += dt;
+      if (st.t > 2.6) { tags.forEach(t => t.classList.remove("done")); st.target = 1; st.phase = "carry"; }
+    }
+    draw();
+    if (running) requestAnimationFrame(tick);
+  }
+
+  let running = false;
+  function start() { if (!running && !still) { running = true; last = 0; requestAnimationFrame(tick); } }
+  function stop() { running = false; }
+
+  layout();
+  let rt;
+  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(layout, 150); });
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(es => es.forEach(e => (e.isIntersecting ? start() : stop()))).observe(ground);
+  } else start();
+  document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+})();
+</script>
 
 <script>
 /* Where sign-ups go:

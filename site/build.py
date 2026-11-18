@@ -23,6 +23,9 @@ doc = ("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
 out = here / "deploy"
 out.mkdir(exist_ok=True)
 (out / "index.html").write_text(doc, encoding="utf-8")
+import shutil
+if (here / "assets").is_dir():
+    shutil.copytree(here / "assets", out / "assets", dirs_exist_ok=True)  # images the page uses
 old = here / "index.html"
 if old.exists():
     old.unlink()  # the hostable copy now lives in deploy/
