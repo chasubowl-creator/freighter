@@ -447,13 +447,22 @@ class FullMove(TempDirCase):
         old = self.build_old_computer()
         with as_home(old), quiet():
             code = rm.cmd_rehearse(argparse.Namespace(to=str(old / "rehearsal"), include=[], skip=[]))
-        os.environ.pop("FREIGHTER_HOME", None)
+            self.assertEqual(rm.home(), old, "after rehearsing, the real home folder is back (issue #16)")
+            self.assertIsNone(rm.HIDE)
         self.assertEqual(code, 0)
         report = (old / "rehearsal" / "rehearsal-report.txt").read_text()
         self.assertIn("LOST in the move: 0", report)
         self.assertIn("still found after the move: 3", report)
         self.assertTrue(self.kick.is_file(), "the real files must not be touched")
 
+
+    def test_rehearsal_restores_folders_even_when_it_fails(self):
+        old = self.build_old_computer()
+        with as_home(old), quiet(), mock.patch.object(rm, "cmd_fix_ableton", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                rm.cmd_rehearse(argparse.Namespace(to=str(old / "rehearsal"), include=[], skip=[]))
+            self.assertEqual(rm.home(), old)
+            self.assertIsNone(rm.HIDE)
 
 if __name__ == "__main__":
     unittest.main()

@@ -927,60 +927,69 @@ def cmd_rehearse(args):
     if not bundles:
         sys.exit("Packing produced no bundle.")
 
-    os.environ["FREIGHTER_HOME"] = str(new_home)
-    new_home.mkdir(parents=True, exist_ok=True)
-    HIDE = (_norm_abs(real_home), _norm_abs(base))
-    print("\n== 2/4  Unpack, as the new computer (the old computer's files now count as gone)")
-    cmd_unpack(argparse.Namespace(bundle=str(bundles[-1]), dest_for=[]))
-    print("\n== 3/4  Repair projects")
-    cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
-    cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
+    # act as the new computer until the rehearsal ends, however it ends: later menu choices must use the
+    # real folders again (issue #16)
+    prev_home = os.environ.get("FREIGHTER_HOME")
+    try:
+        os.environ["FREIGHTER_HOME"] = str(new_home)
+        new_home.mkdir(parents=True, exist_ok=True)
+        HIDE = (_norm_abs(real_home), _norm_abs(base))
+        print("\n== 2/4  Unpack, as the new computer (the old computer's files now count as gone)")
+        cmd_unpack(argparse.Namespace(bundle=str(bundles[-1]), dest_for=[]))
+        print("\n== 3/4  Repair projects")
+        cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
+        cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
 
-    print("\n== 4/4  Check every project on the new computer")
-    maps = load_pathmaps(None)
-    roots = project_search_roots(maps, [])
-    totals = {"kept": 0, "lost": 0, "already": 0, "projects": 0, "unchecked": 0}
-    lost, unchecked = [], []
-    for p in find_projects(roots, ".flp") + find_projects(roots, ".als"):
-        kind, refs = project_refs(p)
-        if refs is None:
-            totals["unchecked"] += 1
-            unchecked.append(f"{p}  ({kind})")
-            continue
-        totals["projects"] += 1
-        for r in refs:
-            before = os.path.exists(r)           # on the old computer
-            after = locate(r, maps)[0] != "missing"  # on the new one
-            if not before:
-                totals["already"] += 1
-            elif after:
-                totals["kept"] += 1
-            else:
-                totals["lost"] += 1
-                lost.append(f"{p.name}: {r}")
+        print("\n== 4/4  Check every project on the new computer")
+        maps = load_pathmaps(None)
+        roots = project_search_roots(maps, [])
+        totals = {"kept": 0, "lost": 0, "already": 0, "projects": 0, "unchecked": 0}
+        lost, unchecked = [], []
+        for p in find_projects(roots, ".flp") + find_projects(roots, ".als"):
+            kind, refs = project_refs(p)
+            if refs is None:
+                totals["unchecked"] += 1
+                unchecked.append(f"{p}  ({kind})")
+                continue
+            totals["projects"] += 1
+            for r in refs:
+                before = os.path.exists(r)           # on the old computer
+                after = locate(r, maps)[0] != "missing"  # on the new one
+                if not before:
+                    totals["already"] += 1
+                elif after:
+                    totals["kept"] += 1
+                else:
+                    totals["lost"] += 1
+                    lost.append(f"{p.name}: {r}")
 
-    checked = totals["kept"] + totals["lost"]
-    lines = [
-        f"Freighter {__version__} rehearsal, {dt.datetime.now():%Y-%m-%d %H:%M}",
-        f"Projects checked: {totals['projects']} (+{totals['unchecked']} that can't be checked automatically)",
-        f"Samples that worked before the move: {checked}",
-        f"  still found after the move: {totals['kept']}",
-        f"  LOST in the move: {totals['lost']}",
-        f"Samples already missing before the move (not Freighter's fault): {totals['already']}",
-    ]
-    if lost:
-        lines += ["", "Lost samples (please report these):"] + lost
-    if unchecked:
-        lines += ["", "Not checked automatically:"] + unchecked
-    report = base / "rehearsal-report.txt"
-    report.write_text("\n".join(lines), encoding="utf-8")
-    print("\n" + "\n".join(lines[:6]))
-    verdict = "PASS: every working sample survived the move." if not totals["lost"] else \
-        f"FAIL: {totals['lost']} samples were lost. See {report}"
-    print("\n" + verdict)
-    print(f"Rehearsal files: {base}  (delete this folder when you're done; your real files weren't touched)")
-    HIDE = None
-    return 0 if not totals["lost"] else 2
+        checked = totals["kept"] + totals["lost"]
+        lines = [
+            f"Freighter {__version__} rehearsal, {dt.datetime.now():%Y-%m-%d %H:%M}",
+            f"Projects checked: {totals['projects']} (+{totals['unchecked']} that can't be checked automatically)",
+            f"Samples that worked before the move: {checked}",
+            f"  still found after the move: {totals['kept']}",
+            f"  LOST in the move: {totals['lost']}",
+            f"Samples already missing before the move (not Freighter's fault): {totals['already']}",
+        ]
+        if lost:
+            lines += ["", "Lost samples (please report these):"] + lost
+        if unchecked:
+            lines += ["", "Not checked automatically:"] + unchecked
+        report = base / "rehearsal-report.txt"
+        report.write_text("\n".join(lines), encoding="utf-8")
+        print("\n" + "\n".join(lines[:6]))
+        verdict = "PASS: every working sample survived the move." if not totals["lost"] else \
+            f"FAIL: {totals['lost']} samples were lost. See {report}"
+        print("\n" + verdict)
+        print(f"Rehearsal files: {base}  (delete this folder when you're done; your real files weren't touched)")
+        return 0 if not totals["lost"] else 2
+    finally:
+        HIDE = None
+        if prev_home is None:
+            os.environ.pop("FREIGHTER_HOME", None)
+        else:
+            os.environ["FREIGHTER_HOME"] = prev_home
 
 
 # --------------------------------------------------------------------------- menu (double-click)
