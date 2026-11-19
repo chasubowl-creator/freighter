@@ -408,7 +408,9 @@ def project_sample_folders(items):
         if f is None:
             loose.setdefault(str(path.parent), set()).add(path.name)
         elif f.is_dir() and f != h:
-            folders.setdefault(f, label)
+            if folders.get(f, label) != label:
+                label = "Samples and projects"   # skipping this folder would lose samples too
+            folders[f] = label
 
     # projects outside the packed folders (FL autosave backups aren't projects worth moving on their own)
     for p in flps + alss:
