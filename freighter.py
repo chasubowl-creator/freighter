@@ -43,6 +43,11 @@ THIS_OS = "mac" if rs.IS_MAC else "windows" if rs.IS_WIN else "other"
 BUNDLE_VERSION = 1
 JUNK_FILES = {".ds_store", "thumbs.db", "desktop.ini", "icon\r"}
 SKIP_DIRS = {".trash", "$recycle.bin", "freighter backup", "rig mover backup"}
+REHEARSAL_MARKER = ".freighter-rehearsal"   # in a rehearsal's folder; scans and packs skip that folder
+
+
+def skip_dir(parent, name):
+    return name.lower() in SKIP_DIRS or os.path.exists(os.path.join(parent, name, REHEARSAL_MARKER))
 
 
 def real_home():
@@ -226,7 +231,7 @@ def walk_files(root, left_behind=None):
     for cur, dirs, files in os.walk(root, onerror=lambda e: None):
         keep = []
         for d in dirs:
-            if d.lower() in SKIP_DIRS or os.path.islink(os.path.join(cur, d)):
+            if skip_dir(cur, d) or os.path.islink(os.path.join(cur, d)):
                 continue
             if left_behind is not None and is_program(os.path.join(cur, d)):  # app and plugin bundles are folders
                 left_behind.append(os.path.join(cur, d))
@@ -776,7 +781,7 @@ def find_projects(roots, ext, include_backups=False):
     found = set()
     for root in roots:
         for cur, dirs, files in os.walk(root, onerror=lambda e: None):
-            dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS and not d.startswith(".")
+            dirs[:] = [d for d in dirs if not skip_dir(cur, d) and not d.startswith(".")
                        and (include_backups or d.lower() != "backup")]
             for fn in files:
                 if fn.lower().endswith(ext) and not fn.startswith("._"):
@@ -1086,7 +1091,7 @@ def cmd_rehearse(args):
     """A full move on one computer: pack, unpack into a stand-in 'new computer' folder, repair,
     then check every project's samples. Your real folders are only read, never changed."""
     global HIDE
-    base = (Path(args.to).expanduser() if args.to else rs.app_dir() / "rehearsal").resolve()
+    base = (Path(args.to).expanduser() if args.to else home() / "Music" / "Freighter" / "Rehearsal").resolve()
     drive, new_home = base / "drive", base / "new-computer"
     real_home = home()
     items = pack_items(args.include, set(args.skip))
@@ -1094,6 +1099,7 @@ def cmd_rehearse(args):
                for _r, _a, size in ([(n, None, (Path(it["source_path"]) / n).stat().st_size)
                                      for n in it["only"]] if "only" in it else walk_files(it["source_path"], [])))
     base.mkdir(parents=True, exist_ok=True)
+    (base / REHEARSAL_MARKER).write_text("A Freighter rehearsal. Freighter never packs this folder.\n", encoding="utf-8")
     free = shutil.disk_usage(base).free
     print(f"Rehearsal needs about {rs.human_size(need * 2)} (a bundle plus an unpacked copy); "
           f"{rs.human_size(free)} free here.")
@@ -1339,7 +1345,7 @@ def main():
     s.set_defaults(fn=cmd_check_fl)
 
     s = sub.add_parser("rehearse", help="practice the whole move on this computer, safely")
-    s.add_argument("--to", metavar="FOLDER", help="where to put the rehearsal (default: ./rehearsal)")
+    s.add_argument("--to", metavar="FOLDER", help="where to put the rehearsal (default: Music/Freighter/Rehearsal)")
     s.add_argument("--include", action="append", default=[], metavar="FOLDER")
     s.add_argument("--skip", action="append", default=[], metavar="ID")
     s.set_defaults(fn=cmd_rehearse)

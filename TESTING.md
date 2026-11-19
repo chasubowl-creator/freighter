@@ -32,7 +32,7 @@ pretends the old computer's files are gone, so a pass means the moved copies are
 
 It needs about twice the size of what gets packed (`freighter.py pack --list` shows the total).
 Leave big items out with `--skip ID`, or put it on another drive with `--to /Volumes/DRIVE`.
-Delete the `rehearsal` folder afterwards.
+Delete the `Rehearsal` folder in `Music/Freighter` afterwards.
 
 **On a Windows PC:** same command with `py` instead of `python3`.
 

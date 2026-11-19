@@ -1,7 +1,7 @@
 # Testing Freighter on your Windows PC (about 20 minutes)
 
-Nothing here changes your music files. Freighter only **reads** them, and writes its copies into its
-own folder, which you delete at the end. No Python or other installs needed.
+Nothing here changes your music files. Freighter only **reads** them, and writes its reports and copies
+into `Music\Freighter` in your user folder, which you can delete at the end. No Python or other installs needed.
 
 ---
 
@@ -54,14 +54,15 @@ version" below): `freighter.exe rehearse --to E:\freighter-rehearsal`
 
 ## Step 6: Send the results back
 
-Send these to the Mac (Google Drive is easiest, because Claude can read it directly):
-- `rehearsal\rehearsal-report.txt` (in the same folder as freighter.exe)
-- the `plugins.csv` inside the new `manifest-...` folder
+Send these back (Google Drive or email both work). The window shows where each one was saved:
+- `rehearsal-report.txt`, in `C:\Users\<you>\Music\Freighter\Rehearsal`
+- `plugins.csv`, in the `manifest-...` folder inside `C:\Users\<you>\Music\Freighter\Reports`
+- `freighter-crash.txt`, if Freighter saved one in `Music\Freighter`
 - a photo of anything in the window that looks like an error
 
 ## Step 7: Clean up
 
-Delete the **rehearsal** folder next to freighter.exe. Your real files were never changed.
+Delete the **Rehearsal** folder in `Music\Freighter`. Your real files were never changed.
 
 ---
 

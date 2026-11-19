@@ -46,6 +46,12 @@ def app_dir():
     return Path(__file__).resolve().parent
 
 
+def reports_dir():
+    """Where reports go: Music/Freighter/Reports. Not next to the program, which may be a temporary folder
+    (an .exe run from inside its zip) or read-only."""
+    return Path(os.environ.get("FREIGHTER_HOME") or Path.home()) / "Music" / "Freighter" / "Reports"
+
+
 def human_size(n):
     n = float(n)
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -914,7 +920,7 @@ def main():
     ap.add_argument("--version", action="version", version=f"_Manifest {__version__}")
     ap.add_argument("--compare", metavar="CSV", help="plugins.csv from another computer's scan")
     ap.add_argument("--extra-dir", action="append", default=[], metavar="FOLDER", help="also scan this folder")
-    ap.add_argument("--out", metavar="FOLDER", help="where to write the report (default: next to this script)")
+    ap.add_argument("--out", metavar="FOLDER", help="where to write the report (default: Music/Freighter/Reports)")
     ap.add_argument("--quick", action="store_true", help="skip measuring backup folder sizes")
     ap.add_argument("--no-open", action="store_true", help="don't open the report when done")
     ap.add_argument("--virus-scan", action="store_true",
@@ -944,7 +950,7 @@ def run_scan(out_dir=None, extra_dirs=(), quick=False, compare_csv=None, extra_h
     """Scan, write manifest-report.html + plugins.csv, and return their paths."""
     host = host_name()
     today = dt.date.today().isoformat()
-    out_dir = Path(out_dir) if out_dir else app_dir() / f"manifest-{host}-{today}"
+    out_dir = Path(out_dir) if out_dir else reports_dir() / f"manifest-{host}-{today}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("Scanning plugin folders...", flush=True)

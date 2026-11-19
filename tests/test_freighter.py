@@ -610,6 +610,21 @@ class FullMove(TempDirCase):
         self.assertTrue(self.kick.is_file(), "the real files must not be touched")
 
 
+    def test_a_leftover_rehearsal_is_never_packed(self):
+        """Issue #18: a rehearsal folder left on the Desktop must not be packed by the next move."""
+        old = self.build_old_computer()
+        with as_home(old), quiet():
+            rm.cmd_rehearse(argparse.Namespace(to=str(old / "Desktop" / "my rehearsal"), include=[], skip=[]))
+            items = rm.pack_items([], set())
+        for it in items:
+            self.assertNotIn("my rehearsal", it["source_path"])
+        with as_home(old):
+            self.assertFalse([p for p in rm.find_projects([old], ".als") if "my rehearsal" in str(p)])
+
+    def test_reports_and_rehearsals_default_to_music_freighter(self):
+        with as_home(self.tmp):
+            self.assertEqual(rs.reports_dir(), self.tmp / "Music" / "Freighter" / "Reports")
+
     def test_rehearsal_restores_folders_even_when_it_fails(self):
         old = self.build_old_computer()
         with as_home(old), quiet(), mock.patch.object(rm, "cmd_fix_ableton", side_effect=RuntimeError("boom")):

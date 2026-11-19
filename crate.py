@@ -531,7 +531,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("preview", help="show what would go where (changes nothing)")
     s.add_argument("folders", nargs="+")
-    s.add_argument("--out", metavar="FOLDER", help="where to write the preview (default: next to this program)")
+    s.add_argument("--out", metavar="FOLDER", help="where to write the preview (default: Music/Freighter Crate preview)")
     s.add_argument("--no-open", action="store_true")
     s = sub.add_parser("build", help="build the sorted library")
     s.add_argument("folders", nargs="+")
@@ -551,8 +551,8 @@ def main():
         print("No audio or MIDI files found.")
         return 0
     if args.cmd == "preview":
-        here = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-        page = write_report(items, Path(args.out) if args.out else here / "crate-preview", "_Crate preview")
+        page = write_report(items, Path(args.out) if args.out else default_library().parent / "Freighter Crate preview",
+                            "_Crate preview")
         counts = {}
         for it in items:
             if not it["duplicate_of"]:
