@@ -1,0 +1,126 @@
+# Freighter: the path to release
+
+Every task links to its GitHub issue, where the details live (what, why, where in the code, and when it's done).
+Tick the box here when the issue closes.
+
+**Size:** S = under a day · M = a few days · L = a week or more. **Who:** Claude (code and docs) or You (decisions, testing on your machines, accounts).
+
+## Decisions so far
+
+- **Free.** No paid tier or subscription.
+- **Open source under GPL-3.0.** The repo goes public once the history is clean.
+- **1.0 is a browser-based app.** Double-click Freighter and it opens in your web browser. It runs only on your computer.
+- **1.0 moves through an external drive.** Computer-to-computer over the network comes in 1.1.
+- **FL Studio and Ableton Live,** on Windows and Mac, in any direction.
+- **Company name: Samplistics.** The tools are _Freighter, _Manifest and _Crate. The trademark and domain checks are in M5.
+
+## M0 · Ready to go public ([issues](https://github.com/chasubowl-creator/freighter/milestone/1))
+
+*about 1 day.* Clean the history, license it, give it a version, and open the code.
+
+- [ ] Remove personal details from the git history (#1) · S · Claude + you
+- [ ] Make the repository public (#2) · S · You (Claude can flip it)
+- [ ] Add the GPL-3.0 license and a contributions note (#3) · S · Claude
+- [ ] Version number, --version and a changelog (#4) · S · Claude
+- [ ] Move the project into a permanent folder on the Mac (#5) · S · You choose, Claude moves
+
+**Done when:** The repository is public under GPL-3.0, with no personal details in its history, and has a version number and changelog.
+
+## M1 · Never lose or skip a file ([issues](https://github.com/chasubowl-creator/freighter/milestone/2))
+
+*about 1 week.* Fix every way the mover can silently skip, lose or misplace a producer's files.
+
+- [ ] Find the real Desktop, Documents and Music folders on Windows (OneDrive) (#6) · M · Claude
+- [ ] Samples sitting at the top of a drive are skipped (#7) · S · Claude
+- [ ] Projects that use no outside samples aren't packed (#8) · M · Claude
+- [ ] The Ableton User Library can be packed twice (#9) · S · Claude
+- [ ] Long Windows paths (over 260 characters) and network drives (#10) · M · Claude
+- [ ] External drive problems: FAT32 4 GB limit, name clashes, ._ files, read-only drives (#11) · M · Claude
+- [ ] Refuse to unpack, or build a Crate library, without enough free space (#12) · S · Claude
+- [ ] Match accented file names between Mac and Windows (#13) · S · Claude
+- [ ] Check the bundle version on unpack (#14) · S · Claude
+- [ ] Report samples that were already missing on the old computer (#15) · S · Claude
+- [ ] Rehearse leaves the menu pointed at the rehearsal folder (#16) · S · Claude
+- [ ] Crashes close the window before anyone can read them (#17) · S · Claude
+- [ ] Write reports and rehearsals to a sensible, writable place (#18) · S · Claude
+- [ ] Make Ableton repairs safe if the computer stops mid-write (#19) · S · Claude
+- [ ] Tests for cross-OS moves, and run scan in CI (#20) · M · Claude
+
+**Done when:** Every fix has a test, CI is green on Windows and Mac, and nothing is ever skipped without being reported.
+
+## M2 · Proven on real computers ([issues](https://github.com/chasubowl-creator/freighter/milestone/3))
+
+*about 1 week, mostly you.* Run Freighter on real Windows and Mac setups, including a full move, and fix what turns up.
+
+- [ ] Tidy the tester docs (#21) · S · Claude
+- [ ] Run the Windows test on your current PC (#22) · M · You
+- [ ] Fix whatever the Windows test turns up (#23) · M · Claude
+- [ ] Do one real move: Windows PC → drive → Mac (#24) · M · You
+- [ ] Ask 2–3 producer friends to run a rehearsal (#25) · S · You
+
+**Done when:** Zero lost samples in every rehearsal and in one real Windows → Mac move.
+
+## M3 · The 1.0 app ([issues](https://github.com/chasubowl-creator/freighter/milestone/4))
+
+*about 2–3 weeks.* Double-click Freighter and a clean app opens in the browser: old computer, new computer, plugins, Crate.
+
+- [ ] Browser app: local server, security and shutdown (#26) · L · Claude
+- [ ] App: old-computer screens (scan, choose, pack) (#27) · L · Claude
+- [ ] App: new-computer screens (unpack, repair, results) (#28) · L · Claude
+- [ ] App: plugins screen with the reinstall checklist (#29) · M · Claude
+- [ ] Plugin maker download links and a license-deactivation checklist (#30) · M · Claude
+- [ ] Move third-party plugin presets (#31) · M · Claude
+- [ ] Repair Ableton device presets and clips (.adg, .alc) (#32) · S · Claude
+- [ ] FL Studio: point it at the moved sample folders (#33) · M · Claude
+- [ ] App: Crate screen (#34) · S · Claude
+- [ ] Usability test with a non-technical producer (#35) · S · You
+
+**Done when:** A non-technical producer completes a move without help.
+
+## M4 · Ship it ([issues](https://github.com/chasubowl-creator/freighter/milestone/5))
+
+*about 1 week.* Real downloads: tagged GitHub Releases, Mac builds that open, free Windows signing, update check, feedback.
+
+- [ ] Release builds on version tags (GitHub Releases) (#36) · M · Claude
+- [ ] A Mac build that opens on every Mac (#37) · M · Claude
+- [ ] Free Windows code signing (SignPath Foundation) (#38) · M · You apply, Claude wires CI
+- [ ] Download and first-run instructions (#39) · S · Claude
+- [ ] Check for updates button (#40) · S · Claude
+- [ ] Feedback: issue templates and a "Report a problem" link (#41) · S · Claude
+
+**Done when:** Pushing a version tag produces downloadable Windows and Mac builds that open with documented steps.
+
+## M5 · Site and launch ([issues](https://github.com/chasubowl-creator/freighter/milestone/6))
+
+*about 3–5 days.* Honest, private, live site with a download button, then the public beta and 1.0.
+
+- [ ] Privacy note and self-hosted fonts (#42) · S · Claude
+- [ ] Back up or remove the "Unsubscribe anytime" promise (#43) · S · Claude
+- [ ] Download button, GitHub and contact links (#44) · S · Claude
+- [ ] Make the page's claims match what the app does (#45) · S · Claude
+- [ ] Small site copy fixes (#46) · S · Claude
+- [ ] Lock in the Samplistics name and domain (#47) · S · You (Claude updates the site and app)
+- [ ] Put the site live on Netlify (#48) · S · You
+- [ ] Beta launch: email the waitlist and post to producer communities (#49) · M · You (Claude drafts)
+- [ ] Release 1.0 (#50) · S · Claude + you
+
+**Done when:** 10–20 beta testers finish moves with zero data loss, every bug is closed, and v1.0.0 is tagged.
+
+## After 1.0 ([issues](https://github.com/chasubowl-creator/freighter/milestone/7))
+
+*later.* What comes once 1.0 is out, starting with network transfer in 1.1.
+
+- [ ] Network transfer: move computer to computer without a drive (1.1) (#51) · L · Claude
+- [ ] Samples loaded inside FL plugins (FPC, Slicex, DirectWave) (#52) · L · Claude
+- [ ] Ableton Live 10 and older projects (#53) · M · Claude
+- [ ] More DAWs, picked by the waitlist (#54) · L · Claude
+- [ ] Desktop app (Tauri) (#55) · L · Claude
+- [ ] Decide on optional paid extras (#56) · S · You
+
+**Done when:** Picked and ordered using beta feedback and the waitlist's DAW answers.
+
+## How the work proceeds
+
+1. Milestones go in order. Inside a milestone, Claude tasks can run while You tasks wait on you.
+2. Each fix lands as its own commit with a test, and the commit message says `Fixes #N` so the issue closes itself.
+3. New problems found in testing become new issues in the milestone where they block.

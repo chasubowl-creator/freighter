@@ -15,6 +15,8 @@ FL Studio and Ableton Live. Windows and Mac, in any direction. Free, and everyth
 
 Testing on a Windows PC, step by step: [WINDOWS-TEST.md](WINDOWS-TEST.md). The full walkthrough for a real move is in [MOVING-FROM-WINDOWS.md](MOVING-FROM-WINDOWS.md).
 
+What's left before release, in order: [ROADMAP.md](ROADMAP.md).
+
 ## Files
 
 | Path | What it is |
