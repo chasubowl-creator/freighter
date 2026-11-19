@@ -251,9 +251,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             webbrowser.open(Path(target).resolve().as_uri())
             return self.send(200, {"ok": True})
         if path == "/api/quit":
-            self.send(200, {"ok": True})
-            self.app.stopped.set()
-            return None
+            self.app.stopped.set()   # before answering, so whoever sees the answer sees Freighter stopping
+            return self.send(200, {"ok": True})
         return self.send(404, {"error": "not found"})
 
 
