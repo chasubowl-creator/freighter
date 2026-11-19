@@ -28,6 +28,10 @@ What's left before release, in order: [ROADMAP.md](ROADMAP.md).
 | `.github/workflows/tests.yml` | Runs the tests on Windows and macOS for every change |
 | `site/` | Landing page: `landing.html` is the source, `python3 build.py` makes `deploy/` for Netlify |
 | `TESTING.md` | How Freighter is tested |
+| `freighter_version.py` | The version number all three tools share |
+| `CHANGELOG.md` | What changed in each version |
+| `ROADMAP.md` | What's left before release, in order |
+| `LICENSE` | GPL-3.0 |
 
 Needs only Python 3.8 or newer. No other packages.
 

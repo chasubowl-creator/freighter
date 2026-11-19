@@ -35,6 +35,8 @@ import wave
 import webbrowser
 from pathlib import Path
 
+from freighter_version import __version__
+
 AUDIO_EXTS = {".wav", ".wave", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a"}
 MIDI_EXTS = {".mid", ".midi"}
 SKIP_DIRS = {"__macosx", ".trash", "$recycle.bin", "freighter crate", "freighter backup"}
@@ -383,7 +385,8 @@ def write_report(items, out_dir, title):
         more = f"<li>&hellip; and {len(cats[cat]) - 400} more</li>" if len(cats[cat]) > 400 else ""
         h.append(f"<details><summary>{html.escape(cat)} ({len(cats[cat])})</summary><ul>{lis}{more}</ul></details>")
     h.append("<p class=note>Nothing has been changed. Your originals stay where they are; building the library adds "
-             "links (or copies) in a separate folder.</p></main>")
+             "links (or copies) in a separate folder.</p>"
+             f"<p class=sub>Made by _Crate {__version__}, part of Freighter.</p></main>")
     page = out_dir / "crate-preview.html"
     page.write_text("".join(h), encoding="utf-8")
     (out_dir / "crate-plan.json").write_text(json.dumps(items, indent=1), encoding="utf-8")
@@ -457,6 +460,7 @@ def build(items, library, copy, by="genre"):
         links += how == "link"
         copies += how == "copy"
         log["created"].append({"path": str(dst), "source": str(src), "how": how})
+    log["version"] = __version__
     log["last_build"] = dt.datetime.now().isoformat(timespec="seconds")
     log_path.write_text(json.dumps(log, indent=1), encoding="utf-8")
     return made, links, copies, skipped
@@ -499,6 +503,7 @@ def undo(library):
 def main():
     ap = argparse.ArgumentParser(description="Sort drum kits and sample packs into a tidy library.",
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    ap.add_argument("--version", action="version", version=f"_Crate {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("preview", help="show what would go where (changes nothing)")
     s.add_argument("folders", nargs="+")

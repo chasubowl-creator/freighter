@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import manifest as rs  # noqa: E402
+from freighter_version import __version__  # noqa: E402
 
 THIS_OS = "mac" if rs.IS_MAC else "windows" if rs.IS_WIN else "other"
 BUNDLE_VERSION = 1
@@ -358,7 +359,7 @@ def cmd_pack(args):
     shutil.copy2(bundle / "manifest-report" / "plugins.csv", bundle / "plugins.csv")
 
     manifest = {
-        "bundle_version": BUNDLE_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"),
+        "bundle_version": BUNDLE_VERSION, "freighter_version": __version__, "created": dt.datetime.now().isoformat(timespec="seconds"),
         "source_host": host, "source_os": THIS_OS, "source_home": str(home()),
         "items": [{k: v for k, v in it.items() if not k.startswith("_")} for it in items],
     }
@@ -394,6 +395,7 @@ def cmd_pack(args):
 
     if left_behind:
         (bundle / "left-behind.txt").write_text(
+            f"Freighter {__version__}\n\n"
             "Programs, installers and plugin files left out of this move. Reinstall software from its maker;\n"
             "installers found in sample folders are a common way malware spreads.\n\n" + "\n".join(left_behind),
             encoding="utf-8")
@@ -401,7 +403,7 @@ def cmd_pack(args):
     if left_behind:
         print(f"{len(left_behind)} programs or installers were left behind; see left-behind.txt.")
     if errors:
-        (bundle / "pack-errors.txt").write_text("\n".join(errors), encoding="utf-8")
+        (bundle / "pack-errors.txt").write_text("\n".join([f"Freighter {__version__}", ""] + errors), encoding="utf-8")
         print(f"{len(errors)} files couldn't be copied; see pack-errors.txt. Run the same command again to retry.")
     print("Next, on the new computer:  python3 freighter.py unpack \"" + str(bundle) + "\"")
     return 0
@@ -481,7 +483,7 @@ def cmd_unpack(args):
     if (bundle / "plugins.csv").is_file():
         shutil.copy2(bundle / "plugins.csv", landing / f"plugins-{src_host}.csv")
 
-    lines = [f"Freighter unpack from {src_host} ({manifest['source_os']}) on {pathmap['created']}", ""]
+    lines = [f"Freighter {__version__} unpack from {src_host} ({manifest['source_os']}) on {pathmap['created']}", ""]
     lines += [f"{e['label']}: {e['old']} -> {e['new']}" for e in entries]
     if conflicts:
         lines += ["", "Files that already existed here with different contents. The moved copy was saved",
@@ -675,7 +677,7 @@ def cmd_fix_ableton(args):
     projects = find_projects(roots, ".als")
     print(f"Found {len(projects)} projects.\n")
     totals = {"fixed": 0, "ok": 0, "missing": 0, "old": 0, "changed": 0}
-    report = []
+    report = [f"Freighter {__version__} Ableton repair, {dt.datetime.now():%Y-%m-%d %H:%M}", ""]
     for p in projects:
         try:
             r = fix_als(p, maps, args.dry_run)
@@ -772,7 +774,8 @@ def cmd_check_fl(args):
     projects = find_projects(roots, ".flp", include_backups=args.include_backups)
     print(f"Found {len(projects)} projects.\n")
     counts = {"ok": 0, "builtin": 0, "moved": 0, "missing": 0}
-    unreadable, report, add_folders = [], [], set()
+    unreadable, add_folders = [], set()
+    report = [f"Freighter {__version__} FL Studio check, {dt.datetime.now():%Y-%m-%d %H:%M}", ""]
     for p in projects:
         try:
             version, samples = flp_samples(p)
@@ -941,7 +944,7 @@ def cmd_rehearse(args):
 
     checked = totals["kept"] + totals["lost"]
     lines = [
-        f"Freighter rehearsal, {dt.datetime.now():%Y-%m-%d %H:%M}",
+        f"Freighter {__version__} rehearsal, {dt.datetime.now():%Y-%m-%d %H:%M}",
         f"Projects checked: {totals['projects']} (+{totals['unchecked']} that can't be checked automatically)",
         f"Samples that worked before the move: {checked}",
         f"  still found after the move: {totals['kept']}",
@@ -966,7 +969,7 @@ def cmd_rehearse(args):
 # --------------------------------------------------------------------------- menu (double-click)
 
 MENU = """
-  _Freighter  move your studio to a new computer
+  _Freighter {version}  move your studio to a new computer
 
   On the OLD computer
     1  Scan my plugins (_Manifest report)
@@ -997,7 +1000,7 @@ def ask_path(prompt):
 
 def interactive_menu():
     while True:
-        print(MENU)
+        print(MENU.format(version=__version__))
         choice = input("  Choose 1-7 (or q): ").strip().lower()
         try:
             if choice == "1":
@@ -1048,6 +1051,7 @@ def interactive_menu():
 def main():
     ap = argparse.ArgumentParser(description="Move a music setup between computers.",
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    ap.add_argument("--version", action="version", version=f"Freighter {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("scan", help="plugin report plus a list of your projects")

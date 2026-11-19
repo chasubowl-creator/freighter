@@ -61,13 +61,15 @@ jobs:
       - name: The built programs run
         shell: bash
         run: |
+          v=$(python -c 'import freighter_version as v; print(v.__version__)' | tr -d '\r')
+          for t in freighter manifest crate; do ./dist/$t --version | tr -d '\r' | grep -q " $v$"; done
           ./dist/freighter pack --list
           ./dist/manifest --no-open --quick --out smoke-scan
           ./dist/crate preview tests --no-open --out smoke-crate
           printf 'q\n' | ./dist/freighter
-      - name: Add the Windows test guide
+      - name: Add the Windows test guide, license and changelog
         shell: bash
-        run: cp WINDOWS-TEST.md dist/
+        run: cp WINDOWS-TEST.md LICENSE CHANGELOG.md dist/
       - uses: actions/upload-artifact@v4
         with:
           name: freighter-${{ matrix.name }}

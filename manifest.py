@@ -31,6 +31,8 @@ import sys
 import webbrowser
 from pathlib import Path
 
+from freighter_version import __version__
+
 IS_MAC = sys.platform == "darwin"
 IS_WIN = os.name == "nt"
 HOME = Path.home()
@@ -888,7 +890,7 @@ def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title, safe
                  f"<td>{e(p['version'])}</td><td>{e(p['archs'])}</td><td>{e(p.get('signer') or SIG_LABEL.get(p.get('signature') or '', ''))}</td><td data-v={p['size']}>{e(human_size(p['size']))}</td>"
                  f"<td>{e(p['modified'])}</td><td class=path>{e(p['path'])}</td></tr>")
     h.append("</tbody></table></div>")
-    h.append("<footer>Made by _Manifest, part of Freighter. It reads plugin info files only, never loads plugins, and sends nothing "
+    h.append(f"<footer>Made by _Manifest {__version__}, part of Freighter. It reads plugin info files only, never loads plugins, and sends nothing "
              "anywhere. Plugins in custom folders: rerun with --extra-dir \"FOLDER\".</footer>")
     h.append(f"<script>{JS}</script></main></body></html>")
     return "".join(h)
@@ -909,6 +911,7 @@ def write_csv(plugins, path):
 
 def main():
     ap = argparse.ArgumentParser(description="List installed audio plugins and write a plugin report.")
+    ap.add_argument("--version", action="version", version=f"_Manifest {__version__}")
     ap.add_argument("--compare", metavar="CSV", help="plugins.csv from another computer's scan")
     ap.add_argument("--extra-dir", action="append", default=[], metavar="FOLDER", help="also scan this folder")
     ap.add_argument("--out", metavar="FOLDER", help="where to write the report (default: next to this script)")
