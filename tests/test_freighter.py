@@ -464,5 +464,25 @@ class FullMove(TempDirCase):
             self.assertEqual(rm.home(), old)
             self.assertIsNone(rm.HIDE)
 
+
+class Menu(TempDirCase):
+    def test_a_crash_keeps_the_window_open_and_saves_a_report(self):
+        answers = iter(["2", "", "q"])
+        with as_home(self.tmp), quiet(), \
+                mock.patch("builtins.input", lambda *_: next(answers)), \
+                mock.patch.object(rm, "cmd_pack", side_effect=ValueError("disk on fire")):
+            code = rm.interactive_menu()
+        self.assertEqual(code, 0, "the menu came back after the error instead of closing")
+        report = (self.tmp / "Music" / "Freighter" / "freighter-crash.txt").read_text()
+        self.assertIn(f"Freighter {rm.__version__}", report)
+        self.assertIn("ValueError: disk on fire", report)
+        self.assertIn("Menu choice: 2", report)
+
+    def test_closed_input_quits(self):
+        def closed(*_):
+            raise EOFError
+        with quiet(), mock.patch("builtins.input", closed):
+            self.assertEqual(rm.interactive_menu(), 0)
+
 if __name__ == "__main__":
     unittest.main()

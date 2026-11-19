@@ -1024,10 +1024,37 @@ def ask_path(prompt):
     return raw
 
 
+def write_crash_report(choice):
+    """Save what went wrong, so a tester can send it in. Returns the file's path."""
+    import platform
+    import tempfile
+    import traceback
+    text = "\n".join([
+        f"Freighter {__version__} crash report, {dt.datetime.now():%Y-%m-%d %H:%M:%S}",
+        f"System: {platform.platform()}, Python {platform.python_version()}"
+        + (", built program" if getattr(sys, "frozen", False) else ""),
+        f"Menu choice: {choice}",
+        "",
+        traceback.format_exc(),
+    ])
+    for folder in (home() / "Music" / "Freighter", Path(tempfile.gettempdir())):
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / "freighter-crash.txt"
+            path.write_text(text, encoding="utf-8")
+            return path
+        except OSError:
+            continue
+    return None
+
+
 def interactive_menu():
     while True:
         print(MENU.format(version=__version__))
-        choice = input("  Choose 1-7 (or q): ").strip().lower()
+        try:
+            choice = input("  Choose 1-7 (or q): ").strip().lower()
+        except EOFError:   # nothing more to read (input closed): same as quitting
+            return 0
         try:
             if choice == "1":
                 html_path, _ = rs.run_scan()
@@ -1069,7 +1096,18 @@ def interactive_menu():
         except SystemExit as e:  # commands exit with a message on problems; show it and keep the menu
             if e.code not in (None, 0):
                 print(f"\n  {e.code}")
-        input("\n  Press Enter to go back to the menu...")
+        except KeyboardInterrupt:
+            print("\n  Stopped.")
+        except Exception as e:  # never let an error close a double-clicked window before it can be read
+            report = write_crash_report(choice)
+            print(f"\n  Something went wrong: {type(e).__name__}: {e}")
+            if report:
+                print(f"  The details are saved in {report}")
+                print("  Please send that file with a bug report: https://github.com/chasubowl-creator/freighter/issues/new")
+        try:
+            input("\n  Press Enter to go back to the menu...")
+        except EOFError:
+            return 0
 
 
 # --------------------------------------------------------------------------- main
