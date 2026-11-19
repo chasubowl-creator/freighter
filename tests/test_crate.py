@@ -97,6 +97,28 @@ class Names(unittest.TestCase):
         self.assertIsNone(crate.find_key("clp_scorch"))
 
 
+class Genres(unittest.TestCase):
+    def test_from_pack_names(self):
+        cases = {
+            "UNDRGRND Sounds - Deep Tech House - Wav": "Tech House",
+            "UNDRGRND Sounds - Organic House - Wav": "House",
+            "deep_house_drum_samples": "House",
+            "UNRGND Sounds - Classic UK Garage Presets": "UK Garage",
+            "JERZY CLUB": "Jersey Club",
+            "OPIUM": "Trap",
+            "THE SAUCE - METROOO": "Trap",
+            "Boom Bap Essentials": "Hip-Hop",
+            "UK Drill Kit": "Drill",
+        }
+        for pack, want in cases.items():
+            self.assertEqual(crate.genre_of(pack), (want, "name"), pack)
+
+    def test_tempo_guess_and_fallback(self):
+        self.assertEqual(crate.genre_of("Deep Grooves", [123] * 20), ("House", "tempo"))
+        self.assertEqual(crate.genre_of("CONTROL", [134] * 20), ("Techno", "tempo"))
+        self.assertEqual(crate.genre_of("Mystery Kit", [140, None]), ("Other", "none"))   # too few tempos to guess
+
+
 class Sound(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="crate-test-"))
@@ -139,12 +161,12 @@ class BuildAndUndo(unittest.TestCase):
         self.assertEqual(sum(1 for i in items if i["duplicate_of"]), 1)
         made, links, copies, skipped = crate.build(items, lib, copy=False)
         self.assertEqual((made, skipped), (4, 1))
-        kicks = list((lib / "Drums" / "Kicks").iterdir())
+        self.assertTrue((lib / "Other" / "KitA" / "Drums" / "Kicks").is_dir(), "default layout: Genre/Pack/type")
+        kicks = list((lib / "Other" / "KitA" / "Drums" / "Kicks").iterdir())
         self.assertEqual(len(kicks), 1)
         self.assertTrue(os.path.samefile(kicks[0], self.kick) or links == 0)
-        snares = sorted(p.name for p in (lib / "Drums" / "Snares").iterdir())
-        self.assertEqual(snares, ["snare (KitB).wav", "snare.wav"])
-        self.assertTrue((lib / "MIDI" / "KitA" / "riff.mid").is_file())
+        self.assertTrue((lib / "Other" / "KitB" / "Drums" / "Snares" / "snare.wav").is_file())
+        self.assertTrue((lib / "Other" / "KitA" / "MIDI" / "riff.mid").is_file())
         # building again adds nothing new
         self.assertEqual(crate.build(items, lib, copy=False)[0], 0)
         before = sorted(p.name for p in self.src.rglob("*") if p.is_file())
@@ -152,9 +174,17 @@ class BuildAndUndo(unittest.TestCase):
         self.assertFalse(lib.exists(), "the library folder is removed when it's empty")
         self.assertEqual(sorted(p.name for p in self.src.rglob("*") if p.is_file()), before, "originals untouched")
 
+    def test_by_type_layout(self):
+        lib = self.tmp / "Library"
+        crate.build(crate.plan([self.src]), lib, copy=False, by="type")
+        snares = sorted(p.name for p in (lib / "Drums" / "Snares").iterdir())
+        self.assertEqual(snares, ["snare (KitB).wav", "snare.wav"])
+        self.assertTrue((lib / "MIDI" / "KitA" / "riff.mid").is_file())
+        crate.undo(lib)
+
     def test_copy_mode(self):
         lib = self.tmp / "Library"
-        made, links, copies, _ = crate.build(crate.plan([self.src]), lib, copy=True)
+        made, links, copies, _ = crate.build(crate.plan([self.src]), lib, copy=True, by="type")
         self.assertEqual((links, copies), (0, made))
         k = next((lib / "Drums" / "Kicks").iterdir())
         self.assertFalse(os.path.samefile(k, self.kick))

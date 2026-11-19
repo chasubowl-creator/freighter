@@ -11,6 +11,11 @@ originals. Across drives it copies instead. Everything it creates is logged, so 
         options: --to FOLDER (library location), --copy (real copies instead of links)
   python3 crate.py undo                                       remove what the last build created
 
+The library is grouped by genre, then by pack, then by sound type:
+  House/UNDRGRND Sounds - Organic House - Wav/Drums/Kicks/...    (--by type drops the genre and pack levels)
+A pack's genre comes from its name (house, trap, UK garage...). Packs whose name doesn't say get a guess from
+their loops' tempo, marked as a guess in the report; packs with neither go in "Other".
+
 Sorting uses the file name first, then its folder names, then (for unlabelled WAVs) the sound itself:
 how long it is and how noisy or boomy it is. Sound-based guesses are marked as guesses in the report.
 Needs only Python 3.8+.
@@ -72,6 +77,43 @@ LOOP_RULES = [
 LOOP_WORDS = {"loop", "loops", "lp", "break", "breaks"}
 ONE_SHOT_WORDS = {"oneshot", "oneshots", "shot", "shots", "hit", "hits"}
 NOT_BPM = {808, 909, 707, 606, 303}
+
+
+# a pack's genre, from its folder name. First match wins, so "tech house" is checked before "house".
+GENRE_RULES = [
+    ("Tech House",    r"tech ?house"),
+    ("UK Garage",     r"uk ?garage|\bukg\b|\b2 ?step\b|\bgarage\b"),
+    ("Jersey Club",   r"jersey|jerzy|\bclub\b"),
+    ("Drum & Bass",   r"drum ?(and|&|n) ?bass|\bdnb\b|\bjungle\b"),
+    ("Drill",         r"\bdrill\b"),
+    ("Trap",          r"\btrap\b|\brage\b|\bopium\b|\bmetro+\b|\b808 ?mafia\b|\bplugg?\b"),
+    ("Hip-Hop",       r"hip ?hop|boom ?bap|\brap\b"),
+    ("Lo-Fi",         r"lo ?fi\b"),
+    ("R&B",           r"\br ?(&|n|and) ?b\b|\brnb\b"),
+    ("Afro",          r"\bafro|amapiano"),
+    ("Techno",        r"\btechno\b"),
+    ("Dubstep",       r"dubstep|\bdub\b|riddim"),
+    ("House",         r"house"),
+    ("Pop",           r"\bpop\b"),
+]
+
+
+def genre_of(pack, bpms=()):
+    """(genre, how) for a pack: how is 'name', 'tempo' (a guess) or 'none'."""
+    name = re.sub(r"[_\-.]+", " ", pack.lower())
+    for genre, pattern in GENRE_RULES:
+        if re.search(pattern, name):
+            return genre, "name"
+    bpms = sorted(b for b in bpms if b)
+    if len(bpms) >= 10:
+        mid = bpms[len(bpms) // 2]
+        if 110 <= mid <= 128:
+            return "House", "tempo"
+        if 129 <= mid <= 140:
+            return "Techno", "tempo"
+        if mid >= 141 or mid <= 100:
+            return "Trap", "tempo"
+    return "Other", "none"
 
 
 def tokens(text):
@@ -280,6 +322,12 @@ def plan(folders):
         pack = p.relative_to(root).parts[0] if len(p.relative_to(root).parts) > 1 else root.name
         items.append({"path": str(p), "name": p.name, "pack": pack, "category": cat, "how": how,
                       "bpm": bpm, "key": key, "duplicate_of": dup_of.get(str(p))})
+    bpms = {}
+    for it in items:
+        bpms.setdefault(it["pack"], []).append(it["bpm"])
+    genres = {pack: genre_of(pack, b) for pack, b in bpms.items()}
+    for it in items:
+        it["genre"], it["genre_how"] = genres[it["pack"]]
     return items
 
 
@@ -311,7 +359,17 @@ def write_report(items, out_dir, title):
     h.append(f"<h1><span class=u>_</span>Crate</h1><p class=sub>{len(items)} files &middot; "
              f"{len(items) - len(dups)} unique &middot; {len(dups)} duplicates skipped &middot; "
              f"{len(guessed)} sorted by sound (guesses)</p>")
-    h.append("<h2>Where everything goes</h2><div class=bars>")
+    packs = {}
+    for it in items:
+        if not it["duplicate_of"] and it.get("genre"):
+            packs.setdefault(it["genre"], {}).setdefault(it["pack"], [0, it["genre_how"]])[0] += 1
+    if packs:
+        h.append("<h2>Packs by genre</h2>")
+        for g in sorted(packs, key=lambda g: (g == "Other", g)):
+            lis = "".join(f"<li>{html.escape(pk)} ({n})" + (" <span class=tag>genre guessed from tempo</span>" if how == "tempo" else "")
+                          + "</li>" for pk, (n, how) in sorted(packs[g].items(), key=lambda kv: kv[0].lower()))
+            h.append(f"<details open><summary>{html.escape(g)}</summary><ul>{lis}</ul></details>")
+    h.append("<h2>Sound types</h2><div class=bars>")
     for cat in sorted(cats, key=lambda c: (c.startswith("Unsorted"), c)):
         n = len(cats[cat])
         h.append(f"<div class=bar><span>{html.escape(cat)}</span><i style='width:{max(2, n / top * 100):.1f}%'></i><span>{n}</span></div>")
@@ -362,7 +420,16 @@ def place(src, dst, copy):
     return "copy"
 
 
-def build(items, library, copy):
+def folder_for(it, library, by="genre"):
+    parts = it["category"].split("/")
+    if by == "genre":
+        parts = [it.get("genre") or "Other", it["pack"]] + parts
+    elif it["category"] == "MIDI":
+        parts = parts + [it["pack"]]
+    return library.joinpath(*[safe_part(p) for p in parts])
+
+
+def build(items, library, copy, by="genre"):
     library.mkdir(parents=True, exist_ok=True)
     log_path = library / "crate-log.json"
     log = json.loads(log_path.read_text(encoding="utf-8")) if log_path.is_file() else {"created": []}
@@ -372,9 +439,7 @@ def build(items, library, copy):
             skipped += 1
             continue
         src = Path(it["path"])
-        folder = library.joinpath(*[safe_part(p) for p in it["category"].split("/")])
-        if it["category"] == "MIDI":
-            folder = folder / safe_part(it["pack"])
+        folder = folder_for(it, library, by)
         name = safe_part(src.name)
         dst = folder / name
         for n in range(0, 50):
@@ -443,6 +508,8 @@ def main():
     s.add_argument("folders", nargs="+")
     s.add_argument("--to", metavar="FOLDER", help="library location (default: Music/Freighter Crate)")
     s.add_argument("--copy", action="store_true", help="make real copies instead of links")
+    s.add_argument("--by", choices=("genre", "type"), default="genre",
+                   help="genre: Genre/Pack/Kicks... (default); type: Kicks... with every pack mixed together")
     s = sub.add_parser("undo", help="remove what builds created")
     s.add_argument("--to", metavar="FOLDER", help="library location (default: Music/Freighter Crate)")
     args = ap.parse_args()
@@ -468,7 +535,7 @@ def main():
             webbrowser.open(page.as_uri())
         return 0
     library = Path(args.to).expanduser() if args.to else default_library()
-    made, links, copies, skipped = build(items, library, args.copy)
+    made, links, copies, skipped = build(items, library, args.copy, args.by)
     write_report(items, library, "_Crate library")
     print(f"\nLibrary: {library}\n{made} files added ({links} links, {copies} copies), {skipped} duplicates skipped."
           f"\nYour originals weren't touched. To remove the library: crate.py undo"
