@@ -32,6 +32,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -280,12 +281,28 @@ def walk_files(root, left_behind=None):
             yield rel, ap, st.st_size
 
 
+# The app watches long jobs through this: set PROGRESS.listener(label, done, total) on the job's thread.
+# A listener may raise Cancelled to stop the job; an interrupted pack resumes where it stopped.
+PROGRESS = threading.local()
+
+
+class Cancelled(Exception):
+    pass
+
+
+def report_progress(label, done, total):
+    listener = getattr(PROGRESS, "listener", None)
+    if listener:
+        listener(label, done, total)
+
+
 class Progress:
     def __init__(self, total_bytes, label):
         self.total, self.done, self.label, self.last, self.start = total_bytes, 0, label, 0.0, time.time()
 
     def add(self, n):
         self.done += n
+        report_progress(self.label, self.done, self.total)
         now = time.time()
         if now - self.last > 2 or self.done >= self.total:
             self.last = now
@@ -437,7 +454,9 @@ def say_missing(missing, where=None):
     lines = missing_lines(missing)
     if not lines:
         return
-    print(f"\n{len(lines)} samples used by {len(missing)} projects are already missing on this computer, so they "
+    n, k = len(lines), len(missing)
+    print(f"\n{n} sample{'s' if n != 1 else ''} used by {k} project{'s' if k != 1 else ''} "
+          f"{'are' if n != 1 else 'is'} already missing on this computer, so {'they' if n != 1 else 'it'} "
           "can't be moved.\nIf they're on a drive that isn't plugged in, plug it in and run this again.")
     for line in lines[:8]:
         print(f"  {line}")
@@ -469,6 +488,29 @@ def folder_to_move(path, h, bases, covered):
     return f
 
 
+def measure_items(items, include_programs=False):
+    """List every file each item would pack (it["_files"], it["files"], it["bytes"]). Fills CLOUD_ONLY.
+    Returns (total bytes, programs left behind, or None when they're kept)."""
+    del CLOUD_ONLY[:]
+    left_behind = None if include_programs else []
+    for i, it in enumerate(items):
+        report_progress(f"Measuring {it['label']}", i, len(items))
+        if "only" in it:
+            files = []
+            for name in it["only"]:
+                ap = Path(it["source_path"]) / name
+                size = file_size(ap)
+                if size is not None:
+                    files.append((name, ap, size))
+        else:
+            # DAW user-data folders move whole; sample folders leave programs and installers behind
+            files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None))
+        it["_files"] = files
+        it["files"] = len(files)
+        it["bytes"] = sum(f[2] for f in files)
+    return sum(it["bytes"] for it in items), left_behind
+
+
 def cmd_pack(args):
     missing = {}
     items = pack_items(args.include, set(args.skip), missing)
@@ -480,22 +522,7 @@ def cmd_pack(args):
         sys.exit(msg)
 
     print("Measuring folders...", flush=True)
-    del CLOUD_ONLY[:]
-    left_behind = None if getattr(args, "include_programs", False) else []
-    for it in items:
-        if "only" in it:
-            files = []
-            for name in it["only"]:
-                ap = Path(it["source_path"]) / name
-                if ap.is_file():
-                    files.append((name, ap, ap.stat().st_size))
-        else:
-            # DAW user-data folders move whole; sample folders leave programs and installers behind
-            files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None))
-        it["_files"] = files
-        it["files"] = len(files)
-        it["bytes"] = sum(f[2] for f in files)
-    total = sum(it["bytes"] for it in items)
+    total, left_behind = measure_items(items, getattr(args, "include_programs", False))
     if CLOUD_ONLY:
         size = sum(n for _, n in CLOUD_ONLY)
         print(f"\nNote: {len(CLOUD_ONLY)} files ({rs.human_size(size)}) are only stored in OneDrive's cloud, not on this "
@@ -1401,6 +1428,11 @@ def interactive_menu():
 
 # --------------------------------------------------------------------------- main
 
+def cmd_app(args):
+    import app   # a plain import, so the built program includes it
+    return app.run()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Move a music setup between computers.",
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
@@ -1446,6 +1478,11 @@ def main():
     s.add_argument("--include", action="append", default=[], metavar="FOLDER")
     s.add_argument("--skip", action="append", default=[], metavar="ID")
     s.set_defaults(fn=cmd_rehearse)
+
+    s = sub.add_parser("app", help="open Freighter in your web browser (preview)")
+    s.set_defaults(fn=cmd_app)
+    s = sub.add_parser("menu", help="the numbered menu (what double-clicking opens)")
+    s.set_defaults(fn=lambda a: interactive_menu())
 
     if len(sys.argv) == 1:  # double-clicked, or run with no options
         return interactive_menu()

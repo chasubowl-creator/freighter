@@ -25,6 +25,21 @@ The first version with a number. Everything that exists so far:
 - Sorts drum kits and sample packs into one library by genre, pack and sound type, skipping duplicates.
 - Uses links, so the library takes no extra space; `undo` removes it without touching your originals.
 
+### Fixed before the beta (milestone M1)
+- Finds Desktop, Documents and Music where Windows really keeps them, including OneDrive, and warns about cloud-only files.
+- Packs samples that sit at the top of a drive, projects that use no outside samples, and never packs the User Library twice.
+- Handles paths past Windows' 260-character limit and network drives.
+- FAT32's 4 GB limit, clashing file names, Mac `._` files and read-only drives are handled up front.
+- Checks free space before unpacking or building a copied Crate library.
+- Matches accented file names between Mac and Windows.
+- Lists samples that were already missing before the move.
+- Rehearse no longer leaves the menu pointed at the rehearsal folder; errors keep the window open and save a crash report.
+- Reports and rehearsals go to Music/Freighter; leftover rehearsals are never packed.
+- Ableton repairs are written safely; bundles from a newer Freighter are refused with a clear message.
+
+### Preview: Freighter in your web browser
+- `freighter app` opens a private local page with the move list and the plugin scan. More screens are coming.
+
 ### Known problems
 The fixes planned before the public beta are listed in the
 [M1 milestone](https://github.com/chasubowl-creator/freighter/milestone/2).

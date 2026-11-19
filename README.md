@@ -23,6 +23,7 @@ What's left before release, in order: [ROADMAP.md](ROADMAP.md).
 |---|---|
 | `manifest.py` | _Manifest: finds installed plugins, flags problems, compares two computers |
 | `freighter.py` | Freighter: `scan`, `pack`, `unpack`, `fix-ableton`, `check-fl`, `rehearse` |
+| `app.py` | Freighter in your web browser (`freighter app`, preview): a private local page for the move list and plugin scan |
 | `crate.py` | _Crate: sorts drum kits and sample packs into one library by genre, pack and sound type (`preview`, `build`, `undo`). Never moves your originals |
 | `tests/` | Automated tests: `python3 -m unittest discover -s tests -v` |
 | `.github/workflows/tests.yml` | Runs the tests on Windows and macOS for every change |

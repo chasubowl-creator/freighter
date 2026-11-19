@@ -413,7 +413,7 @@ class WhatGetsPacked(TempDirCase):
         out = io.StringIO()
         with as_home(h), contextlib.redirect_stdout(out):
             rm.cmd_pack(argparse.Namespace(to=None, list=True, include=[], skip=[], include_programs=False))
-        self.assertIn("1 samples used by 1 projects are already missing", out.getvalue())
+        self.assertIn("1 sample used by 1 project is already missing", out.getvalue())
         self.assertIn("Beat.flp: " + str(h / "Unplugged" / "kick.wav"), out.getvalue())
 
     def test_user_library_is_not_packed_twice(self):
