@@ -3,6 +3,9 @@
 **Plugins move as a list** (you reinstall them from each maker).
 **Your own files move as files**: projects, presets, recordings, and every sample your projects use.
 You need an external drive with enough free space (step 2 shows how much).
+Format it as **exFAT**, which both Windows and Mac can read and write. NTFS drives are read-only on a
+Mac, and FAT32 can't hold files over 4 GB. To format: Windows, right-click the drive → Format → exFAT;
+Mac, Disk Utility → Erase → ExFAT. Formatting erases the drive.
 
 ## 1. Get Freighter on both computers
 

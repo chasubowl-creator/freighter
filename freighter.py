@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import struct
+import subprocess
 import sys
 import time
 import unicodedata
@@ -239,7 +240,7 @@ def walk_files(root, left_behind=None):
             keep.append(d)
         dirs[:] = keep
         for fn in files:
-            if fn.lower() in JUNK_FILES or fn.endswith(".freighter-part"):
+            if fn.lower() in JUNK_FILES or fn.startswith("._") or fn.endswith(".freighter-part"):
                 continue
             if left_behind is not None and is_program(os.path.join(cur, fn)):
                 left_behind.append(os.path.join(cur, fn))
@@ -491,9 +492,21 @@ def cmd_pack(args):
             return 0
 
     host = rs.host_name()
-    bundle = Path(args.to).expanduser() / f"Freighter-{host}-{dt.date.today().isoformat()}"
-    bundle.mkdir(parents=True, exist_ok=True)
-    (bundle / "index").mkdir(exist_ok=True)
+    drive = Path(args.to).expanduser()
+    bundle = drive / f"Freighter-{host}-{dt.date.today().isoformat()}"
+    if filesystem(drive) in FAT_NAMES:
+        big = [(ap, size) for it in items for _rel, ap, size in it["_files"] if size > FAT_MAX]
+        if big:
+            sys.exit(f"This drive is formatted as FAT32, which can't hold files over 4 GB, and {len(big)} of yours "
+                     "are bigger:\n" + "\n".join(f"  {ap} ({rs.human_size(n)})" for ap, n in big[:5])
+                     + "\nReformat the drive as exFAT (this erases it), or leave those items out with --skip ID.")
+    try:
+        bundle.mkdir(parents=True, exist_ok=True)
+        (bundle / "index").mkdir(exist_ok=True)
+    except OSError as e:
+        sys.exit(f"Can't write to {drive}: {e.strerror or e}.\nIf it's a Windows (NTFS) drive plugged into a Mac, "
+                 "macOS can only read it. Use a drive formatted as exFAT, which both Mac and Windows can write "
+                 "(formatting erases the drive).")
 
     already = 0
     for it in items:
@@ -525,9 +538,10 @@ def cmd_pack(args):
             # can't swallow the next record appended after it.
             index_path.write_text("".join(json.dumps(r) + "\n" for r in done.values()), encoding="utf-8")
         data_root = bundle / "data" / it["id"]
+        taken = {r["stored"].lower() for r in done.values()}
         with open(index_path, "a", encoding="utf-8") as index:
             for rel, ap, size in it["_files"]:
-                stored = safe_rel(rel)
+                stored = done[rel]["stored"] if rel in done else unique_stored(rel, taken)
                 dst = data_root / stored
                 rec = done.get(rel)
                 if rec and rec["size"] == size and dst.is_file() and dst.stat().st_size == size:
@@ -591,6 +605,58 @@ def space_shortfalls(plan, margin=200 * 1024 * 1024):
                 pass
             need[disk] = need.get(disk, 0) + rec["size"]
     return [(where[d], n, free[d]) for d, n in need.items() if n + margin > free[d]]
+
+
+FAT_NAMES = {"fat", "fat12", "fat16", "fat32", "msdos", "vfat"}
+FAT_MAX = 4 * 1024 ** 3 - 1   # the biggest file a FAT32 drive can hold
+
+
+def mount_fs(mount_output, path):
+    """File system of `path` from the output of `mount` (macOS/Linux), or ''."""
+    path, best = str(path), ("", "")
+    for line in mount_output.splitlines():
+        m = re.match(r"^.+? on (.+?) (?:\((\w+)|type (\w+))", line)
+        if not m:
+            continue
+        point, fs = m.group(1), (m.group(2) or m.group(3)).lower()
+        if (path == point or path.startswith(point.rstrip("/") + "/")) and len(point) >= len(best[0]):
+            best = (point, fs)
+    return best[1]
+
+
+def filesystem(path):
+    """The drive's file system ('ntfs', 'exfat', 'fat32', 'msdos', 'apfs'...), lowercased, or '' if unknown."""
+    path = existing_parent(Path(path).expanduser().resolve())
+    if rs.IS_WIN:
+        try:
+            import ctypes
+            vol, fs = ctypes.create_unicode_buffer(300), ctypes.create_unicode_buffer(64)
+            k32 = ctypes.windll.kernel32
+            if k32.GetVolumePathNameW(str(path), vol, 300) and \
+                    k32.GetVolumeInformationW(vol.value, None, 0, None, None, None, fs, 64):
+                return fs.value.lower()
+        except Exception:
+            pass
+        return ""
+    try:
+        return mount_fs(subprocess.run(["mount"], capture_output=True, text=True, timeout=10).stdout, path)
+    except Exception:
+        return ""
+
+
+def unique_stored(rel, taken):
+    """The name a file is stored under on the drive. safe_rel can turn two names into one (kick?.wav and
+    kick_.wav), and exFAT ignores case (Kick.wav, kick.wav): add " (2)", " (3)"... so nothing overwrites.
+    `taken` holds lowercased names already used and is updated."""
+    stored = safe_rel(rel)
+    head, _, last = stored.rpartition("/")
+    stem, dot, ext = last.rpartition(".") if "." in last else (last, "", "")
+    n = 2
+    while stored.lower() in taken:
+        stored = (head + "/" if head else "") + f"{stem} ({n}){dot}{ext}"
+        n += 1
+    taken.add(stored.lower())
+    return stored
 
 
 def cmd_unpack(args):

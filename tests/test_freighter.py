@@ -431,6 +431,70 @@ class WhatGetsPacked(TempDirCase):
                 self.assertFalse(a != b and a in b.parents, f"{b} would be packed twice (inside {a})")
 
 
+class Drives(TempDirCase):
+    """Issue #11: what different drives can and can't hold."""
+
+    def test_mount_output_gives_the_file_system(self):
+        out = ("/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n"
+               "/dev/disk4s1 on /Volumes/USB STICK (msdos, local, nodev, nosuid, noowners)\n"
+               "/dev/disk5s1 on /Volumes/Big (exfat, local, nodev, nosuid, noowners)\n"
+               "/dev/sdb1 on /media/me/STICK type vfat (rw,nosuid)")
+        self.assertEqual(rm.mount_fs(out, "/Volumes/USB STICK/moves"), "msdos")
+        self.assertEqual(rm.mount_fs(out, "/Volumes/Big"), "exfat")
+        self.assertEqual(rm.mount_fs(out, "/Users/me"), "apfs")
+        self.assertEqual(rm.mount_fs(out, "/media/me/STICK"), "vfat")
+
+    def test_names_that_clash_on_the_drive_get_their_own(self):
+        taken = set()
+        self.assertEqual(rm.unique_stored("Kits/kick?.wav", taken), "Kits/kick_.wav")
+        self.assertEqual(rm.unique_stored("Kits/kick_.wav", taken), "Kits/kick_ (2).wav")
+        self.assertEqual(rm.unique_stored("Kits/Kick_.wav", taken), "Kits/Kick_ (3).wav", "exFAT ignores case")
+        self.assertEqual(rm.unique_stored("README", taken), "README")
+
+    def test_clashing_names_both_survive_a_move(self):
+        src = self.tmp / "Kits"
+        try:
+            write(src / "kick?.wav", b"first")
+        except OSError:
+            self.skipTest("this computer can't hold a name with ? in it (Windows)")
+        write(src / "kick_.wav", b"second")
+        drive = self.tmp / "drive"
+        drive.mkdir()
+        with as_home(self.tmp / "home"), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[str(src)], skip=[],
+                                           include_programs=False))
+        stored = sorted(p.read_bytes() for p in next(drive.glob("Freighter-*")).joinpath("data").rglob("*.wav"))
+        self.assertEqual(stored, [b"first", b"second"])
+
+    def test_mac_resource_files_are_skipped(self):
+        write(self.tmp / "Kit" / "._kick.wav", b"apple double")
+        write(self.tmp / "Kit" / "kick.wav", b"kick")
+        self.assertEqual([r for r, _, _ in rm.walk_files(self.tmp / "Kit")], ["kick.wav"])
+
+    def test_fat32_refuses_big_files_before_copying(self):
+        src = self.tmp / "Stems"
+        write(src / "long-stem.wav", os.urandom(3000))
+        drive = self.tmp / "drive"
+        drive.mkdir()
+        with as_home(self.tmp / "home"), quiet(), mock.patch.object(rm, "filesystem", lambda p: "msdos"), \
+                mock.patch.object(rm, "FAT_MAX", 1000), self.assertRaises(SystemExit) as e:
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[str(src)], skip=[],
+                                           include_programs=False))
+        self.assertIn("FAT32", str(e.exception.code))
+        self.assertIn("long-stem.wav", str(e.exception.code))
+        self.assertEqual(list(drive.iterdir()), [], "nothing was written")
+
+    def test_a_drive_that_cant_be_written_explains_itself(self):
+        src = self.tmp / "Kit"
+        write(src / "kick.wav", b"kick")
+        with as_home(self.tmp / "home"), quiet(), mock.patch.object(rm, "filesystem", lambda p: "ntfs"), \
+                mock.patch.object(rm.Path, "mkdir", side_effect=OSError(30, "Read-only file system")), \
+                self.assertRaises(SystemExit) as e:
+            rm.cmd_pack(argparse.Namespace(to=str(self.tmp / "drive"), list=False, include=[str(src)], skip=[],
+                                           include_programs=False))
+        self.assertIn("exFAT", str(e.exception.code))
+
+
 class OneDriveFolders(TempDirCase):
     """Windows can keep Desktop and Documents somewhere else, usually in OneDrive (issue #6)."""
 
