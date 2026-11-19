@@ -774,10 +774,19 @@ def cmd_unpack(args):
     if bad:
         print(f"{len(bad)} problems; see unpack-report.txt.")
     print("\nNext:")
-    print("  python3 freighter.py fix-ableton     (if you use Ableton)")
-    print("  python3 freighter.py check-fl        (if you use FL Studio)")
-    print(f"  python3 manifest.py --compare \"{landing / f'plugins-{src_host}.csv'}\"   (plugins to reinstall)")
+    print("  Repair projects: menu option 6, or " + tool_cmd("freighter", "fix-ableton") + " and "
+          + tool_cmd("freighter", "check-fl"))
+    print(f"  Plugins to reinstall: {tool_cmd('manifest', '--compare')} \"{landing / f'plugins-{src_host}.csv'}\"")
     return 0
+
+
+def tool_cmd(tool, args=""):
+    """How to run one of Freighter's tools from a terminal: the built program next to this one, or the script."""
+    if getattr(sys, "frozen", False):
+        cmd = f"{tool}.exe" if rs.IS_WIN else f"./{tool}"
+    else:
+        cmd = f"{'py' if rs.IS_WIN else 'python3'} {tool}.py"
+    return f"{cmd} {args}".strip()
 
 
 # --------------------------------------------------------------------------- path mapping

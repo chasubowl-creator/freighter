@@ -7,12 +7,13 @@ into `Music\Freighter` in your user folder, which you can delete at the end. No 
 
 ## Step 1: Download the program (3 min)
 
-1. On the PC, sign in to GitHub and open
-   **https://github.com/chasubowl-creator/freighter/actions**
+1. On the PC, open **https://github.com/chasubowl-creator/freighter/actions** (no account needed)
 2. Click the newest run with a **green check**.
 3. Scroll to **Artifacts** at the bottom and click **freighter-windows**. A zip downloads.
 4. In Downloads, right-click **freighter-windows.zip** → **Extract All… → Extract**.
-5. Move the extracted folder to your **Desktop**. Inside are `freighter.exe`, `manifest.exe` and this guide.
+5. Move the extracted folder to your **Desktop**. Inside are `freighter.exe` (the mover), `manifest.exe`
+   (the plugin list), `crate.exe` (the sample sorter) and this guide. Always run them from the extracted
+   folder, not from inside the zip.
 
 ## Step 2: Open it (1 min)
 
@@ -39,6 +40,10 @@ Press Enter to go back to the menu.
 Type **2** and press Enter. It lists everything Freighter would move, with a **total** at the bottom.
 - Are your FL Studio projects and sample folders there?
 - Anything missing, like samples on another drive? Note it down. That's useful feedback.
+- Read any notes under the list:
+  - **"already missing"**: samples your projects use that aren't on the PC any more (maybe an unplugged drive).
+  - **OneDrive**: files that only live in the cloud and would download while packing.
+  Take a photo of these notes.
 
 ## Step 5: Rehearse the move (5–20 min)
 

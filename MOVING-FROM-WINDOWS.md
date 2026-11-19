@@ -10,8 +10,9 @@ Mac, Disk Utility → Erase → ExFAT. Formatting erases the drive.
 ## 1. Get Freighter on both computers
 
 From **https://github.com/chasubowl-creator/freighter/actions**, open the newest run with a green check and
-download **freighter-windows** (or **freighter-mac** for a Mac). Unzip it. You get `freighter` and `manifest`.
-No other installs needed. Windows may say "Windows protected your PC": click **More info → Run anyway**.
+download **freighter-windows** (or **freighter-mac** for a Mac). No GitHub account is needed. Unzip it (on
+Windows: right-click → Extract All; don't run it from inside the zip). You get `freighter` (the mover),
+`manifest` (the plugin list) and `crate` (the sample sorter). No other installs needed. Windows may say "Windows protected your PC": click **More info → Run anyway**.
 
 ## 2. On the old computer
 
@@ -26,8 +27,13 @@ Installers and programs found in sample folders are left behind on purpose, and 
 
 ## 3. Before you wipe or sell the old computer
 
-- [ ] **Deactivate plugin licenses** in iLok License Manager, Waves Central, Native Access, Arturia
-      Software Center and any others, so they free up for the new computer.
+- [ ] **Deactivate plugin licenses**, so they free up for the new computer:
+  - [ ] iLok License Manager (PACE/iLok plugins)
+  - [ ] Waves Central → Licenses
+  - [ ] Native Access (Native Instruments)
+  - [ ] Arturia Software Center
+  - [ ] Plugin Alliance Installation Manager
+  - [ ] Any other maker with a license app or activation limit
 - [ ] Samples on another drive that step 2 didn't show? Run `freighter pack --to E:\ --include "D:\Samples"`.
 
 ## 4. On the new computer
@@ -46,7 +52,11 @@ Double-click **freighter**:
 
 ## 5. Reinstall plugins
 
-Run `manifest --compare "Music/Freighter/<old computer's name>/plugins-<old computer's name>.csv"`.
+Unpack prints the exact command at the end. In a command window opened in Freighter's folder it looks like:
+
+    manifest.exe --compare "C:\Users\<you>\Music\Freighter\<old computer>\plugins-<old computer>.csv"
+
+(on a Mac: `./manifest --compare "/Users/<you>/Music/Freighter/<old computer>/plugins-<old computer>.csv"`).
 The report lists every plugin from the old computer that isn't installed yet, grouped by maker.
 Run it again after installing to watch the list shrink.
 

@@ -40,8 +40,8 @@ Delete the `Rehearsal` folder in `Music/Freighter` afterwards.
 
 `.github/workflows/tests.yml` runs the automated tests, the scanner and `pack --list` on Windows and
 macOS, with old (3.8) and new (3.12) Python, every time code changes. This catches Windows-only problems
-that can't show up on a Mac. To turn it on, put this folder in a GitHub repository (free). The results
-appear under the repository's **Actions** tab.
+that can't show up on a Mac. Results are on the repository's **Actions** tab
+(https://github.com/chasubowl-creator/freighter/actions), which also holds the built programs.
 
 ## What still needs a person
 

@@ -747,6 +747,15 @@ class Menu(TempDirCase):
         self.assertIn("ValueError: disk on fire", report)
         self.assertIn("Menu choice: 2", report)
 
+    def test_next_step_commands_match_how_freighter_was_started(self):
+        """The built program has no manifest.py; tell people the command that exists (issue #21)."""
+        with mock.patch.object(rm.sys, "frozen", True, create=True), mock.patch.object(rs, "IS_WIN", True):
+            self.assertEqual(rm.tool_cmd("manifest", "--compare"), "manifest.exe --compare")
+        with mock.patch.object(rm.sys, "frozen", True, create=True), mock.patch.object(rs, "IS_WIN", False):
+            self.assertEqual(rm.tool_cmd("manifest"), "./manifest")
+        with mock.patch.object(rs, "IS_WIN", False):
+            self.assertEqual(rm.tool_cmd("freighter", "check-fl"), "python3 freighter.py check-fl")
+
     def test_closed_input_quits(self):
         def closed(*_):
             raise EOFError
