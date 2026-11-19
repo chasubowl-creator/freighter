@@ -357,6 +357,39 @@ class SampleFolders(TempDirCase):
         self.assertEqual(loose[0]["only"], ["kick.wav"], "only the used file, not the rest of the drive")
 
 
+class WhatGetsPacked(TempDirCase):
+    def items(self, h):
+        with as_home(h), quiet():
+            return rm.pack_items([], set())
+
+    def test_projects_that_use_no_outside_samples_are_packed(self):
+        """Issue #8: a synth-only project outside the DAW folders used to be left behind."""
+        h = self.tmp / "home"
+        make_als(h / "Desktop" / "Synth Song Project" / "Synth Song.als", [])
+        make_flp(h / "Desktop" / "idea.flp", [])
+        write(h / "Desktop" / "taxes.pdf", b"not music")
+        items = self.items(h)
+        self.assertIn(h / "Desktop" / "Synth Song Project", [Path(it["source_path"]) for it in items])
+        self.assertTrue(any(it.get("only") == ["idea.flp"] for it in items), "a loose project file comes alone")
+        self.assertFalse(any(Path(it["source_path"]) == h / "Desktop" and "only" not in it for it in items),
+                         "never the whole Desktop")
+
+    def test_user_library_is_not_packed_twice(self):
+        """Issue #9: a project next to the User Library used to pull in the whole Ableton folder."""
+        h = self.tmp / "home"
+        user_library = rm.known_roots(rm.THIS_OS, h)["ableton_user_library"][1]
+        write(user_library / "Presets" / "a.adv", b"preset")
+        project = user_library.parent / "Song Project"
+        clap = write(project / "Samples" / "Imported" / "clap.wav", os.urandom(200))
+        make_als(project / "Song.als", [str(clap)])
+        items = self.items(h)
+        paths = [Path(it["source_path"]) for it in items if "only" not in it]
+        self.assertIn(project, paths)
+        for a in paths:
+            for b in paths:
+                self.assertFalse(a != b and a in b.parents, f"{b} would be packed twice (inside {a})")
+
+
 class OneDriveFolders(TempDirCase):
     """Windows can keep Desktop and Documents somewhere else, usually in OneDrive (issue #6)."""
 

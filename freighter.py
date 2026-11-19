@@ -290,15 +290,15 @@ def pack_items(includes, skips):
         if iid not in skips:
             items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
     folders, loose = project_sample_folders(items)
-    for i, folder in enumerate(folders, 1):
+    for i, (folder, label) in enumerate(folders.items(), 1):
         iid = f"used{i}"
         if iid not in skips:
-            items.append({"id": iid, "label": f"Samples your projects use: {folder.name}",
+            items.append({"id": iid, "label": f"{label}: {folder.name}",
                           "source_path": str(folder), "kind": "extra"})
     for i, (folder, files) in enumerate(sorted(loose.items()), 1):
         iid = f"loose{i}"
         if iid not in skips:
-            items.append({"id": iid, "label": f"Loose samples your projects use from {Path(folder).name}",
+            items.append({"id": iid, "label": f"Loose files your projects use from {landing_name(folder)}",
                           "source_path": folder, "kind": "extra", "only": sorted(files)})
     return items
 
@@ -331,53 +331,74 @@ def landing_name(source_path):
 
 
 def project_sample_folders(items):
-    """Folders outside the packed items that FL/Ableton projects pull samples from."""
+    """What a move needs beyond the packed items: projects found in Desktop, Documents and Music (even ones
+    that use no outside samples), and every sample folder FL/Ableton projects use.
+    Returns ({folder: label}, {folder: set of file names to take loose})."""
     h = home()
     covered = [Path(it["source_path"]) for it in items]
     roots = [r for r in user_folders(h).values() if r.is_dir()]
     roots += [c for c in covered if c.is_dir()]
+    flps = find_projects(roots, ".flp", include_backups=True)
+    alss = find_projects(roots, ".als")
     refs = set()
-    for p in find_projects(roots, ".flp", include_backups=True):
+    for p in flps:
         try:
             refs.update(s for s in flp_samples(p)[1] if not FL_PLACEHOLDER.match(s))
         except (ValueError, OSError, struct.error):
             pass
-    for p in find_projects(roots, ".als"):
+    for p in alss:
         try:
             text, _ = read_als(p)
             refs.update(html.unescape(m.group(2)) for m in PATH_RE.finditer(text) if m.group(2))
         except Exception:
             pass
-    folders, loose = set(), {}
     bases = [u for u in user_folders(h).values() if u.is_dir()]
-    for s in refs:
-        if not os.path.isfile(s):
-            continue
-        sp = Path(s)
-        if any(c == sp or c in sp.parents for c in covered):
-            continue
-        base = next((u for u in bases if u in sp.parents), None)
-        if base is not None:
-            # inside Desktop, Documents or Music (wherever they really are, e.g. in OneDrive): take the
-            # top folder inside it, or just the file if it sits loose there
-            if sp.parent == base:
-                loose.setdefault(str(sp.parent), set()).add(sp.name)
-            else:
-                folders.add(base / sp.relative_to(base).parts[0])
-            continue
-        if sp.parent.parent == h:
-            # a file sitting straight in ~/Downloads etc.: take the file, not the whole folder
-            loose.setdefault(str(sp.parent), set()).add(sp.name)
-            continue
-        f = sample_folder_for(s, h)
+    folders, loose = {}, {}
+
+    def inside_covered(path):
+        return any(c == path or c in path.parents for c in covered)
+
+    def take(path, label):
+        """Add the folder that should carry this file, or the file alone when it sits loose."""
+        f = folder_to_move(path, h, bases, covered)
         if f is None:
-            # at the top of a drive: take the file, not the whole drive
-            loose.setdefault(str(sp.parent), set()).add(sp.name)
+            loose.setdefault(str(path.parent), set()).add(path.name)
         elif f.is_dir() and f != h:
-            folders.add(f)
-    folders = sorted((f for f in folders if not any(o != f and o in f.parents for o in folders)),
-                     key=lambda f: str(f).lower())
-    return folders, loose
+            folders.setdefault(f, label)
+
+    # projects outside the packed folders (FL autosave backups aren't projects worth moving on their own)
+    for p in flps + alss:
+        if not inside_covered(p) and "backup" not in {x.lower() for x in p.parts[:-1]}:
+            take(p, "Folder with projects")
+    for s in refs:
+        if os.path.isfile(s) and not inside_covered(Path(s)):
+            take(Path(s), "Samples your projects use")
+    keep = {f: label for f, label in folders.items() if not any(o != f and o in f.parents for o in folders)}
+    return dict(sorted(keep.items(), key=lambda kv: str(kv[0]).lower())), loose
+
+
+def folder_to_move(path, h, bases, covered):
+    """The folder to move so that `path` (a sample or project) comes along, or None to take the file alone.
+    Starts at the top folder inside Desktop, Documents or Music (wherever they really are), or uses
+    sample_folder_for elsewhere, then steps down while that folder would also re-pack a packed item
+    such as the Ableton User Library (issue #9)."""
+    base = next((u for u in bases if u in path.parents), None)
+    if base is not None:
+        if path.parent == base:
+            return None
+        f = base / path.relative_to(base).parts[0]
+    elif path.parent.parent == h:
+        return None      # a file sitting straight in ~/Downloads etc.
+    else:
+        f = sample_folder_for(str(path), h)
+        if f is None:
+            return None  # at the top of a drive
+    while any(f in c.parents for c in covered):
+        rest = path.relative_to(f).parts
+        if len(rest) == 1:
+            return None
+        f = f / rest[0]
+    return f
 
 
 def cmd_pack(args):
