@@ -566,6 +566,9 @@ def cmd_unpack(args):
         manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         sys.exit(f"Not a Freighter bundle (no readable manifest.json): {bundle}")
+    if manifest.get("bundle_version", 1) > BUNDLE_VERSION:
+        sys.exit(f"This bundle was made by a newer Freighter ({manifest.get('freighter_version', 'unknown version')}) "
+                 f"than this one ({__version__}). Update Freighter on this computer, then unpack again.")
     src_host = manifest["source_host"]
     dest_known = known_roots(THIS_OS, home())
     landing = moved_root(src_host)
@@ -772,6 +775,17 @@ def als_new_format(text):
     return '<Path Value="' in text
 
 
+def write_replace(path, data):
+    """Write a file so that a crash or power cut leaves either the old file or the new one, never half of one:
+    write a temporary file next to it, then swap it in."""
+    tmp = path.with_name(path.name + ".freighter-part")
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 def fix_als(path, maps, dry_run=False):
     text, gz = read_als(path)
     creator = (CREATOR_RE.search(text[:2000]) or [None, "unknown Live version"])[1]
@@ -813,7 +827,7 @@ def fix_als(path, maps, dry_run=False):
         if not backup.exists():
             shutil.copy2(path, backup)
         data = new_text.encode("utf-8")
-        Path(path).write_bytes(gzip.compress(data) if gz else data)
+        write_replace(Path(path), gzip.compress(data) if gz else data)
     return result
 
 

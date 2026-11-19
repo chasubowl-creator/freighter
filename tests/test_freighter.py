@@ -263,6 +263,18 @@ class AbletonFix(TempDirCase):
         self.assertIn('Path Value="D:/gone.wav"', text)
         self.assertTrue((als.parent / "Freighter backup" / "Song.als").is_file())
 
+    def test_repair_swaps_the_file_in_whole(self):
+        """Issue #19: the repaired project is written to a temp file and swapped in, never half-written."""
+        target = self.tmp / "song.als"
+        target.write_bytes(b"old")
+        with mock.patch.object(rm.os, "replace", side_effect=OSError("power cut")):
+            with self.assertRaises(OSError):
+                rm.write_replace(target, b"new contents")
+        self.assertEqual(target.read_bytes(), b"old", "the original survives a failed write")
+        rm.write_replace(target, b"new contents")
+        self.assertEqual(target.read_bytes(), b"new contents")
+        self.assertFalse(list(self.tmp.glob("*.freighter-part")))
+
     def test_live10_is_reported_not_changed(self):
         als = write(self.tmp / "old.als", gzip.compress(b'<Ableton Creator="Ableton Live 10.1"><FileRef Id="0">'
                                                          b'<RelativePath><RelativePathElement Dir="x"/></RelativePath></FileRef></Ableton>'))
@@ -530,6 +542,17 @@ class FullMove(TempDirCase):
         self.assertIn("checksum mismatch", report)
         self.assertEqual(existing.read_bytes(), b"mine")
         self.assertTrue(list((landing / "DrumKits" / "Snares").glob("snare (from *).wav")))
+
+    def test_unpack_refuses_a_bundle_from_a_newer_freighter(self):
+        """Issue #14."""
+        bundle = self.tmp / "Freighter-x"
+        write(bundle / "manifest.json", json.dumps({"bundle_version": rm.BUNDLE_VERSION + 1,
+                                                    "freighter_version": "9.9.9", "source_host": "x",
+                                                    "source_os": "windows", "items": []}).encode())
+        with as_home(self.tmp / "new"), self.assertRaises(SystemExit) as e:
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        self.assertIn("9.9.9", str(e.exception.code))
+        self.assertIn("Update Freighter", str(e.exception.code))
 
     def test_unpack_twice_copies_nothing_new(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
