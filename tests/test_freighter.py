@@ -312,6 +312,26 @@ class PathMapping(TempDirCase):
                  "home": {"old": "/Users/x", "new": str(self.tmp)}}]
         self.assertEqual(rm.locate("/Users/x/Kits/Kicks/kick: hard.wav", maps)[0], "moved")
 
+    def test_accented_names_match_either_way(self):
+        """Issue #13: "é" can be one character (Windows) or e + accent (Mac); both must be found."""
+        import unicodedata
+        nfc, nfd = unicodedata.normalize("NFC", "Café Kicks"), unicodedata.normalize("NFD", "Café Kicks")
+        self.assertNotEqual(nfc, nfd)
+        moved = self.tmp / "new" / "Kits"
+        maps = [{"source_os": "windows", "entries": [{"old": "C:\\Users\\Producer\\Desktop\\Kits", "new": str(moved)}],
+                 "home": {"old": "C:\\Users\\Producer", "new": str(self.tmp / "new")}}]
+        stored = write(moved / nfd / "kick.wav", b"k")       # the file was stored with the Mac spelling
+        found = [c for c in rm.candidates(f"C:\\Users\\Producer\\Desktop\\Kits\\{nfc}\\kick.wav", maps)]
+        self.assertTrue(any(str(c).endswith(str(Path(nfd) / "kick.wav")) for c in found), found)
+        self.assertTrue(any(str(c).endswith(str(Path(nfc) / "kick.wav")) for c in found), found)
+        status, where = rm.locate(f"C:\\Users\\Producer\\Desktop\\Kits\\{nfc}\\kick.wav", maps)
+        self.assertEqual(status, "moved")
+        self.assertTrue(where.is_file())
+        # and an old root written in the other spelling still matches
+        maps[0]["entries"][0]["old"] = f"C:\\Users\\Producer\\Desktop\\{unicodedata.normalize('NFD', 'Kits')}"
+        self.assertEqual(rm.locate(f"C:\\Users\\Producer\\Desktop\\Kits\\{nfd}\\kick.wav", maps)[0], "moved")
+        self.assertTrue(stored.is_file())
+
     def test_safe_rel(self):
         self.assertEqual(rm.safe_rel('a:b/c?.wav'), "a_b/c_.wav")
         self.assertEqual(rm.safe_rel("CON/aux.txt"), "_CON/_aux.txt")

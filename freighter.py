@@ -32,6 +32,7 @@ import shutil
 import struct
 import sys
 import time
+import unicodedata
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -659,7 +660,8 @@ def cmd_unpack(args):
 # --------------------------------------------------------------------------- path mapping
 
 def norm(p, fold_case):
-    s = re.sub(r"/+", "/", p.replace("\\", "/")).rstrip("/")
+    # NFC: Macs often store "é" as e + accent (two characters), Windows as one; compare them as equal
+    s = unicodedata.normalize("NFC", re.sub(r"/+", "/", p.replace("\\", "/")).rstrip("/"))
     return s.lower() if fold_case else s
 
 
@@ -686,8 +688,10 @@ def candidates(old, maps):
             k = norm(old_root, fold)
             if o == k or o.startswith(k + "/"):
                 rest = o_raw[len(k):].lstrip("/")
-                for r in dict.fromkeys((rest, safe_rel(rest))) if rest else ("",):
-                    # safe_rel: names Windows can't hold (e.g. "kick: hard.wav") were stored renamed
+                forms = (rest, unicodedata.normalize("NFC", rest), unicodedata.normalize("NFD", rest))
+                for r in dict.fromkeys(f for x in forms for f in (x, safe_rel(x))) if rest else ("",):
+                    # safe_rel: names Windows can't hold (e.g. "kick: hard.wav") were stored renamed.
+                    # NFC/NFD: the moved file may spell accented letters either way (see norm)
                     out.append(Path(new_root).joinpath(*r.split("/")) if r else Path(new_root))
     return out
 
