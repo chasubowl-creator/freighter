@@ -495,6 +495,41 @@ class Drives(TempDirCase):
         self.assertIn("exFAT", str(e.exception.code))
 
 
+class LongPaths(TempDirCase):
+    """Issue #10: paths past Windows' old 260-character limit, and network drives."""
+
+    def test_windows_long_and_network_forms(self):
+        with mock.patch.object(rs, "IS_WIN", True):
+            self.assertEqual(rm.long_path("Z:\\Samples\\kick.wav"), "\\\\?\\Z:\\Samples\\kick.wav",
+                             "a mapped drive stays a drive letter")
+            unc = rm.long_path("\\\\nas\\share\\Samples")
+            self.assertEqual(unc, "\\\\?\\UNC\\nas\\share\\Samples")
+            self.assertEqual(rm.short_path(unc), "\\\\nas\\share\\Samples")
+            self.assertEqual(rm.long_path("\\\\?\\C:\\x"), "\\\\?\\C:\\x", "never prefixed twice")
+
+    def test_a_file_300_characters_deep_moves(self):
+        src = self.tmp / "Deep"
+        deep = src.joinpath(*["a very long folder name for a sample pack"] * 8)
+        os.makedirs(rm.long_path(deep))
+        target = deep / "kick.wav"
+        with open(rm.long_path(target), "wb") as f:
+            f.write(b"deep kick")
+        self.assertGreater(len(str(target)), 300)
+        self.assertEqual([r for r, _, _ in rm.walk_files(src)][0].split("/")[-1], "kick.wav")
+        drive, new = self.tmp / "drive", self.tmp / "new"
+        drive.mkdir()
+        with as_home(self.tmp / "old"), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[str(src)], skip=[],
+                                           include_programs=False))
+        bundle = next(drive.glob("Freighter-*"))
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        found = [os.path.join(c, f) for c, _, fs in os.walk(rm.long_path(new)) for f in fs if f == "kick.wav"]
+        self.assertEqual(len(found), 1)
+        with open(found[0], "rb") as f:
+            self.assertEqual(f.read(), b"deep kick")
+
+
 class OneDriveFolders(TempDirCase):
     """Windows can keep Desktop and Documents somewhere else, usually in OneDrive (issue #6)."""
 

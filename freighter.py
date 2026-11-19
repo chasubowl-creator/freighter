@@ -142,20 +142,40 @@ def safe_rel(rel):
 
 
 def long_path(p):
-    """Windows needs a \\\\?\\ prefix for paths over 260 characters."""
-    p = Path(p)
-    if rs.IS_WIN:
-        s = str(p.resolve())
-        if not s.startswith("\\\\?\\"):
-            s = "\\\\?\\" + s
+    """On Windows, the \\\\?\\ form of a path, which works past the old 260-character limit. Network
+    paths (\\\\server\\share) need \\\\?\\UNC\\server\\share. Other systems: the path unchanged.
+    abspath, not resolve(): resolve turns a mapped drive (Z:) into its network path."""
+    s = str(p)
+    if not rs.IS_WIN or s.startswith("\\\\?\\"):
         return s
-    return str(p)
+    import ntpath
+    s = ntpath.abspath(s)
+    if s.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + s[2:]
+    return "\\\\?\\" + s
+
+
+def short_path(s):
+    """The same path without the \\\\?\\ prefix, for showing to people and storing in reports."""
+    s = str(s)
+    if s.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + s[8:]
+    return s[4:] if s.startswith("\\\\?\\") else s
+
+
+def file_size(p):
+    """Size of the file at p, or None if there isn't one (works for long Windows paths)."""
+    try:
+        st = os.stat(long_path(p))
+    except OSError:
+        return None
+    return st.st_size if not os.path.isdir(long_path(p)) else None
 
 
 def copy_and_hash(src, dst):
     """Copy src to dst through a temporary name; return the SHA-256 of what was copied."""
     dst = Path(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(long_path(dst.parent), exist_ok=True)
     tmp = dst.with_name(dst.name + ".freighter-part")
     h = hashlib.sha256()
     with open(long_path(src), "rb") as f, open(long_path(tmp), "wb") as out:
@@ -229,32 +249,35 @@ def walk_files(root, left_behind=None):
     """Yield (relative posix path, absolute path, size) for every real file under root.
     With a left_behind list, programs and installers are skipped and recorded there instead."""
     root = Path(root)
-    for cur, dirs, files in os.walk(root, onerror=lambda e: None):
+    lroot = long_path(root)   # walk the long form so deep folders on Windows aren't skipped
+    for cur, dirs, files in os.walk(lroot, onerror=lambda e: None):
         keep = []
         for d in dirs:
             if skip_dir(cur, d) or os.path.islink(os.path.join(cur, d)):
                 continue
             if left_behind is not None and is_program(os.path.join(cur, d)):  # app and plugin bundles are folders
-                left_behind.append(os.path.join(cur, d))
+                left_behind.append(short_path(os.path.join(cur, d)))
                 continue
             keep.append(d)
         dirs[:] = keep
         for fn in files:
             if fn.lower() in JUNK_FILES or fn.startswith("._") or fn.endswith(".freighter-part"):
                 continue
-            if left_behind is not None and is_program(os.path.join(cur, fn)):
-                left_behind.append(os.path.join(cur, fn))
+            full = os.path.join(cur, fn)
+            if left_behind is not None and is_program(full):
+                left_behind.append(short_path(full))
                 continue
-            ap = Path(cur) / fn
-            if ap.is_symlink():
+            if os.path.islink(full):
                 continue
             try:
-                st = ap.stat()
+                st = os.stat(full)
             except OSError:
                 continue
+            rel = Path(os.path.relpath(full, lroot)).as_posix()
+            ap = root.joinpath(*rel.split("/"))
             if is_cloud_only(st):
                 CLOUD_ONLY.append((ap, st.st_size))
-            yield ap.relative_to(root).as_posix(), ap, st.st_size
+            yield rel, ap, st.st_size
 
 
 class Progress:
@@ -544,7 +567,7 @@ def cmd_pack(args):
                 stored = done[rel]["stored"] if rel in done else unique_stored(rel, taken)
                 dst = data_root / stored
                 rec = done.get(rel)
-                if rec and rec["size"] == size and dst.is_file() and dst.stat().st_size == size:
+                if rec and rec["size"] == size and file_size(dst) == size:
                     prog.add(size)
                     continue
                 try:
@@ -598,11 +621,8 @@ def space_shortfalls(plan, margin=200 * 1024 * 1024):
         free.setdefault(disk, shutil.disk_usage(anchor).free)
         for rec in idx.values():
             target = dest / (rec["rel"] if THIS_OS != "windows" else rec["stored"])
-            try:
-                if target.stat().st_size == rec["size"]:
-                    continue   # most likely already unpacked
-            except OSError:
-                pass
+            if file_size(target) == rec["size"]:
+                continue   # most likely already unpacked
             need[disk] = need.get(disk, 0) + rec["size"]
     return [(where[d], n, free[d]) for d, n in need.items() if n + margin > free[d]]
 
@@ -706,12 +726,12 @@ def cmd_unpack(args):
             src = data_root / rec["stored"]
             target_rel = rec["rel"] if THIS_OS != "windows" else rec["stored"]
             dst = dest / target_rel
-            if dst.exists():
-                if dst.stat().st_size == rec["size"] and hash_file(dst) == rec["sha256"]:
+            if file_size(dst) is not None:
+                if file_size(dst) == rec["size"] and hash_file(dst) == rec["sha256"]:
                     prog.add(rec["size"])
                     continue  # already there, identical
                 dst = dst.with_name(f"{dst.stem} (from {src_host}){dst.suffix}")
-                if dst.exists() and dst.stat().st_size == rec["size"]:
+                if file_size(dst) == rec["size"]:
                     prog.add(rec["size"])
                     continue
                 conflicts.append(str(dst))
@@ -813,7 +833,7 @@ def exists(p):
         under = lambda root: s == root or s.startswith(root.rstrip(os.sep) + os.sep)
         if under(old) and not under(keep):
             return False
-    return os.path.exists(p)
+    return os.path.exists(long_path(p))
 
 
 def locate(old, maps):
