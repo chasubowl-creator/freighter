@@ -406,7 +406,7 @@ class OneDriveFolders(TempDirCase):
         env = {k: v for k, v in os.environ.items() if k != "FREIGHTER_HOME"}
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(rm, "THIS_OS", "windows"), \
-                mock.patch.object(rm, "home", lambda: self.h), \
+                mock.patch.object(rm, "real_home", lambda: self.h), \
                 mock.patch.object(rm, "_registry_folders", lambda: {"Documents": self.docs, "Desktop": self.desk}):
             yield
 
@@ -416,6 +416,12 @@ class OneDriveFolders(TempDirCase):
             self.assertEqual(roots["fl_user"][1], self.docs / "Image-Line")
             self.assertEqual(roots["ableton_user_library"][1], self.docs / "Ableton" / "User Library")
             self.assertEqual(rm.user_folders()["Music"], self.h / "Music", "unmoved folders stay put")
+
+    def test_other_folders_never_use_the_real_folders(self):
+        """Asking about any folder other than the real home must not return this computer's moved folders."""
+        with self.windows_with_onedrive():
+            other = self.tmp / "someone-else"
+            self.assertEqual(rm.known_roots("windows", other)["fl_user"][1], other / "Documents" / "Image-Line")
 
     def test_a_rehearsals_stand_in_home_never_uses_the_real_folders(self):
         with self.windows_with_onedrive(), mock.patch.dict(os.environ, {"FREIGHTER_HOME": str(self.h)}):

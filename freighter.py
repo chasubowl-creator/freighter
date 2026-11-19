@@ -44,9 +44,13 @@ JUNK_FILES = {".ds_store", "thumbs.db", "desktop.ini", "icon\r"}
 SKIP_DIRS = {".trash", "$recycle.bin", "freighter backup", "rig mover backup"}
 
 
+def real_home():
+    return Path.home()
+
+
 def home():
-    """Home folder. FREIGHTER_HOME overrides it (used for testing)."""
-    return Path(os.environ.get("FREIGHTER_HOME") or Path.home())
+    """Home folder. FREIGHTER_HOME overrides it (rehearsals and tests use a stand-in)."""
+    return Path(os.environ.get("FREIGHTER_HOME") or real_home())
 
 
 # --------------------------------------------------------------------------- known folders
@@ -77,10 +81,11 @@ def _registry_folders():
 
 def user_folders(h=None):
     """Desktop, Documents and Music for home folder h, where they really are on this computer.
-    Moved folders are only looked up for the real home folder (not a rehearsal's stand-in)."""
+    Moved folders are only looked up for this computer's real home folder: never for a rehearsal's
+    stand-in or any other folder (the registry only describes the real one)."""
     h = home() if h is None else Path(h)
     folders = {"Music": h / "Music", "Documents": h / "Documents", "Desktop": h / "Desktop"}
-    if THIS_OS == "windows" and not os.environ.get("FREIGHTER_HOME"):
+    if THIS_OS == "windows" and not os.environ.get("FREIGHTER_HOME") and _norm_abs(h) == _norm_abs(real_home()):
         for name, path in _registry_folders().items():
             if path.is_dir():
                 folders[name] = path
