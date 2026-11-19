@@ -30,3 +30,19 @@ What's left before release, in order: [ROADMAP.md](ROADMAP.md).
 | `TESTING.md` | How Freighter is tested |
 
 Needs only Python 3.8 or newer. No other packages.
+
+## License
+
+Freighter is free software under the [GNU General Public License v3.0](LICENSE). You can use, study, share and
+change it. If you share a changed version, it has to stay open under the same license.
+
+Copyright © 2026 chasubowl-creator.
+
+## Contributing
+
+Bug reports and ideas are very welcome: [open an issue](https://github.com/chasubowl-creator/freighter/issues/new).
+Please attach the report files Freighter wrote (for example `rehearsal-report.txt` or `unpack-report.txt`) and say which
+version you ran (`freighter --version`).
+
+Code contributions (pull requests) aren't being accepted for now. This keeps the project's licensing simple while it
+finds its feet.
