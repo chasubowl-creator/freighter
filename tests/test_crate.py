@@ -7,6 +7,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import wave
 from pathlib import Path
 
@@ -181,6 +182,15 @@ class BuildAndUndo(unittest.TestCase):
         self.assertEqual(snares, ["snare (KitB).wav", "snare.wav"])
         self.assertTrue((lib / "MIDI" / "KitA" / "riff.mid").is_file())
         crate.undo(lib)
+
+    def test_refuses_to_copy_without_space(self):
+        """Issue #12: a copying build checks the space first and changes nothing."""
+        lib = self.tmp / "Library"
+        with mock.patch.object(crate.shutil, "disk_usage", lambda p: mock.Mock(free=1000)):
+            with self.assertRaises(SystemExit) as e:
+                crate.build(crate.plan([self.src]), lib, copy=True)
+        self.assertIn("Not enough free space", str(e.exception.code))
+        self.assertFalse(lib.exists())
 
     def test_copy_mode(self):
         lib = self.tmp / "Library"

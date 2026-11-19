@@ -574,6 +574,17 @@ class FullMove(TempDirCase):
         self.assertIn("9.9.9", str(e.exception.code))
         self.assertIn("Update Freighter", str(e.exception.code))
 
+    def test_unpack_stops_before_copying_when_a_disk_is_full(self):
+        """Issue #12."""
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        new.mkdir()
+        with as_home(new), quiet(), mock.patch.object(rm.shutil, "disk_usage", lambda p: mock.Mock(free=1000)):
+            with self.assertRaises(SystemExit) as e:
+                rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        self.assertIn("Not enough free space", str(e.exception.code))
+        self.assertFalse([p for p in new.rglob("*.wav")], "nothing was copied")
+
     def test_unpack_twice_copies_nothing_new(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
         bundle = self.pack(old, drive)

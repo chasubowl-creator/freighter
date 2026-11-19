@@ -561,6 +561,33 @@ def cmd_pack(args):
 
 # --------------------------------------------------------------------------- unpack
 
+def existing_parent(path):
+    path = Path(path)
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    return path
+
+
+def space_shortfalls(plan, margin=200 * 1024 * 1024):
+    """For an unpack plan [(item, dest, index)]: the disks without room for the files still to copy.
+    Returns [(disk, bytes needed, bytes free)]. Keeps a small margin so the disk isn't filled to the brim."""
+    need, free, where = {}, {}, {}
+    for it, dest, idx in plan:
+        anchor = existing_parent(dest)
+        disk = os.stat(anchor).st_dev
+        where.setdefault(disk, anchor)
+        free.setdefault(disk, shutil.disk_usage(anchor).free)
+        for rec in idx.values():
+            target = dest / (rec["rel"] if THIS_OS != "windows" else rec["stored"])
+            try:
+                if target.stat().st_size == rec["size"]:
+                    continue   # most likely already unpacked
+            except OSError:
+                pass
+            need[disk] = need.get(disk, 0) + rec["size"]
+    return [(where[d], n, free[d]) for d, n in need.items() if n + margin > free[d]]
+
+
 def cmd_unpack(args):
     bundle = Path(args.bundle).expanduser()
     try:
@@ -593,8 +620,11 @@ def cmd_unpack(args):
     print("Unpacking:")
     for it, dest, idx in plan:
         print(f"  {it['label']}: {len(idx)} files -> {dest}")
-    if shutil.disk_usage(landing).free < total:
-        print(f"Warning: this disk may not have room for {rs.human_size(total)}.")
+    short = space_shortfalls(plan)
+    if short:
+        sys.exit("Not enough free space, so nothing was unpacked:\n" + "\n".join(
+            f"  {where}: needs {rs.human_size(need)}, has {rs.human_size(free)} free" for where, need, free in short)
+            + "\nFree up space, or send big items elsewhere with --dest-for ID=FOLDER.")
 
     prog = Progress(total, "Copying")
     prog.add(0)

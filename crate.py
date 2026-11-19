@@ -432,7 +432,31 @@ def folder_for(it, library, by="genre"):
     return library.joinpath(*[safe_part(p) for p in parts])
 
 
+def copy_bytes_needed(items, library, copy):
+    """Bytes a build would really copy: everything with --copy, else only files on another drive than the
+    library (links can't cross drives)."""
+    anchor = library
+    while not anchor.exists() and anchor.parent != anchor:
+        anchor = anchor.parent
+    lib_dev = os.stat(anchor).st_dev
+    need = 0
+    for it in items:
+        if it["duplicate_of"]:
+            continue
+        try:
+            st = os.stat(it["path"])
+        except OSError:
+            continue
+        if copy or st.st_dev != lib_dev:
+            need += st.st_size
+    return need, shutil.disk_usage(anchor).free
+
+
 def build(items, library, copy, by="genre"):
+    need, free = copy_bytes_needed(items, library, copy)
+    if need and need + 200 * 1024 * 1024 > free:
+        sys.exit(f"Not enough free space for the library: it needs {need / 1e9:.1f} GB of copies "
+                 f"and the drive has {free / 1e9:.1f} GB free. Nothing was changed.")
     library.mkdir(parents=True, exist_ok=True)
     log_path = library / "crate-log.json"
     log = json.loads(log_path.read_text(encoding="utf-8")) if log_path.is_file() else {"created": []}
