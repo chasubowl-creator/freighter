@@ -282,7 +282,9 @@ def read_jsonl(p):
 
 # --------------------------------------------------------------------------- pack
 
-def pack_items(includes, skips):
+def pack_items(includes, skips, missing=None):
+    """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
+    already missing on this computer]}."""
     items = []
     for rid, (label, path) in known_roots(THIS_OS, home()).items():
         if path.is_dir() and rid not in skips:
@@ -294,7 +296,9 @@ def pack_items(includes, skips):
         iid = f"extra{i}"
         if iid not in skips:
             items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
-    folders, loose = project_sample_folders(items)
+    folders, loose, gone = project_sample_folders(items)
+    if missing is not None:
+        missing.update(gone)
     for i, (folder, label) in enumerate(folders.items(), 1):
         iid = f"used{i}"
         if iid not in skips:
@@ -338,23 +342,28 @@ def landing_name(source_path):
 def project_sample_folders(items):
     """What a move needs beyond the packed items: projects found in Desktop, Documents and Music (even ones
     that use no outside samples), and every sample folder FL/Ableton projects use.
-    Returns ({folder: label}, {folder: set of file names to take loose})."""
+    Returns ({folder: label}, {folder: set of file names to take loose},
+             {project path: [samples it uses that are already missing]})."""
     h = home()
     covered = [Path(it["source_path"]) for it in items]
     roots = [r for r in user_folders(h).values() if r.is_dir()]
     roots += [c for c in covered if c.is_dir()]
     flps = find_projects(roots, ".flp", include_backups=True)
     alss = find_projects(roots, ".als")
-    refs = set()
+    refs = {}   # sample -> projects that use it
     for p in flps:
         try:
-            refs.update(s for s in flp_samples(p)[1] if not FL_PLACEHOLDER.match(s))
+            for s in flp_samples(p)[1]:
+                if not FL_PLACEHOLDER.match(s):
+                    refs.setdefault(s, set()).add(p)
         except (ValueError, OSError, struct.error):
             pass
     for p in alss:
         try:
             text, _ = read_als(p)
-            refs.update(html.unescape(m.group(2)) for m in PATH_RE.finditer(text) if m.group(2))
+            for m in PATH_RE.finditer(text):
+                if m.group(2):
+                    refs.setdefault(html.unescape(m.group(2)), set()).add(p)
         except Exception:
             pass
     bases = [u for u in user_folders(h).values() if u.is_dir()]
@@ -375,11 +384,33 @@ def project_sample_folders(items):
     for p in flps + alss:
         if not inside_covered(p) and "backup" not in {x.lower() for x in p.parts[:-1]}:
             take(p, "Folder with projects")
-    for s in refs:
-        if os.path.isfile(s) and not inside_covered(Path(s)):
+    missing = {}
+    for s, users in refs.items():
+        if not os.path.isfile(s):
+            for p in users:
+                missing.setdefault(str(p), []).append(s)
+        elif not inside_covered(Path(s)):
             take(Path(s), "Samples your projects use")
     keep = {f: label for f, label in folders.items() if not any(o != f and o in f.parents for o in folders)}
-    return dict(sorted(keep.items(), key=lambda kv: str(kv[0]).lower())), loose
+    missing = {p: sorted(v) for p, v in sorted(missing.items(), key=lambda kv: kv[0].lower())}
+    return dict(sorted(keep.items(), key=lambda kv: str(kv[0]).lower())), loose, missing
+
+
+def missing_lines(missing):
+    """One line per sample that was already missing, grouped by project."""
+    return [f"{Path(p).name}: {s}" for p, samples in missing.items() for s in samples]
+
+
+def say_missing(missing, where=None):
+    lines = missing_lines(missing)
+    if not lines:
+        return
+    print(f"\n{len(lines)} samples used by {len(missing)} projects are already missing on this computer, so they "
+          "can't be moved.\nIf they're on a drive that isn't plugged in, plug it in and run this again.")
+    for line in lines[:8]:
+        print(f"  {line}")
+    if len(lines) > 8:
+        print(f"  ... and {len(lines) - 8} more" + (f" (all listed in {where})" if where else ""))
 
 
 def folder_to_move(path, h, bases, covered):
@@ -407,7 +438,8 @@ def folder_to_move(path, h, bases, covered):
 
 
 def cmd_pack(args):
-    items = pack_items(args.include, set(args.skip))
+    missing = {}
+    items = pack_items(args.include, set(args.skip), missing)
     if not items:
         msg = "Nothing to pack: no standard music folders found. Add folders with --include FOLDER."
         if args.list or not args.to:
@@ -446,6 +478,7 @@ def cmd_pack(args):
         if left_behind:
             print(f"{len(left_behind)} programs or installers will be left behind (reinstall software from its "
                   "maker). Keep them with --include-programs.")
+        say_missing(missing)
         if not args.to:
             return 0
         if args.list:
@@ -509,7 +542,13 @@ def cmd_pack(args):
             "Programs, installers and plugin files left out of this move. Reinstall software from its maker;\n"
             "installers found in sample folders are a common way malware spreads.\n\n" + "\n".join(left_behind),
             encoding="utf-8")
+    if missing:
+        (bundle / "already-missing.txt").write_text(
+            f"Freighter {__version__}\n\nSamples your projects use that were already missing on {host} when this "
+            "bundle was packed.\nThey couldn't be moved. If they were on a drive that wasn't plugged in, plug it in "
+            "and pack again.\n\n" + "\n".join(missing_lines(missing)), encoding="utf-8")
     print(f"\nBundle ready: {bundle}")
+    say_missing(missing, "already-missing.txt")
     if left_behind:
         print(f"{len(left_behind)} programs or installers were left behind; see left-behind.txt.")
     if errors:
@@ -1037,7 +1076,7 @@ def cmd_rehearse(args):
         maps = load_pathmaps(None)
         roots = project_search_roots(maps, [])
         totals = {"kept": 0, "lost": 0, "already": 0, "projects": 0, "unchecked": 0}
-        lost, unchecked = [], []
+        lost, unchecked, already = [], [], []
         for p in find_projects(roots, ".flp") + find_projects(roots, ".als"):
             kind, refs = project_refs(p)
             if refs is None:
@@ -1050,6 +1089,7 @@ def cmd_rehearse(args):
                 after = locate(r, maps)[0] != "missing"  # on the new one
                 if not before:
                     totals["already"] += 1
+                    already.append(f"{p.name}: {r}")
                 elif after:
                     totals["kept"] += 1
                 else:
@@ -1067,6 +1107,9 @@ def cmd_rehearse(args):
         ]
         if lost:
             lines += ["", "Lost samples (please report these):"] + lost
+        if already:
+            lines += ["", "Already missing before the move (fix these on the old computer, e.g. plug in the "
+                      "drive they were on):"] + already
         if unchecked:
             lines += ["", "Not checked automatically:"] + unchecked
         report = base / "rehearsal-report.txt"
@@ -1075,6 +1118,8 @@ def cmd_rehearse(args):
         verdict = "PASS: every working sample survived the move." if not totals["lost"] else \
             f"FAIL: {totals['lost']} samples were lost. See {report}"
         print("\n" + verdict)
+        if already:
+            print(f"Note: {len(already)} samples were already missing before the move (listed in {report}).")
         print(f"Rehearsal files: {base}  (delete this folder when you're done; your real files weren't touched)")
         return 0 if not totals["lost"] else 2
     finally:

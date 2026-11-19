@@ -374,6 +374,15 @@ class WhatGetsPacked(TempDirCase):
         self.assertFalse(any(Path(it["source_path"]) == h / "Desktop" and "only" not in it for it in items),
                          "never the whole Desktop")
 
+    def test_pack_list_names_samples_that_are_already_missing(self):
+        h = self.tmp / "home"
+        make_flp(h / "Desktop" / "Beat" / "Beat.flp", [str(h / "Unplugged" / "kick.wav")])
+        out = io.StringIO()
+        with as_home(h), contextlib.redirect_stdout(out):
+            rm.cmd_pack(argparse.Namespace(to=None, list=True, include=[], skip=[], include_programs=False))
+        self.assertIn("1 samples used by 1 projects are already missing", out.getvalue())
+        self.assertIn("Beat.flp: " + str(h / "Unplugged" / "kick.wav"), out.getvalue())
+
     def test_user_library_is_not_packed_twice(self):
         """Issue #9: a project next to the User Library used to pull in the whole Ableton folder."""
         h = self.tmp / "home"
@@ -473,6 +482,8 @@ class FullMove(TempDirCase):
         manifest = json.loads((bundle / "manifest.json").read_text())
         ids = {it["id"] for it in manifest["items"]}
         self.assertTrue({"fl_user", "ableton_user_library", "used1", "loose1"} <= ids)
+        gone = (bundle / "already-missing.txt").read_text()
+        self.assertIn("Song.als: /nowhere/gone.wav", gone, "already-missing samples are listed (issue #15)")
         self.assertFalse(any("unrelated.zip" in p.name for p in (bundle / "data").rglob("*")),
                          "files no project uses must not be packed")
 
@@ -540,6 +551,7 @@ class FullMove(TempDirCase):
         self.assertEqual(code, 0)
         report = (old / "rehearsal" / "rehearsal-report.txt").read_text()
         self.assertIn("LOST in the move: 0", report)
+        self.assertIn("Song.als: /nowhere/gone.wav", report, "already-missing samples are listed (issue #15)")
         self.assertIn("still found after the move: 3", report)
         self.assertTrue(self.kick.is_file(), "the real files must not be touched")
 
