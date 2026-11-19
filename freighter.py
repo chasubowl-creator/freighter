@@ -32,7 +32,7 @@ import shutil
 import struct
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import manifest as rs  # noqa: E402
@@ -252,17 +252,31 @@ def pack_items(includes, skips):
     return items
 
 
-def sample_folder_for(sample, h):
-    """The folder to move for one referenced sample: two levels under home
-    (e.g. ~/Desktop/DrumKits), or three levels from the root elsewhere (e.g. /Volumes/SSD/Samples)."""
-    p = Path(sample)
+def sample_folder_for(sample, h, mac=None):
+    """The folder to move for one referenced sample: two levels under home (e.g. ~/Desktop/DrumKits), or up to
+    three levels from the root elsewhere (e.g. /Volumes/SSD/Samples, D:\\Samples\\Drums).
+    None when the sample sits at the top of a drive (/Volumes/SSD/kick.wav, D:\\kick.wav): the caller then takes
+    just that file, never the whole drive."""
+    mac = rs.IS_MAC if mac is None else mac
+    P = PurePosixPath if mac else PureWindowsPath
+    p, hp = P(sample), P(str(h))
     try:
-        rel = p.relative_to(h)
+        rel = p.relative_to(hp)
         parts = rel.parts[:2] if len(rel.parts) > 2 else rel.parts[:1]
-        return h.joinpath(*parts) if parts else None
+        return Path(str(hp.joinpath(*parts))) if parts else None
     except ValueError:
-        parts = p.parts[:4] if rs.IS_MAC else p.parts[:3]
-        return Path(*parts) if len(parts) > 1 else None
+        folder = p.parent.parts                    # never the file itself
+        if len(folder) < (4 if mac else 2):        # the top of a drive: / Volumes SSD, or D:\\
+            return None
+        return Path(str(P(*folder[:4 if mac else 3])))
+
+
+def landing_name(source_path):
+    """Folder name for a moved item on the new computer. A drive root (D:\\) becomes "D drive"."""
+    name = source_path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    if re.fullmatch(r"[A-Za-z]:", name):
+        return f"{name[0].upper()} drive"
+    return safe_rel(name) if name else "Loose samples"
 
 
 def project_sample_folders(items):
@@ -295,7 +309,10 @@ def project_sample_folders(items):
             loose.setdefault(str(sp.parent), set()).add(sp.name)
             continue
         f = sample_folder_for(s, h)
-        if f and f.is_dir() and f != h:
+        if f is None:
+            # at the top of a drive: take the file, not the whole drive
+            loose.setdefault(str(sp.parent), set()).add(sp.name)
+        elif f.is_dir() and f != h:
             folders.add(f)
     folders = sorted((f for f in folders if not any(o != f and o in f.parents for o in folders)),
                      key=lambda f: str(f).lower())
@@ -427,7 +444,7 @@ def cmd_unpack(args):
         if it["kind"] == "known" and it["id"] in dest_known:
             dest = dest_known[it["id"]][1]
         else:
-            dest = landing / Path(it["source_path"].replace("\\", "/")).name
+            dest = landing / landing_name(it["source_path"])
         if args.dest_for:
             for spec in args.dest_for:
                 iid, _, folder = spec.partition("=")

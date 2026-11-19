@@ -15,6 +15,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -315,6 +316,46 @@ class PathMapping(TempDirCase):
 
 
 # --------------------------------------------------------------------------- full moves
+
+class SampleFolders(TempDirCase):
+    """Which folder gets moved for a sample a project uses (issue #7)."""
+
+    def test_windows(self):
+        h = "C:\\Users\\Producer"
+        f = lambda s: (lambda r: str(r) if r else None)(rm.sample_folder_for(s, h, mac=False))
+        self.assertEqual(f("D:\\Samples\\kick.wav"), "D:\\Samples")
+        self.assertEqual(f("D:\\Samples\\Drums\\Kit\\kick.wav"), "D:\\Samples\\Drums")
+        self.assertIsNone(f("D:\\kick.wav"), "a file at the top of a drive is taken alone, never the whole drive")
+        self.assertEqual(f("C:\\Users\\Producer\\Desktop\\Kit\\kick.wav"), "C:\\Users\\Producer\\Desktop\\Kit")
+        self.assertEqual(f("c:\\users\\producer\\Desktop\\Kit\\kick.wav"), "C:\\Users\\Producer\\Desktop\\Kit")
+
+    def test_mac(self):
+        f = lambda s: (lambda r: r.as_posix() if r else None)(rm.sample_folder_for(s, "/Users/producer", mac=True))
+        self.assertIsNone(f("/Volumes/SSD/kick.wav"))
+        self.assertEqual(f("/Volumes/SSD/Samples/kick.wav"), "/Volumes/SSD/Samples")
+        self.assertEqual(f("/Volumes/SSD/Samples/Drums/Kit/kick.wav"), "/Volumes/SSD/Samples")
+        self.assertEqual(f("/Users/producer/Desktop/Kit/Kicks/kick.wav"), "/Users/producer/Desktop/Kit")
+
+    def test_landing_names(self):
+        self.assertEqual(rm.landing_name("D:\\"), "D drive")
+        self.assertEqual(rm.landing_name("e:/"), "E drive")
+        self.assertEqual(rm.landing_name("/Volumes/SSD"), "SSD")
+        self.assertEqual(rm.landing_name("C:\\Users\\Producer\\Desktop\\Kit"), "Kit")
+
+    def test_sample_at_top_of_a_drive_is_packed_alone(self):
+        old = self.tmp / "old"
+        drive_root = self.tmp / "SSD"
+        kick = write(drive_root / "kick.wav", os.urandom(1000))
+        write(drive_root / "huge-unrelated.wav", os.urandom(5000))
+        make_flp(old / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp", [str(kick)])
+        real = rm.sample_folder_for
+        top = lambda s, h, mac=None: None if Path(s).parent == drive_root else real(s, h, mac)
+        with as_home(old), mock.patch.object(rm, "sample_folder_for", top):
+            items = rm.pack_items([], set())
+        loose = [it for it in items if it["id"].startswith("loose")]
+        self.assertEqual(len(loose), 1, items)
+        self.assertEqual(loose[0]["only"], ["kick.wav"], "only the used file, not the rest of the drive")
+
 
 class FullMove(TempDirCase):
     """Pack on one fake home, unpack on another, repair, and check every sample."""
