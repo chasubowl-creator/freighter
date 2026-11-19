@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import gzip
 import hashlib
+import html
 import io
 import json
 import os
@@ -751,6 +752,89 @@ class Menu(TempDirCase):
             raise EOFError
         with quiet(), mock.patch("builtins.input", closed):
             self.assertEqual(rm.interactive_menu(), 0)
+
+
+class CrossOSMove(TempDirCase):
+    """Issue #20: a bundle packed on Windows unpacks and repairs here, and so does one packed on a Mac.
+    The bundles are built exactly as pack writes them, so both directions run on every CI machine."""
+
+    def bundle(self, source_os, items):
+        b = self.tmp / f"Freighter-OLD{source_os.upper()}-2026-01-01"
+        manifest = {"bundle_version": rm.BUNDLE_VERSION, "freighter_version": rm.__version__,
+                    "created": "2026-01-01T12:00:00", "source_host": f"OLD{source_os.upper()}", "source_os": source_os,
+                    "source_home": items[0]["home"], "items": []}
+        for it in items:
+            manifest["items"].append({k: it[k] for k in ("id", "label", "source_path", "kind")})
+            taken, lines = set(), []
+            for rel, data in it["files"].items():
+                stored = rm.unique_stored(rel, taken)
+                write(b / "data" / it["id"] / stored, data)
+                lines.append(json.dumps({"rel": rel, "stored": stored, "size": len(data),
+                                         "sha256": hashlib.sha256(data).hexdigest()}))
+            write(b / "index" / f"{it['id']}.jsonl", ("\n".join(lines) + "\n").encode())
+        write(b / "manifest.json", json.dumps(manifest).encode())
+        return b
+
+    def projects(self, kick_ref, snare_ref):
+        stage = self.tmp / "stage"
+        als = make_als(stage / "Song.als", [kick_ref]).read_bytes()
+        raw = gzip.decompress(make_als(stage / "Raw.als", [kick_ref]).read_bytes())   # saved uncompressed
+        flp = make_flp(stage / "Beat.flp", [snare_ref]).read_bytes()
+        return als, raw, flp
+
+    def move(self, source_os, h, sep, ul, dest_for=()):
+        kit = sep.join([h, "Desktop", "DrumKits"])
+        kick_old = sep.join([kit, "Kicks", "Kick 01 & Co.wav"])
+        snare_old = sep.join([kit, "Snares", "snare.wav"])
+        # Live on Windows writes forward slashes; FL writes backslashes
+        als, raw, flp = self.projects(kick_old.replace("\\", "/"), snare_old)
+        b = self.bundle(source_os, [
+            {"id": "fl_user", "kind": "known", "label": "FL", "home": h,
+             "source_path": sep.join([h, "Documents", "Image-Line"]),
+             "files": {"FL Studio/Projects/Beat/Beat.flp": flp}},
+            {"id": "ableton_user_library", "kind": "known", "label": "UL", "home": h, "source_path": ul,
+             "files": {"Song Project/Song.als": als, "Raw Project/Raw.als": raw}},
+            {"id": "used1", "kind": "extra", "label": "Samples: DrumKits", "home": h, "source_path": kit,
+             "files": {"Kicks/Kick 01 & Co.wav": b"kick", "Snares/snare.wav": b"snare"}},
+        ])
+        new = self.tmp / "new"
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=list(dest_for)))
+            rm.cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
+            rm.cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
+            user_library = rm.known_roots(rm.THIS_OS, new)["ableton_user_library"][1]
+        return new, user_library
+
+    def assert_repaired(self, new, user_library):
+        for name, compressed in (("Song Project/Song.als", True), ("Raw Project/Raw.als", False)):
+            p = user_library / name
+            self.assertTrue(p.is_file(), f"{name} landed in this computer's User Library")
+            text, gz = rm.read_als(p)
+            self.assertEqual(gz, compressed, "repair keeps the file's compression")
+            refs = [html.unescape(m.group(2)) for m in rm.PATH_RE.finditer(text)]
+            self.assertEqual(len(refs), 1)
+            self.assertTrue(Path(refs[0]).is_file(), f"{name} points at the moved kick: {refs[0]}")
+            self.assertEqual(Path(refs[0]).read_bytes(), b"kick")
+            self.assertIn("&amp;", text, "the & in the file name is escaped in the XML")
+        fl = (new / "Music" / "Freighter" / "fl-check-report.txt").read_text(encoding="utf-8")
+        self.assertIn("moved=1 missing=0", fl)
+
+    def test_windows_to_here(self):
+        h = "C:\\Users\\Producer"
+        self.assert_repaired(*self.move("windows", h, "\\", h + "\\Documents\\Ableton\\User Library"))
+
+    def test_mac_to_here(self):
+        h = "/Users/producer"
+        self.assert_repaired(*self.move("mac", h, "/", h + "/Music/Ableton/User Library"))
+
+    def test_dest_for_sends_an_item_elsewhere(self):
+        h = "C:\\Users\\Producer"
+        elsewhere = self.tmp / "Samples drive" / "Kits"
+        new, ul = self.move("windows", h, "\\", h + "\\Documents\\Ableton\\User Library",
+                            dest_for=[f"used1={elsewhere}"])
+        self.assertEqual((elsewhere / "Kicks" / "Kick 01 & Co.wav").read_bytes(), b"kick")
+        self.assert_repaired(new, ul)
 
 if __name__ == "__main__":
     unittest.main()
