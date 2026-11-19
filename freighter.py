@@ -51,9 +51,49 @@ def home():
 
 # --------------------------------------------------------------------------- known folders
 
+SHELL_FOLDERS_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+
+
+def _registry_folders():
+    """Where Windows really keeps Desktop, Documents and Music. OneDrive moves Desktop and Documents by
+    default (e.g. C:\\Users\\you\\OneDrive\\Documents), and people move them to other drives."""
+    if not rs.IS_WIN:
+        return {}
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, SHELL_FOLDERS_KEY)
+    except OSError:
+        return {}
+    found = {}
+    with key:
+        for name, value in (("Desktop", "Desktop"), ("Documents", "Personal"), ("Music", "My Music")):
+            try:
+                raw, _ = winreg.QueryValueEx(key, value)
+                found[name] = Path(winreg.ExpandEnvironmentStrings(raw))
+            except OSError:
+                pass
+    return found
+
+
+def user_folders(h=None):
+    """Desktop, Documents and Music for home folder h, where they really are on this computer.
+    Moved folders are only looked up for the real home folder (not a rehearsal's stand-in)."""
+    h = home() if h is None else Path(h)
+    folders = {"Music": h / "Music", "Documents": h / "Documents", "Desktop": h / "Desktop"}
+    if THIS_OS == "windows" and not os.environ.get("FREIGHTER_HOME"):
+        for name, path in _registry_folders().items():
+            if path.is_dir():
+                folders[name] = path
+    return folders
+
+
 def known_roots(os_name, h):
     """Standard places producers keep their own files, by logical id, for one OS."""
-    docs, music = h / "Documents", h / "Music"
+    if os_name == THIS_OS:
+        uf = user_folders(h)
+        docs, music = uf["Documents"], uf["Music"]
+    else:
+        docs, music = h / "Documents", h / "Music"
     roots = {
         "fl_user": ("FL Studio user data (projects, presets, recordings)", docs / "Image-Line"),
         "ableton_user_library": ("Ableton User Library",
@@ -164,6 +204,15 @@ def is_program(path):
     return False
 
 
+# OneDrive "Files On-Demand" placeholders: the file lives in the cloud and downloads when read
+CLOUD_ONLY_ATTRS = 0x400000 | 0x40000 | 0x1000   # RECALL_ON_DATA_ACCESS, RECALL_ON_OPEN, OFFLINE
+CLOUD_ONLY = []   # (path, size) of cloud-only files seen while measuring; cmd_pack reports them
+
+
+def is_cloud_only(st):
+    return bool(getattr(st, "st_file_attributes", 0) & CLOUD_ONLY_ATTRS)
+
+
 def walk_files(root, left_behind=None):
     """Yield (relative posix path, absolute path, size) for every real file under root.
     With a left_behind list, programs and installers are skipped and recorded there instead."""
@@ -188,10 +237,12 @@ def walk_files(root, left_behind=None):
             if ap.is_symlink():
                 continue
             try:
-                size = ap.stat().st_size
+                st = ap.stat()
             except OSError:
                 continue
-            yield ap.relative_to(root).as_posix(), ap, size
+            if is_cloud_only(st):
+                CLOUD_ONLY.append((ap, st.st_size))
+            yield ap.relative_to(root).as_posix(), ap, st.st_size
 
 
 class Progress:
@@ -283,7 +334,7 @@ def project_sample_folders(items):
     """Folders outside the packed items that FL/Ableton projects pull samples from."""
     h = home()
     covered = [Path(it["source_path"]) for it in items]
-    roots = [r for r in (h / "Music", h / "Documents", h / "Desktop") if r.is_dir()]
+    roots = [r for r in user_folders(h).values() if r.is_dir()]
     roots += [c for c in covered if c.is_dir()]
     refs = set()
     for p in find_projects(roots, ".flp", include_backups=True):
@@ -298,14 +349,24 @@ def project_sample_folders(items):
         except Exception:
             pass
     folders, loose = set(), {}
+    bases = [u for u in user_folders(h).values() if u.is_dir()]
     for s in refs:
         if not os.path.isfile(s):
             continue
         sp = Path(s)
         if any(c == sp or c in sp.parents for c in covered):
             continue
+        base = next((u for u in bases if u in sp.parents), None)
+        if base is not None:
+            # inside Desktop, Documents or Music (wherever they really are, e.g. in OneDrive): take the
+            # top folder inside it, or just the file if it sits loose there
+            if sp.parent == base:
+                loose.setdefault(str(sp.parent), set()).add(sp.name)
+            else:
+                folders.add(base / sp.relative_to(base).parts[0])
+            continue
         if sp.parent.parent == h:
-            # a file sitting straight in ~/Downloads, ~/Desktop etc.: take the file, not the whole folder
+            # a file sitting straight in ~/Downloads etc.: take the file, not the whole folder
             loose.setdefault(str(sp.parent), set()).add(sp.name)
             continue
         f = sample_folder_for(s, h)
@@ -329,6 +390,7 @@ def cmd_pack(args):
         sys.exit(msg)
 
     print("Measuring folders...", flush=True)
+    del CLOUD_ONLY[:]
     left_behind = None if getattr(args, "include_programs", False) else []
     for it in items:
         if "only" in it:
@@ -344,6 +406,11 @@ def cmd_pack(args):
         it["files"] = len(files)
         it["bytes"] = sum(f[2] for f in files)
     total = sum(it["bytes"] for it in items)
+    if CLOUD_ONLY:
+        size = sum(n for _, n in CLOUD_ONLY)
+        print(f"\nNote: {len(CLOUD_ONLY)} files ({rs.human_size(size)}) are only stored in OneDrive's cloud, not on this "
+              f"computer.\nPacking downloads them first, so stay online. To speed it up, right-click the folder in "
+              f"File Explorer and choose \"Always keep on this device\" before packing.\nFirst one: {CLOUD_ONLY[0][0]}")
 
     if args.list or not args.to:
         print(f"\n{'ID':<22} {'SIZE':>10} {'FILES':>8}  WHAT")
@@ -591,7 +658,7 @@ def project_search_roots(maps, folders):
     if folders:
         return [Path(f).expanduser() for f in folders]
     h = home()
-    roots = [h / "Music", h / "Documents", h / "Desktop"]
+    roots = list(user_folders(h).values())
     for pm in maps:
         roots += [Path(e["new"]) for e in pm["entries"]]
     seen, out = set(), []
@@ -841,7 +908,7 @@ def cmd_check_fl(args):
 
 def cmd_scan(args):
     h = home()
-    roots = [r for r in (h / "Music", h / "Documents", h / "Desktop") if r.is_dir()]
+    roots = [r for r in user_folders(h).values() if r.is_dir()]
     rows = []
     print("Looking for projects...", flush=True)
     for p in find_projects(roots, ".flp"):

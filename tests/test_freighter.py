@@ -357,6 +357,55 @@ class SampleFolders(TempDirCase):
         self.assertEqual(loose[0]["only"], ["kick.wav"], "only the used file, not the rest of the drive")
 
 
+class OneDriveFolders(TempDirCase):
+    """Windows can keep Desktop and Documents somewhere else, usually in OneDrive (issue #6)."""
+
+    def setUp(self):
+        super().setUp()
+        self.h = self.tmp / "home"
+        self.docs = self.h / "OneDrive" / "Documents"
+        self.desk = self.h / "OneDrive" / "Desktop"
+        self.docs.mkdir(parents=True)
+        self.desk.mkdir(parents=True)
+
+    @contextlib.contextmanager
+    def windows_with_onedrive(self):
+        env = {k: v for k, v in os.environ.items() if k != "FREIGHTER_HOME"}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(rm, "THIS_OS", "windows"), \
+                mock.patch.object(rm, "home", lambda: self.h), \
+                mock.patch.object(rm, "_registry_folders", lambda: {"Documents": self.docs, "Desktop": self.desk}):
+            yield
+
+    def test_known_folders_follow_moved_documents(self):
+        with self.windows_with_onedrive():
+            roots = rm.known_roots("windows", self.h)
+            self.assertEqual(roots["fl_user"][1], self.docs / "Image-Line")
+            self.assertEqual(roots["ableton_user_library"][1], self.docs / "Ableton" / "User Library")
+            self.assertEqual(rm.user_folders()["Music"], self.h / "Music", "unmoved folders stay put")
+
+    def test_a_rehearsals_stand_in_home_never_uses_the_real_folders(self):
+        with self.windows_with_onedrive(), mock.patch.dict(os.environ, {"FREIGHTER_HOME": str(self.h)}):
+            self.assertEqual(rm.user_folders()["Documents"], self.h / "Documents")
+
+    def test_projects_and_samples_in_onedrive_are_packed(self):
+        kick = write(self.desk / "DrumKits" / "Kicks" / "kick.wav", os.urandom(500))
+        loose = write(self.desk / "vox.wav", os.urandom(300))
+        make_flp(self.docs / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp", [str(kick), str(loose)])
+        with self.windows_with_onedrive(), quiet():
+            items = rm.pack_items([], set())
+        paths = {it["id"]: Path(it["source_path"]) for it in items}
+        self.assertEqual(paths["fl_user"], self.docs / "Image-Line")
+        self.assertIn(self.desk / "DrumKits", paths.values(), "the kit folder, not the whole OneDrive Desktop")
+        self.assertNotIn(self.desk, [p for i, p in paths.items() if not i.startswith("loose")])
+        self.assertTrue(any(it.get("only") == ["vox.wav"] for it in items))
+
+    def test_cloud_only_files_are_recognised(self):
+        self.assertTrue(rm.is_cloud_only(mock.Mock(st_file_attributes=0x400000)))
+        self.assertFalse(rm.is_cloud_only(mock.Mock(st_file_attributes=0x20)))
+        self.assertFalse(rm.is_cloud_only(os.stat(__file__)))
+
+
 class FullMove(TempDirCase):
     """Pack on one fake home, unpack on another, repair, and check every sample."""
 
