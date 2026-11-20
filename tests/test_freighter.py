@@ -694,6 +694,62 @@ class FullMove(TempDirCase):
                          next(it["source_path"] for it in json.loads((bundle / "manifest.json").read_text())["items"]
                               if it["id"] == kit))
 
+    # ---- issue #59: bundles are checked as a whole
+
+    def test_unpack_refuses_an_unfinished_bundle(self):
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        (bundle / rm.COMPLETE).unlink()                      # as if packing had been interrupted
+        new.mkdir()
+        with as_home(new), quiet(), self.assertRaises(SystemExit) as e:
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        self.assertIn("isn't complete", str(e.exception.code))
+        self.assertFalse(list(new.rglob("*.wav")), "nothing was unpacked")
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[], anyway=True))
+        report = next(new.rglob("unpack-report.txt")).read_text()
+        self.assertIn("WASN'T COMPLETE", report)
+
+    def test_a_short_item_is_caught(self):
+        old, drive = self.build_old_computer(), self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        index = bundle / "index" / f"{self.item(bundle, 'DrumKits')}.jsonl"
+        index.write_text("\n".join(index.read_text().splitlines()[:-1]) + "\n")   # one file never recorded
+        problems = rm.bundle_problems(bundle, json.loads((bundle / "manifest.json").read_text()))
+        self.assertTrue(any("of 2 files were packed" in p for p in problems), problems)
+
+    def test_resuming_the_next_day_continues_the_same_bundle(self):
+        old, drive = self.build_old_computer(), self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        (bundle / rm.COMPLETE).unlink()
+        yesterday = bundle.with_name(bundle.name[:-10] + "2000-01-01")
+        bundle.rename(yesterday)
+        self.pack(old, drive)
+        self.assertEqual([p.name for p in drive.iterdir()], [yesterday.name], "no second bundle was started")
+        self.assertTrue((yesterday / rm.COMPLETE).is_file())
+
+    def test_a_changed_file_of_the_same_size_is_copied_again(self):
+        old, drive = self.build_old_computer(), self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        self.snare.write_bytes(b"R" * self.snare.stat().st_size)          # re-rendered, same length
+        later = self.snare.stat().st_mtime + 1000
+        os.utime(self.snare, (later, later))
+        self.pack(old, drive)
+        kit = self.item(bundle, "DrumKits")
+        rec = rm.read_jsonl(bundle / "index" / f"{kit}.jsonl")["Snares/snare.wav"]
+        self.assertEqual((bundle / "data" / kit / rec["stored"]).read_bytes()[:1], b"R")
+
+    def test_unpack_shows_the_old_computers_reports(self):
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        new.mkdir()
+        out = io.StringIO()
+        with as_home(new), contextlib.redirect_stdout(out):
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        self.assertIn("1 sample was already missing on the old computer", out.getvalue())
+        self.assertTrue(list(new.rglob("already-missing.txt")))
+        self.assertIn("Done. Every file is in place", out.getvalue())
+
     def test_unpack_detects_damage_and_keeps_existing_files(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
         bundle = self.pack(old, drive)
@@ -830,6 +886,7 @@ class CrossOSMove(TempDirCase):
                                          "sha256": hashlib.sha256(data).hexdigest()}))
             write(b / "index" / f"{it['id']}.jsonl", ("\n".join(lines) + "\n").encode())
         write(b / "manifest.json", json.dumps(manifest).encode())
+        write(b / rm.COMPLETE, json.dumps({"errors": 0}).encode())   # as a finished pack leaves it
         return b
 
     def projects(self, kick_ref, snare_ref):

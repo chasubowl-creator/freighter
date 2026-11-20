@@ -312,6 +312,53 @@ class Progress:
                   f"  ({rs.human_size(rate)}/s)", flush=True)
 
 
+COMPLETE = "complete.json"   # written last by pack; unpack checks for it (issue #59)
+PACK_REPORTS = (("pack-errors.txt", "file couldn't be copied", "files couldn't be copied"),
+                ("already-missing.txt", "sample was already missing on the old computer",
+                 "samples were already missing on the old computer"),
+                ("left-behind.txt", "program or installer was left behind on purpose",
+                 "programs or installers were left behind on purpose"))
+
+
+def find_bundle(drive, host):
+    """Where this pack goes: this computer's unfinished bundle if there is one (so a pack interrupted yesterday
+    resumes instead of starting over), otherwise today's bundle."""
+    pattern = re.compile(rf"Freighter-{re.escape(host)}-\d{{4}}-\d\d-\d\d$")
+    mine = sorted((p for p in drive.glob("Freighter-*")
+                   if pattern.match(p.name) and (p / "manifest.json").is_file()),
+                  key=lambda p: p.stat().st_mtime)
+    unfinished = [p for p in mine if not (p / COMPLETE).is_file()]
+    return unfinished[-1] if unfinished else drive / f"Freighter-{host}-{dt.date.today().isoformat()}"
+
+
+def report_count(path):
+    """How many entries a pack report lists (lines after its blank-line-separated header)."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    body = text.split("\n\n", 2)[-1] if text.count("\n\n") >= 2 else text.split("\n\n", 1)[-1]
+    return sum(1 for line in body.splitlines() if line.strip())
+
+
+def bundle_problems(bundle, manifest):
+    """Why this bundle isn't a finished, whole pack (empty list when it is)."""
+    problems = []
+    try:
+        done = json.loads((bundle / COMPLETE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        problems.append("Packing this bundle wasn't finished: it was interrupted, or is still running.")
+        done = {}
+    for it in manifest["items"]:
+        have = len(read_jsonl(bundle / "index" / f"{it['id']}.jsonl"))
+        want = it.get("files")
+        if want is not None and have < want:
+            problems.append(f"{it['label']}: only {have} of {want} files were packed.")
+    if done.get("errors"):
+        problems.append(f"{done['errors']} files couldn't be copied (listed in pack-errors.txt on the drive).")
+    return problems
+
+
 def resume_records(bundle, it):
     """The records already packed for this item, if its index really belongs to this item's folder. An index
     written for a different folder (or by an older Freighter without a header) is set aside, never reused."""
@@ -576,7 +623,7 @@ def cmd_pack(args):
 
     host = rs.host_name()
     drive = Path(args.to).expanduser()
-    bundle = drive / f"Freighter-{host}-{dt.date.today().isoformat()}"
+    bundle = find_bundle(drive, host) if drive.is_dir() else drive / f"Freighter-{host}-{dt.date.today().isoformat()}"
     if filesystem(drive) in FAT_NAMES:
         big = [(ap, size) for it in items for _rel, ap, size in it["_files"] if size > FAT_MAX]
         if big:
@@ -610,6 +657,7 @@ def cmd_pack(args):
     }
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
+    (bundle / COMPLETE).unlink(missing_ok=True)   # changing it: not finished until the end
     prog = Progress(total, "Copying")
     prog.add(0)
     errors = []
@@ -627,7 +675,13 @@ def cmd_pack(args):
                 stored = done[rel]["stored"] if rel in done else unique_stored(rel, taken)
                 dst = data_root / stored
                 rec = done.get(rel)
-                if rec and rec["size"] == size and file_size(dst) == size:
+                try:
+                    mtime = int(os.stat(long_path(ap)).st_mtime)
+                except OSError:
+                    mtime = None
+                # skip what's already there, unless the original changed since (same size isn't enough: a
+                # re-rendered sample often keeps its length)
+                if rec and rec["size"] == size and file_size(dst) == size and rec.get("mtime") in (None, mtime):
                     prog.add(size)
                     continue
                 try:
@@ -635,10 +689,13 @@ def cmd_pack(args):
                 except OSError as e:
                     errors.append(f"{ap}: {e}")
                     continue
-                index.write(json.dumps({"rel": rel, "stored": stored, "size": size, "sha256": digest}) + "\n")
+                index.write(json.dumps({"rel": rel, "stored": stored, "size": size, "sha256": digest,
+                                        "mtime": mtime}) + "\n")
                 index.flush()
                 prog.add(size)
 
+    for name, *_ in PACK_REPORTS:   # reports from an earlier run of this bundle no longer apply
+        (bundle / name).unlink(missing_ok=True)
     if left_behind:
         (bundle / "left-behind.txt").write_text(
             f"Freighter {__version__}\n\n"
@@ -655,9 +712,16 @@ def cmd_pack(args):
     if left_behind:
         print(f"{len(left_behind)} programs or installers were left behind; see left-behind.txt.")
     if errors:
-        (bundle / "pack-errors.txt").write_text("\n".join([f"Freighter {__version__}", ""] + errors), encoding="utf-8")
+        (bundle / "pack-errors.txt").write_text("\n".join([f"Freighter {__version__}", "", "Files that couldn't be "
+                                                            "copied:", ""] + errors), encoding="utf-8")
         print(f"{len(errors)} files couldn't be copied; see pack-errors.txt. Run the same command again to retry.")
-    print("Next, on the new computer:  python3 freighter.py unpack \"" + str(bundle) + "\"")
+    (bundle / COMPLETE).write_text(json.dumps({
+        "finished": dt.datetime.now().isoformat(timespec="seconds"), "freighter_version": __version__,
+        "errors": len(errors),
+        "items": {it["id"]: {"files": it["files"], "packed": len(read_jsonl(bundle / "index" / f"{it['id']}.jsonl"))}
+                  for it in items},
+    }, indent=1), encoding="utf-8")
+    print("Next, on the new computer:  " + tool_cmd("freighter", f"unpack \"{bundle}\""))
     return 0
 
 
@@ -786,6 +850,11 @@ def cmd_unpack(args):
     if manifest.get("bundle_version", 1) > BUNDLE_VERSION:
         sys.exit(f"This bundle was made by a newer Freighter ({manifest.get('freighter_version', 'unknown version')}) "
                  f"than this one ({__version__}). Update Freighter on this computer, then unpack again.")
+    problems = bundle_problems(bundle, manifest)
+    if problems and not getattr(args, "anyway", False):
+        sys.exit("This bundle isn't complete, so nothing was unpacked:\n" + "\n".join(f"  - {p}" for p in problems)
+                 + "\nOn the old computer, pack onto the drive again: it picks up where it stopped.\n"
+                 "If the old computer is gone, unpack what's there with --anyway (or answer y in the menu).")
     src_host = manifest["source_host"]
     dest_known = known_roots(THIS_OS, home())
     landing = moved_root(src_host)
@@ -862,7 +931,17 @@ def cmd_unpack(args):
     if (bundle / "plugins.csv").is_file():
         shutil.copy2(bundle / "plugins.csv", landing / f"plugins-{src_host}.csv")
 
+    notes = []
+    for name, one, many in PACK_REPORTS:
+        n = report_count(bundle / name)
+        if n:
+            shutil.copy2(bundle / name, landing / name)
+            notes.append(f"{n} {one if n == 1 else many} (see {landing / name})")
     lines = [f"Freighter {__version__} unpack from {src_host} ({manifest['source_os']}) on {pathmap['created']}", ""]
+    if problems:
+        lines += ["THIS BUNDLE WASN'T COMPLETE. Unpacked what was there:"] + [f"  - {p}" for p in problems] + [""]
+    if notes:
+        lines += ["From the old computer:"] + [f"  - {n}" for n in notes] + [""]
     lines += [f"{e['label']}: {e['old']} -> {e['new']}" for e in entries]
     if conflicts:
         lines += ["", "Files that already existed here with different contents. The moved copy was saved",
@@ -871,7 +950,12 @@ def cmd_unpack(args):
         lines += ["", "Problems:"] + bad
     (landing / "unpack-report.txt").write_text("\n".join(lines), encoding="utf-8")
 
-    print(f"\nDone. Moved files are in place. Path map: {pm_path}")
+    for note in notes:
+        print(f"From the old computer: {note}")
+    if problems or bad:
+        print(f"\nUnpacked, with problems: see {landing / 'unpack-report.txt'}. Path map: {pm_path}")
+    else:
+        print(f"\nDone. Every file is in place and checked. Path map: {pm_path}")
     if conflicts:
         print(f"{len(conflicts)} files already existed with different contents; see unpack-report.txt.")
     if bad:
@@ -1463,7 +1547,19 @@ def interactive_menu():
             elif choice == "5":
                 bundle = ask_path("  Drag the Freighter-... folder from the drive into this window, then press Enter: ")
                 if bundle:
-                    cmd_unpack(argparse.Namespace(bundle=bundle, dest_for=[]))
+                    anyway = False
+                    try:
+                        manifest = json.loads((Path(bundle) / "manifest.json").read_text(encoding="utf-8"))
+                        problems = bundle_problems(Path(bundle), manifest)
+                    except (OSError, ValueError, KeyError):
+                        problems = []
+                    if problems:
+                        print("\n  This bundle isn't complete:\n" + "\n".join(f"    - {p}" for p in problems))
+                        print("  Best: on the old computer, choose 4 again to finish packing.")
+                        anyway = input("  Unpack what's there anyway? (y/n): ").strip().lower().startswith("y")
+                        if not anyway:
+                            continue
+                    cmd_unpack(argparse.Namespace(bundle=bundle, dest_for=[], anyway=anyway))
             elif choice == "6":
                 cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
                 cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
@@ -1533,6 +1629,8 @@ def main():
 
     s = sub.add_parser("unpack", help="put a bundle's files in place on this computer")
     s.add_argument("bundle")
+    s.add_argument("--anyway", action="store_true",
+                   help="unpack what's there even if packing the bundle wasn't finished")
     s.add_argument("--dest-for", action="append", default=[], metavar="ID=FOLDER",
                    help="put one item somewhere else, e.g. used-3fa2b1c9=/Volumes/Samples (IDs are shown by pack --list)")
     s.set_defaults(fn=cmd_unpack)
