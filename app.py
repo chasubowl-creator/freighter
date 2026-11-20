@@ -105,10 +105,9 @@ class Job:
 
 def job_move_list(job):
     """What a move would take from this computer: the same list as `freighter pack --list`."""
-    missing, installed = {}, set()
-    items = rm.pack_items([], set(), missing, installed)
-    total, left_behind = rm.measure_items(items)
-    cloud = list(rm.CLOUD_ONLY)
+    plan = rm.plan_move()
+    items, total, left_behind = plan["items"], plan["total"], plan["left_behind"]
+    missing, installed, cloud = plan["missing"], plan["installed"], plan["cloud_only"]
     gone = rm.missing_lines(missing)
     return {
         "items": [{"id": it["id"], "label": it["label"], "path": it["source_path"], "bytes": it["bytes"],

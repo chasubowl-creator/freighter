@@ -437,7 +437,7 @@ def item_id(prefix, path):
     return f"{prefix}-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:8]}"
 
 
-def pack_items(includes, skips, missing=None, installed=None):
+def pack_items(includes, skips, missing=None, installed=None, needed=None):
     """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
     already missing on this computer]}; if `installed` is a set, with samples that come with installed programs."""
     items = []
@@ -452,7 +452,7 @@ def pack_items(includes, skips, missing=None, installed=None):
         if iid not in skips:
             items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
     left_out = [str(path) for rid, (_l, path) in known_roots(THIS_OS, home()).items() if rid in skips and path.is_dir()]
-    folders, loose, gone = project_sample_folders(items, installed, left_out)
+    folders, loose, gone = project_sample_folders(items, installed, left_out, needed)
     if missing is not None:
         missing.update(gone)
     for folder, label in folders.items():
@@ -514,7 +514,7 @@ def in_program_place(path):
     return (s.lower() + ("/" if not s.endswith("/") else "")).startswith(MAC_PROGRAM_DIRS)
 
 
-def project_sample_folders(items, installed=None, excluded=()):
+def project_sample_folders(items, installed=None, excluded=(), needed=None):
     """What a move needs beyond the packed items: projects found in Desktop, Documents and Music (even ones
     that use no outside samples), and every sample folder FL/Ableton projects use.
     Returns ({folder: label}, {folder: set of file names to take loose},
@@ -570,7 +570,11 @@ def project_sample_folders(items, installed=None, excluded=()):
 
     usable = {}   # project -> the existing samples it uses that need moving (outside packed folders, not programs)
     for s, users in refs.items():
-        if not in_program_place(s) and os.path.isfile(long_path(s)) and not inside_covered(Path(s)):
+        if in_program_place(s) or inside_left_out(Path(s)) or not os.path.isfile(long_path(s)):
+            continue
+        if needed is not None:
+            needed.add(s)        # every existing sample the move must carry, checked again after measuring (#64)
+        if not inside_covered(Path(s)):
             for u in users:
                 usable.setdefault(u, []).append(Path(s))
 
@@ -657,6 +661,22 @@ def folder_to_move(path, h, bases, covered):
     return f
 
 
+def measure_item(it, left_behind):
+    if "only" in it:
+        files = []
+        for name in it["only"]:
+            ap = Path(it["source_path"]) / name
+            size = file_size(ap)
+            if size is not None:
+                files.append((name, ap, size))
+    else:
+        # DAW user-data folders move whole; sample folders leave programs and installers behind
+        files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None))
+    it["_files"] = files
+    it["files"] = len(files)
+    it["bytes"] = sum(f[2] for f in files)
+
+
 def measure_items(items, include_programs=False):
     """List every file each item would pack (it["_files"], it["files"], it["bytes"]). Fills CLOUD_ONLY.
     Returns (total bytes, programs left behind, or None when they're kept)."""
@@ -664,20 +684,42 @@ def measure_items(items, include_programs=False):
     left_behind = None if include_programs else []
     for i, it in enumerate(items):
         report_progress(f"Measuring {it['label']}", i, len(items))
-        if "only" in it:
-            files = []
-            for name in it["only"]:
-                ap = Path(it["source_path"]) / name
-                size = file_size(ap)
-                if size is not None:
-                    files.append((name, ap, size))
-        else:
-            # DAW user-data folders move whole; sample folders leave programs and installers behind
-            files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None))
-        it["_files"] = files
-        it["files"] = len(files)
-        it["bytes"] = sum(f[2] for f in files)
+        measure_item(it, left_behind)
     return sum(it["bytes"] for it in items), left_behind
+
+
+def cover_stragglers(items, needed):
+    """The safety net (issue #64): every existing sample a project uses must be in some item's file list. Any that
+    isn't (a symlink inside a packed folder, an odd location, or a future gap in the folder rules) is added as a
+    loose file. Returns how many were added."""
+    fold = THIS_OS == "windows"
+    packed = {norm(str(ap), fold) for it in items for _rel, ap, _size in it["_files"]}
+    stray = sorted(s for s in needed if norm(s, fold) not in packed)
+    by_folder = {}
+    for s in stray:
+        p = Path(s)
+        by_folder.setdefault(str(p.parent), []).append(p.name)
+    for folder, names in by_folder.items():
+        iid = item_id("loose", folder)
+        it = next((i for i in items if i["id"] == iid), None)
+        if it is None:
+            it = {"id": iid, "label": f"Loose files your projects use from {landing_name(folder)}",
+                  "source_path": folder, "kind": "extra", "only": []}
+            items.append(it)
+        it["only"] = sorted(set(it["only"]) | set(names))
+        measure_item(it, None)
+    return len(stray)
+
+
+def plan_move(includes=(), skips=(), include_programs=False):
+    """Everything a pack (or the app's move list) needs to know, decided once. Returns a dict with items (measured),
+    total, left_behind, missing, installed, cloud_only and stragglers (files the safety net added)."""
+    missing, installed, needed = {}, set(), set()
+    items = pack_items(list(includes), set(skips), missing, installed, needed)
+    total, left_behind = measure_items(items, include_programs) if items else (0, None)
+    added = cover_stragglers(items, needed) if items else 0
+    return {"items": items, "total": sum(it["bytes"] for it in items), "left_behind": left_behind,
+            "missing": missing, "installed": installed, "cloud_only": list(CLOUD_ONLY), "stragglers": added}
 
 
 def say_installed(installed):
@@ -689,8 +731,9 @@ def say_installed(installed):
 
 
 def cmd_pack(args):
-    missing, installed = {}, set()
-    items = pack_items(args.include, set(args.skip), missing, installed)
+    print("Looking through your music folders and projects...", flush=True)
+    plan = plan_move(args.include, args.skip, getattr(args, "include_programs", False))
+    items, missing, installed = plan["items"], plan["missing"], plan["installed"]
     if not items:
         msg = "Nothing to pack: no standard music folders found. Add folders with --include FOLDER."
         if args.list or not args.to:
@@ -698,8 +741,10 @@ def cmd_pack(args):
             return 0
         sys.exit(msg)
 
-    print("Measuring folders...", flush=True)
-    total, left_behind = measure_items(items, getattr(args, "include_programs", False))
+    total, left_behind = plan["total"], plan["left_behind"]
+    if plan["stragglers"]:
+        print(f"Added {plan['stragglers']} sample{'s' if plan['stragglers'] != 1 else ''} your projects use that the "
+              "folders above didn't cover (as loose files).")
     if CLOUD_ONLY:
         size = sum(n for _, n in CLOUD_ONLY)
         print(f"\nNote: {len(CLOUD_ONLY)} files ({rs.human_size(size)}) are only stored in OneDrive's cloud, not on this "

@@ -518,6 +518,36 @@ class WhatGetsPacked(TempDirCase):
         self.assertFalse((drive / rm.REHEARSAL_MARKER).exists(), "the drive itself isn't marked")
         self.assertTrue((drive / "Freighter Rehearsal" / rm.REHEARSAL_MARKER).exists())
 
+    def test_safety_net_packs_a_sample_the_folder_rules_missed(self):
+        """Issue #64: a symlinked sample inside a packed folder is skipped by the folder walk; the safety net adds it."""
+        h = self.tmp / "home"
+        real = write(h / "Elsewhere" / "real kick.wav", b"the real kick")
+        kits = h / "Desktop" / "Kits"
+        snare = write(kits / "snare.wav", b"snare")
+        try:
+            os.symlink(real, kits / "kick.wav")
+        except (OSError, NotImplementedError):
+            self.skipTest("can't make symlinks here (Windows without developer mode)")
+        make_flp(h / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp",
+                 [str(kits / "kick.wav"), str(snare)])
+        with as_home(h), quiet():
+            plan = rm.plan_move()
+        self.assertEqual(plan["stragglers"], 1)
+        packed = {str(ap) for it in plan["items"] for _r, ap, _s in it["_files"]}
+        self.assertIn(str(kits / "kick.wav"), packed)
+        drive, new = self.tmp / "drive", self.tmp / "new"
+        drive.mkdir()
+        new.mkdir()
+        with as_home(h), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
+        shutil.rmtree(h)   # the old computer is gone
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(next(drive.glob("Freighter-*"))), dest_for=[]))
+            maps = rm.load_pathmaps(None)
+            status, where = rm.locate(str(kits / "kick.wav"), maps)
+        self.assertEqual(status, "moved")
+        self.assertEqual(where.read_bytes(), b"the real kick")
+
     def test_user_library_is_not_packed_twice(self):
         """Issue #9: a project next to the User Library used to pull in the whole Ableton folder."""
         h = self.tmp / "home"
