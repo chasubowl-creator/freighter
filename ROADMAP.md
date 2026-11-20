@@ -18,11 +18,11 @@ Tick the box here when the issue closes.
 
 *about 1 day.* Clean the history, license it, give it a version, and open the code.
 
-- [ ] Remove personal details from the git history (#1) · S · Claude + you
-- [ ] Make the repository public (#2) · S · You (Claude can flip it)
-- [ ] Add the GPL-3.0 license and a contributions note (#3) · S · Claude
-- [ ] Version number, --version and a changelog (#4) · S · Claude
-- [ ] Move the project into a permanent folder on the Mac (#5) · S · You choose, Claude moves
+- [x] Remove personal details from the git history (#1) · S · Claude + you
+- [x] Make the repository public (#2) · S · You (Claude can flip it)
+- [x] Add the GPL-3.0 license and a contributions note (#3) · S · Claude
+- [x] Version number, --version and a changelog (#4) · S · Claude
+- [x] Move the project into a permanent folder on the Mac (#5) · S · You choose, Claude moves
 
 **Done when:** The repository is public under GPL-3.0, with no personal details in its history, and has a version number and changelog.
 
@@ -30,35 +30,65 @@ Tick the box here when the issue closes.
 
 *about 1 week.* Fix every way the mover can silently skip, lose or misplace a producer's files.
 
-- [ ] Find the real Desktop, Documents and Music folders on Windows (OneDrive) (#6) · M · Claude
-- [ ] Samples sitting at the top of a drive are skipped (#7) · S · Claude
-- [ ] Projects that use no outside samples aren't packed (#8) · M · Claude
-- [ ] The Ableton User Library can be packed twice (#9) · S · Claude
-- [ ] Long Windows paths (over 260 characters) and network drives (#10) · M · Claude
-- [ ] External drive problems: FAT32 4 GB limit, name clashes, ._ files, read-only drives (#11) · M · Claude
-- [ ] Refuse to unpack, or build a Crate library, without enough free space (#12) · S · Claude
-- [ ] Match accented file names between Mac and Windows (#13) · S · Claude
-- [ ] Check the bundle version on unpack (#14) · S · Claude
-- [ ] Report samples that were already missing on the old computer (#15) · S · Claude
-- [ ] Rehearse leaves the menu pointed at the rehearsal folder (#16) · S · Claude
-- [ ] Crashes close the window before anyone can read them (#17) · S · Claude
-- [ ] Write reports and rehearsals to a sensible, writable place (#18) · S · Claude
-- [ ] Make Ableton repairs safe if the computer stops mid-write (#19) · S · Claude
-- [ ] Tests for cross-OS moves, and run scan in CI (#20) · M · Claude
+- [x] Find the real Desktop, Documents and Music folders on Windows (OneDrive) (#6) · M · Claude
+- [x] Samples sitting at the top of a drive are skipped (#7) · S · Claude
+- [x] Projects that use no outside samples aren't packed (#8) · M · Claude
+- [x] The Ableton User Library can be packed twice (#9) · S · Claude
+- [x] Long Windows paths (over 260 characters) and network drives (#10) · M · Claude
+- [x] External drive problems: FAT32 4 GB limit, name clashes, ._ files, read-only drives (#11) · M · Claude
+- [x] Refuse to unpack, or build a Crate library, without enough free space (#12) · S · Claude
+- [x] Match accented file names between Mac and Windows (#13) · S · Claude
+- [x] Check the bundle version on unpack (#14) · S · Claude
+- [x] Report samples that were already missing on the old computer (#15) · S · Claude
+- [x] Rehearse leaves the menu pointed at the rehearsal folder (#16) · S · Claude
+- [x] Crashes close the window before anyone can read them (#17) · S · Claude
+- [x] Write reports and rehearsals to a sensible, writable place (#18) · S · Claude
+- [x] Make Ableton repairs safe if the computer stops mid-write (#19) · S · Claude
+- [x] Tests for cross-OS moves, and run scan in CI (#20) · M · Claude
 
 **Done when:** Every fix has a test, CI is green on Windows and Mac, and nothing is ever skipped without being reported.
+
+## M1b · Never a wrong result ([issues](https://github.com/chasubowl-creator/freighter/milestone/8))
+
+*about 4–5 days.* Found in the major-improvements review: ways a move could still silently mix up, miss or wrongly add files. Done before anyone relies on a real move.
+
+- [ ] Resuming a pack can put one folder's files into another (#57) · M · Claude
+- [ ] Moved folders with the same name land in the same place (#58) · S · Claude
+- [ ] Check bundles as a whole: completeness, reports, and resuming the next day (#59) · M · Claude
+- [ ] Never pack programs or app folders as "samples" (#60) · M · Claude
+- [ ] Demo projects inside sample packs pull whole libraries into the move (#61) · M · Claude
+- [ ] Close the remaining ways folders are missed or packed by mistake (#62) · M · Claude
+- [ ] Repair can pick the wrong file after a name clash on Windows (#63) · S · Claude
+- [ ] Safety net: every sample a project uses must be in the bundle (#64) · M · Claude
+- [ ] Make the rehearsal honest (#65) · M · Claude
+- [ ] App: one job at a time for real, and sturdier requests (#66) · S · Claude
+
+**Done when:** Every item has a test that reproduced it, CI is green on Windows and Mac, and the real rehearsal still passes.
 
 ## M2 · Proven on real computers ([issues](https://github.com/chasubowl-creator/freighter/milestone/3))
 
 *about 1 week, mostly you.* Run Freighter on real Windows and Mac setups, including a full move, and fix what turns up.
 
-- [ ] Tidy the tester docs (#21) · S · Claude
+- [x] Tidy the tester docs (#21) · S · Claude
 - [ ] Run the Windows test on your current PC (#22) · M · You
 - [ ] Fix whatever the Windows test turns up (#23) · M · Claude
 - [ ] Do one real move: Windows PC → drive → Mac (#24) · M · You
 - [ ] Ask 2–3 producer friends to run a rehearsal (#25) · S · You
 
 **Done when:** Zero lost samples in every rehearsal and in one real Windows → Mac move.
+
+## M2b · Projects open by themselves ([issues](https://github.com/chasubowl-creator/freighter/milestone/9))
+
+*about 2–3 weeks.* The product promise: projects open on the new computer without hunting for samples or plugins.
+
+- [ ] Same-places restore for same-OS moves (#67) · L · Claude
+- [ ] Repair FL Studio projects: rewrite sample paths in the .flp (#68) · L · Claude
+- [ ] Read what FL Studio and Ableton already know about your folders (#69) · M · Claude
+- [ ] Plugin readiness for each project (#70) · L · Claude
+- [ ] Sample libraries and plugin content (Kontakt and friends) (#71) · L · Claude
+- [ ] Ableton: real Live 11/12 sets, Live 10 sets and racks (#72) · M · Claude
+
+**Done when:** A same-OS move needs no repair, FL projects are repaired like Ableton's, and each project shows which plugins it still needs.
 
 ## M3 · The 1.0 app ([issues](https://github.com/chasubowl-creator/freighter/milestone/4))
 
@@ -69,10 +99,12 @@ Tick the box here when the issue closes.
 - [ ] App: new-computer screens (unpack, repair, results) (#28) · L · Claude
 - [ ] App: plugins screen with the reinstall checklist (#29) · M · Claude
 - [ ] Plugin maker download links and a license-deactivation checklist (#30) · M · Claude
-- [ ] Move third-party plugin presets (#31) · M · Claude
+- [ ] Move third-party plugin presets (#31, widened into #71) · M · Claude
 - [ ] Repair Ableton device presets and clips (.adg, .alc) (#32) · S · Claude
-- [ ] FL Studio: point it at the moved sample folders (#33) · M · Claude
+- [ ] FL Studio: point it at the moved sample folders (#33, mostly replaced by #68) · M · Claude
 - [ ] App: Crate screen (#34) · S · Claude
+- [ ] Unpack journal, preview and undo (#73) · M · Claude
+- [ ] Speed for 500 GB moves (#74) · M · Claude
 - [ ] Usability test with a non-technical producer (#35) · S · You
 
 **Done when:** A non-technical producer completes a move without help.
@@ -121,6 +153,7 @@ Tick the box here when the issue closes.
 
 ## How the work proceeds
 
-1. Milestones go in order. Inside a milestone, Claude tasks can run while You tasks wait on you.
+1. Milestones go in order: M0, M1, M1b, then M2 (your real-computer tests) alongside M2b, then M3–M5. Your Windows test can start any time, since it only reads and rehearses; a real move should wait for M1b and the first M2b items.
+1. Within a milestone, Claude tasks can run while You tasks wait on you.
 2. Each fix lands as its own commit with a test, and the commit message says `Fixes #N` so the issue closes itself.
 3. New problems found in testing become new issues in the milestone where they block.
