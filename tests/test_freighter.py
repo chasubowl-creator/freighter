@@ -1136,6 +1136,23 @@ class CrossOSMove(TempDirCase):
         self.assertEqual(olds, [h + "/Desktop/Kits", h + "/Desktop/Loops"], "the second unpack kept the first's map")
         self.assertEqual(rm.locate(h + "/Desktop/Kits/k.wav", maps)[0], "moved")
 
+    def test_renamed_files_are_found_by_their_record_on_windows(self):
+        """Issue #63: kick?.wav and kick_.wav clash on a Windows drive; repair must not hand kick_.wav's projects
+        the other file's audio."""
+        h = "/Users/producer"
+        b = self.bundle("mac", [{"id": "used-k", "kind": "extra", "label": "Kits", "home": h,
+                                 "source_path": h + "/Desktop/Kits",
+                                 "files": {"kick?.wav": b"question kick", "kick_.wav": b"underscore kick"}}])
+        new = self.tmp / "new"
+        new.mkdir()
+        with as_home(new), quiet(), mock.patch.object(rm, "THIS_OS", "windows"):
+            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=[]))
+            maps = rm.load_pathmaps(None)
+            got = {name: rm.locate(f"{h}/Desktop/Kits/{name}", maps) for name in ("kick_.wav", "kick?.wav")}
+        self.assertEqual(got["kick_.wav"][0], "moved")
+        self.assertEqual(got["kick_.wav"][1].read_bytes(), b"underscore kick")
+        self.assertEqual(got["kick?.wav"][1].read_bytes(), b"question kick")
+
     def test_dest_for_sends_an_item_elsewhere(self):
         h = "C:\\Users\\Producer"
         elsewhere = self.tmp / "Samples drive" / "Kits"

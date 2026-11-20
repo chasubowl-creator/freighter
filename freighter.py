@@ -1013,7 +1013,14 @@ def cmd_unpack(args):
             if digest != rec["sha256"]:
                 bad.append(f"{dst}: checksum mismatch (the copy on the drive may be damaged)")
             prog.add(rec["size"])
-        entries.append({"id": it["id"], "label": it["label"], "old": it["source_path"], "new": str(dest)})
+        entry = {"id": it["id"], "label": it["label"], "old": it["source_path"], "new": str(dest)}
+        if THIS_OS == "windows":
+            # files unpacked under a different name (Windows can't hold the original, or two names clashed):
+            # repair must find them by this record, never by guessing (issue #63)
+            renamed = {rec["rel"]: rec["stored"] for rec in index.values() if rec["stored"] != rec["rel"]}
+            if renamed:
+                entry["renamed"] = renamed
+        entries.append(entry)
 
     # keep what earlier unpacks from this computer mapped, unless this one maps the same folder again
     fold = manifest["source_os"] == "windows"
@@ -1102,11 +1109,17 @@ def candidates(old, maps):
         fold = pm["source_os"] == "windows"
         o_raw = norm(old, False)
         o = o_raw.lower() if fold else o_raw
-        pairs = [(e["old"], e["new"]) for e in pm["entries"]] + [(pm["home"]["old"], pm["home"]["new"])]
-        for old_root, new_root in pairs:
+        pairs = [(e["old"], e["new"], e.get("renamed") or {}) for e in pm["entries"]] \
+            + [(pm["home"]["old"], pm["home"]["new"], {})]
+        for old_root, new_root, renamed in pairs:
             k = norm(old_root, fold)
             if o == k or o.startswith(k + "/"):
                 rest = o_raw[len(k):].lstrip("/")
+                if renamed and rest:
+                    lookup = {norm(r, fold): v for r, v in renamed.items()}
+                    hit = lookup.get(norm(rest, fold))
+                    if hit:
+                        out.append(Path(new_root).joinpath(*hit.split("/")))
                 forms = (rest, unicodedata.normalize("NFC", rest), unicodedata.normalize("NFD", rest))
                 for r in dict.fromkeys(f for x in forms for f in (x, safe_rel(x))) if rest else ("",):
                     # safe_rel: names Windows can't hold (e.g. "kick: hard.wav") were stored renamed.
