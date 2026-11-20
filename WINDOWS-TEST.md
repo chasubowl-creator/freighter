@@ -55,7 +55,7 @@ Type **3** and press Enter. At the end it prints either:
 - **FAIL:** lists the samples it lost. That's a Freighter bug, and exactly what we're looking for.
 
 **If C: is too small,** use the command version instead, pointing at an external drive (see "Command
-version" below): `freighter.exe rehearse --to E:\freighter-rehearsal`
+version" below): `freighter.exe rehearse --to E:\`
 
 ## Step 6: Send the results back
 
@@ -76,7 +76,7 @@ Delete the **Rehearsal** folder in `Music\Freighter`. Your real files were never
 In the folder with freighter.exe, click the address bar, type `cmd`, press Enter, then for example:
 
     freighter.exe pack --list
-    freighter.exe rehearse --to E:\freighter-rehearsal
+    freighter.exe rehearse --to E:\
     freighter.exe rehearse --skip used-3fa2b1c9      (use an ID from the pack --list output)
     manifest.exe --extra-dir "D:\VST"
     manifest.exe --virus-scan

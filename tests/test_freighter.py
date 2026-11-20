@@ -451,6 +451,73 @@ class WhatGetsPacked(TempDirCase):
         self.assertIn(h / "Desktop" / "Everything" / "2024" / "Beat 7", paths)
         self.assertNotIn(h / "Desktop" / "Everything", paths)
 
+    # ---- issue #62: the remaining ways folders were missed or packed by mistake
+
+    def test_a_sample_in_the_home_folder_itself_comes_as_a_loose_file(self):
+        h = self.tmp / "home"
+        kick = write(h / "kick.wav", b"k" * 50)
+        make_flp(h / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp", [str(kick)])
+        loose = [it for it in self.items(h) if "only" in it]
+        self.assertEqual([(Path(it["source_path"]), it["only"]) for it in loose], [(h, ["kick.wav"])])
+
+    def test_a_skipped_fl_folder_stays_out(self):
+        h = self.tmp / "home"
+        kick = write(h / "Desktop" / "Kits" / "kick.wav", b"k" * 50)
+        make_flp(h / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp", [str(kick)])
+        with as_home(h), quiet():
+            items = rm.pack_items([], {"fl_user"})
+        image_line = h / "Documents" / "Image-Line"
+        for it in items:
+            p = Path(it["source_path"])
+            self.assertFalse(p == image_line or image_line in p.parents or p in image_line.parents, p)
+
+    def test_an_archive_folder_named_backup_is_searched(self):
+        h = self.tmp / "home"
+        make_flp(h / "Documents" / "Backup" / "Beats 2019" / "old.flp", [])
+        make_flp(h / "Desktop" / "Song" / "Backup" / "Song (autosave).flp", [])     # FL autosave: not moved alone
+        paths = [Path(it["source_path"]) for it in self.items(h)]
+        self.assertIn(h / "Documents" / "Backup" / "Beats 2019", paths)
+        self.assertNotIn(h / "Desktop" / "Song" / "Backup", paths)
+
+    def test_projects_and_samples_deeper_than_260_characters_are_found(self):
+        h = self.tmp / "home"
+        deep = h.joinpath("Desktop", *["a very long folder name for a sample pack"] * 7)
+        os.makedirs(rm.long_path(deep / "Beat"))
+        with open(rm.long_path(deep / "kick.wav"), "wb") as f:
+            f.write(b"k" * 50)
+        flp = make_flp(self.tmp / "stage" / "beat.flp", [str(deep / "kick.wav")]).read_bytes()
+        with open(rm.long_path(deep / "Beat" / "beat.flp"), "wb") as f:
+            f.write(flp)
+        self.assertGreater(len(str(deep / "Beat" / "beat.flp")), 300)
+        missing = {}
+        with as_home(h), quiet():
+            items = rm.pack_items([], set(), missing)
+        self.assertEqual(missing, {}, "the deep sample isn't reported missing")
+        self.assertTrue(items, "the deep project and its sample are packed")
+
+    def test_freighters_own_output_is_never_packed(self):
+        h = self.tmp / "home"
+        old_rehearsal = h / "Desktop" / "freighter-windows" / "rehearsal"     # left by an older Freighter
+        make_als(old_rehearsal / "new-computer" / "Music" / "Song Project" / "Song.als", [])
+        (old_rehearsal / "drive").mkdir(parents=True)
+        bundle = h / "Desktop" / "Move" / "Freighter-PC-2026-01-01"            # a half-made bundle
+        write(bundle / "manifest.json", b"{}")
+        (bundle / "index").mkdir()
+        make_flp(bundle / "data" / "fl_user" / "Beat.flp", [])
+        make_flp(h / "Desktop" / "Real" / "real.flp", [])
+        paths = [it["source_path"] for it in self.items(h)]
+        self.assertEqual(paths, [str(h / "Desktop" / "Real")])
+
+    def test_rehearse_to_a_drive_works_in_its_own_folder(self):
+        old = self.tmp / "old"
+        make_flp(old / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp", [])
+        drive = self.tmp / "E"
+        drive.mkdir()
+        with as_home(old), quiet():
+            rm.cmd_rehearse(argparse.Namespace(to=str(drive), include=[], skip=[]))
+        self.assertFalse((drive / rm.REHEARSAL_MARKER).exists(), "the drive itself isn't marked")
+        self.assertTrue((drive / "Freighter Rehearsal" / rm.REHEARSAL_MARKER).exists())
+
     def test_user_library_is_not_packed_twice(self):
         """Issue #9: a project next to the User Library used to pull in the whole Ableton folder."""
         h = self.tmp / "home"
@@ -642,6 +709,14 @@ class OneDriveFolders(TempDirCase):
         with self.windows_with_onedrive():
             other = self.tmp / "someone-else"
             self.assertEqual(rm.known_roots("windows", other)["fl_user"][1], other / "Documents" / "Image-Line")
+
+    def test_fl_data_left_in_the_local_documents_is_still_found(self):
+        """Issue #62: Documents moved to OneDrive, but FL's folder stayed in the local Documents."""
+        local = self.h / "Documents" / "Image-Line"
+        local.mkdir(parents=True)
+        with self.windows_with_onedrive():
+            self.assertEqual(rm.known_roots("windows", self.h)["fl_user"][1], local)
+            self.assertIn(self.h / "Documents", rm.all_user_folders(), "the local Documents is still searched")
 
     def test_a_rehearsals_stand_in_home_never_uses_the_real_folders(self):
         with self.windows_with_onedrive(), mock.patch.dict(os.environ, {"FREIGHTER_HOME": str(self.h)}):
@@ -886,7 +961,7 @@ class FullMove(TempDirCase):
             self.assertEqual(rm.home(), old, "after rehearsing, the real home folder is back (issue #16)")
             self.assertIsNone(rm.HIDE)
         self.assertEqual(code, 0)
-        report = (old / "rehearsal" / "rehearsal-report.txt").read_text()
+        report = (old / "rehearsal" / "Freighter Rehearsal" / "rehearsal-report.txt").read_text()
         self.assertIn("LOST in the move: 0", report)
         self.assertIn("Song.als: /nowhere/gone.wav", report, "already-missing samples are listed (issue #15)")
         self.assertIn("still found after the move: 3", report)

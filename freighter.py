@@ -49,7 +49,18 @@ REHEARSAL_MARKER = ".freighter-rehearsal"   # in a rehearsal's folder; scans and
 
 
 def skip_dir(parent, name):
-    return name.lower() in SKIP_DIRS or os.path.exists(os.path.join(parent, name, REHEARSAL_MARKER))
+    """Folders a scan never enters: trash, Freighter's backups, and Freighter's own output: rehearsals (marked, or
+    the drive/ + new-computer/ layout older versions left without a mark) and bundles (manifest.json + index/ +
+    data/), e.g. a half-made bundle on the Desktop."""
+    if name.lower() in SKIP_DIRS:
+        return True
+    d = os.path.join(parent, name)
+    if os.path.exists(os.path.join(d, REHEARSAL_MARKER)):
+        return True
+    if os.path.isfile(os.path.join(d, "manifest.json")) and os.path.isdir(os.path.join(d, "index")) \
+            and os.path.isdir(os.path.join(d, "data")):
+        return True
+    return os.path.isdir(os.path.join(d, "drive")) and os.path.isdir(os.path.join(d, "new-computer"))
 
 
 def real_home():
@@ -100,6 +111,14 @@ def user_folders(h=None):
     return folders
 
 
+def all_user_folders(h=None):
+    """Every Desktop, Documents and Music folder worth searching: where Windows says they are (e.g. in OneDrive)
+    and the usual ones in the home folder, which can still hold files from before the move to OneDrive."""
+    h = home() if h is None else Path(h)
+    out = list(user_folders(h).values()) + [h / "Music", h / "Documents", h / "Desktop"]
+    return [f for f in dict.fromkeys(out) if f.is_dir()]
+
+
 def known_roots(os_name, h):
     """Standard places producers keep their own files, by logical id, for one OS."""
     if os_name == THIS_OS:
@@ -118,6 +137,17 @@ def known_roots(os_name, h):
     if os_name == "mac":
         roots["logic"] = ("Logic projects", music / "Logic")
         roots["audio_music_apps"] = ("Logic / GarageBand content", music / "Audio Music Apps")
+    if os_name == THIS_OS:
+        # a DAW folder left in the local Documents (from before OneDrive took Documents over) is still the one
+        for rid, (label, path) in list(roots.items()):
+            for moved, local in ((docs, h / "Documents"), (music, h / "Music")):
+                if moved != local and not path.exists():
+                    try:
+                        rel = path.relative_to(moved)
+                    except ValueError:
+                        continue
+                    if (local / rel).exists():
+                        roots[rid] = (label, local / rel)
     return roots
 
 
@@ -421,7 +451,8 @@ def pack_items(includes, skips, missing=None, installed=None):
         iid = item_id("extra", p)
         if iid not in skips:
             items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
-    folders, loose, gone = project_sample_folders(items, installed)
+    left_out = [str(path) for rid, (_l, path) in known_roots(THIS_OS, home()).items() if rid in skips and path.is_dir()]
+    folders, loose, gone = project_sample_folders(items, installed, left_out)
     if missing is not None:
         missing.update(gone)
     for folder, label in folders.items():
@@ -483,17 +514,19 @@ def in_program_place(path):
     return (s.lower() + ("/" if not s.endswith("/") else "")).startswith(MAC_PROGRAM_DIRS)
 
 
-def project_sample_folders(items, installed=None):
+def project_sample_folders(items, installed=None, excluded=()):
     """What a move needs beyond the packed items: projects found in Desktop, Documents and Music (even ones
     that use no outside samples), and every sample folder FL/Ableton projects use.
     Returns ({folder: label}, {folder: set of file names to take loose},
              {project path: [samples it uses that are already missing]})."""
     h = home()
-    covered = [Path(it["source_path"]) for it in items]
-    roots = [r for r in user_folders(h).values() if r.is_dir()]
-    roots += [c for c in covered if c.is_dir()]
-    flps = find_projects(roots, ".flp", include_backups=True)
-    alss = find_projects(roots, ".als")
+    # excluded: DAW folders the user chose to leave out (--skip). They count as handled, so nothing re-adds them.
+    covered = [Path(it["source_path"]) for it in items] + [Path(e) for e in excluded]
+    roots = all_user_folders(h) + [c for c in covered if c.is_dir()]
+    left_out = [Path(e) for e in excluded]
+    inside_left_out = lambda p: any(e == p or e in p.parents for e in left_out)
+    flps = [p for p in find_projects(roots, ".flp", include_backups=True) if not inside_left_out(p)]
+    alss = [p for p in find_projects(roots, ".als") if not inside_left_out(p)]
     refs = {}   # sample -> projects that use it
     for p in flps:
         try:
@@ -509,7 +542,7 @@ def project_sample_folders(items, installed=None):
                 refs.setdefault(ref, set()).add(p)
         except Exception:
             pass
-    bases = [u for u in user_folders(h).values() if u.is_dir()]
+    bases = all_user_folders(h)
     folders, loose = {}, {}
 
     def inside_covered(path):
@@ -537,7 +570,7 @@ def project_sample_folders(items, installed=None):
 
     usable = {}   # project -> the existing samples it uses that need moving (outside packed folders, not programs)
     for s, users in refs.items():
-        if not in_program_place(s) and os.path.isfile(s) and not inside_covered(Path(s)):
+        if not in_program_place(s) and os.path.isfile(long_path(s)) and not inside_covered(Path(s)):
             for u in users:
                 usable.setdefault(u, []).append(Path(s))
 
@@ -547,7 +580,7 @@ def project_sample_folders(items, installed=None):
     # kit, moves with just that part of the tree: it no longer drags a whole sample library along (issue #61).
     handled = set()
     for p in flps + alss:
-        if inside_covered(p) or "backup" in {x.lower() for x in p.parts[:-1]}:
+        if inside_covered(p) or p.parent.name.lower() == "backup":
             continue
         own = p.parent
         if own == h or own in bases or own.parent == own:
@@ -565,11 +598,13 @@ def project_sample_folders(items, installed=None):
 
     missing = {}
     for s, users in refs.items():
+        if inside_left_out(Path(s)):
+            continue
         if in_program_place(s):
             if installed is not None:
                 installed.add(s)
             continue
-        if not os.path.isfile(s):
+        if not os.path.isfile(long_path(s)):
             for p in users:
                 missing.setdefault(str(p), []).append(s)
         elif not inside_covered(Path(s)) and not all(u in handled for u in users):
@@ -608,8 +643,8 @@ def folder_to_move(path, h, bases, covered):
         if path.parent == base:
             return None
         f = base / path.relative_to(base).parts[0]
-    elif path.parent.parent == h:
-        return None      # a file sitting straight in ~/Downloads etc.
+    elif path.parent == h or path.parent.parent == h:
+        return None      # a file sitting in the home folder itself, or straight in ~/Downloads etc.
     else:
         f = sample_folder_for(str(path), h)
         if f is None:
@@ -1114,7 +1149,7 @@ def project_search_roots(maps, folders):
     if folders:
         return [Path(f).expanduser() for f in folders]
     h = home()
-    roots = list(user_folders(h).values())
+    roots = all_user_folders(h)
     for pm in maps:
         roots += [Path(e["new"]) for e in pm["entries"]]
     seen, out = set(), []
@@ -1127,14 +1162,18 @@ def project_search_roots(maps, folders):
 
 
 def find_projects(roots, ext, include_backups=False):
+    """Project files under roots. Autosave copies (in a project's own Backup folder) only with include_backups;
+    a folder that merely has \"backup\" in its name (an archive of old projects) is searched like any other."""
     found = set()
     for root in roots:
-        for cur, dirs, files in os.walk(root, onerror=lambda e: None):
-            dirs[:] = [d for d in dirs if not skip_dir(cur, d) and not d.startswith(".")
-                       and (include_backups or d.lower() != "backup")]
+        for cur, dirs, files in os.walk(long_path(root), onerror=lambda e: None):
+            dirs[:] = [d for d in dirs if not skip_dir(cur, d) and not d.startswith(".")]
+            autosave = os.path.basename(cur).lower() == "backup"
+            if autosave and not include_backups:
+                continue
             for fn in files:
                 if fn.lower().endswith(ext) and not fn.startswith("._"):
-                    found.add(Path(cur) / fn)
+                    found.add(Path(short_path(os.path.join(cur, fn))))
     return sorted(found, key=lambda p: str(p).lower())
 
 
@@ -1171,7 +1210,8 @@ def xml_attr_escape(s):
 
 
 def read_als(path):
-    raw = Path(path).read_bytes()
+    with open(long_path(path), "rb") as f:
+        raw = f.read()
     try:
         return gzip.decompress(raw).decode("utf-8"), True
     except OSError:
@@ -1302,7 +1342,8 @@ FL_PLACEHOLDER = re.compile(r"^%FL[^%]*%", re.I)
 def flp_samples(path):
     """Read the sample paths an .flp project references. Read-only.
     Returns (FL version string, [paths]). Raises ValueError for unreadable files."""
-    data = Path(path).read_bytes()
+    with open(long_path(path), "rb") as f:
+        data = f.read()
     if data[:4] != b"FLhd":
         raise ValueError("not an FL Studio project")
     hlen = struct.unpack("<I", data[4:8])[0]
@@ -1403,7 +1444,7 @@ def cmd_check_fl(args):
 
 def cmd_scan(args):
     h = home()
-    roots = [r for r in user_folders(h).values() if r.is_dir()]
+    roots = all_user_folders(h)
     rows = []
     print("Looking for projects...", flush=True)
     for p in find_projects(roots, ".flp"):
@@ -1468,7 +1509,9 @@ def cmd_rehearse(args):
     """A full move on one computer: pack, unpack into a stand-in 'new computer' folder, repair,
     then check every project's samples. Your real folders are only read, never changed."""
     global HIDE
-    base = (Path(args.to).expanduser() if args.to else home() / "Music" / "Freighter" / "Rehearsal").resolve()
+    # always a folder of its own: --to E:\\ must not turn the whole drive into "a rehearsal" (issue #62)
+    base = (Path(args.to).expanduser() / "Freighter Rehearsal" if args.to
+            else home() / "Music" / "Freighter" / "Rehearsal").resolve()
     drive, new_home = base / "drive", base / "new-computer"
     real_home = home()
     items = pack_items(args.include, set(args.skip))
@@ -1741,7 +1784,7 @@ def main():
     s.set_defaults(fn=cmd_check_fl)
 
     s = sub.add_parser("rehearse", help="practice the whole move on this computer, safely")
-    s.add_argument("--to", metavar="FOLDER", help="where to put the rehearsal (default: Music/Freighter/Rehearsal)")
+    s.add_argument("--to", metavar="FOLDER", help="a drive or folder to rehearse on; Freighter makes a 'Freighter Rehearsal' folder there (default: Music/Freighter/Rehearsal)")
     s.add_argument("--include", action="append", default=[], metavar="FOLDER")
     s.add_argument("--skip", action="append", default=[], metavar="ID")
     s.set_defaults(fn=cmd_rehearse)
