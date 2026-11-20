@@ -52,16 +52,16 @@ Tick the box here when the issue closes.
 
 *about 4–5 days.* Found in the major-improvements review: ways a move could still silently mix up, miss or wrongly add files. Done before anyone relies on a real move.
 
-- [ ] Resuming a pack can put one folder's files into another (#57) · M · Claude
-- [ ] Moved folders with the same name land in the same place (#58) · S · Claude
-- [ ] Check bundles as a whole: completeness, reports, and resuming the next day (#59) · M · Claude
-- [ ] Never pack programs or app folders as "samples" (#60) · M · Claude
-- [ ] Demo projects inside sample packs pull whole libraries into the move (#61) · M · Claude
-- [ ] Close the remaining ways folders are missed or packed by mistake (#62) · M · Claude
-- [ ] Repair can pick the wrong file after a name clash on Windows (#63) · S · Claude
-- [ ] Safety net: every sample a project uses must be in the bundle (#64) · M · Claude
-- [ ] Make the rehearsal honest (#65) · M · Claude
-- [ ] App: one job at a time for real, and sturdier requests (#66) · S · Claude
+- [x] Resuming a pack can put one folder's files into another (#57) · M · Claude
+- [x] Moved folders with the same name land in the same place (#58) · S · Claude
+- [x] Check bundles as a whole: completeness, reports, and resuming the next day (#59) · M · Claude
+- [x] Never pack programs or app folders as "samples" (#60) · M · Claude
+- [x] Demo projects inside sample packs pull whole libraries into the move (#61) · M · Claude
+- [x] Close the remaining ways folders are missed or packed by mistake (#62) · M · Claude
+- [x] Repair can pick the wrong file after a name clash on Windows (#63) · S · Claude
+- [x] Safety net: every sample a project uses must be in the bundle (#64) · M · Claude
+- [x] Make the rehearsal honest (#65) · M · Claude
+- [x] App: one job at a time for real, and sturdier requests (#66) · S · Claude
 
 **Done when:** Every item has a test that reproduced it, CI is green on Windows and Mac, and the real rehearsal still passes.
 
