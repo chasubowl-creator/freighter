@@ -1173,7 +1173,7 @@ def candidates(old, maps):
     return out
 
 
-HIDE = None  # during a rehearsal: (old home, rehearsal folder). Files under the old home count as gone.
+HIDE = None  # during a rehearsal: (folders that count as gone, or None for everything, rehearsal folder)
 
 
 def _norm_abs(p):
@@ -1185,9 +1185,9 @@ def exists(p):
     if not p:
         return False
     if HIDE:
-        s, (old, keep) = _norm_abs(p), HIDE
+        s, (gone, keep) = _norm_abs(p), HIDE
         under = lambda root: s == root or s.startswith(root.rstrip(os.sep) + os.sep)
-        if under(old) and not under(keep):
+        if (gone is None or any(under(g) for g in gone)) and not under(keep):
             return False
     return os.path.exists(long_path(p))
 
@@ -1546,11 +1546,32 @@ def cmd_scan(args):
 
 # --------------------------------------------------------------------------- rehearse
 
+FL_USER_DATA = re.compile(r"^%FLStudioUserData%", re.I)
+
+
+def fl_user_data(h):
+    """What FL's %FLStudioUserData% means for home folder h: <FL user folder>/FL Studio."""
+    return known_roots(THIS_OS, h)["fl_user"][1] / "FL Studio"
+
+
+def same_contents(a, b):
+    """True when two files hold the same bytes (size first, then a hash). A rehearsal uses this so a sample
+    moved to the wrong place, or the wrong sample, can't pass."""
+    try:
+        if os.stat(long_path(a)).st_size != os.stat(long_path(b)).st_size:
+            return False
+        return hash_file(a) == hash_file(b)
+    except OSError:
+        return False
+
+
 def project_refs(p):
     """(kind, [referenced file paths as the project stored them]) or (kind, None) if unreadable."""
     if p.suffix.lower() == ".flp":
         try:
-            return "FL Studio", [s for s in dict.fromkeys(flp_samples(p)[1]) if not FL_PLACEHOLDER.match(s)]
+            # FL's own sounds (%FLStudioFactoryData%) come with FL; the user's data (%FLStudioUserData%) is checked
+            return "FL Studio", [s for s in dict.fromkeys(flp_samples(p)[1])
+                                 if FL_USER_DATA.match(s) or not FL_PLACEHOLDER.match(s)]
         except (ValueError, OSError, struct.error):
             return "FL Studio", None
     src = p.parent / "Freighter backup" / p.name  # the original, if fix-ableton rewrote it
@@ -1597,7 +1618,9 @@ def cmd_rehearse(args):
     try:
         os.environ["FREIGHTER_HOME"] = str(new_home)
         new_home.mkdir(parents=True, exist_ok=True)
-        HIDE = (_norm_abs(real_home), _norm_abs(base))
+        # the old computer is gone: everything outside the rehearsal counts as missing, not just the home folder,
+        # so a sample on D:\\ or an external drive passes only if its moved copy works (issue #65)
+        HIDE = (None, _norm_abs(base))
         print("\n== 2/4  Unpack, as the new computer (the old computer's files now count as gone)")
         cmd_unpack(argparse.Namespace(bundle=str(bundles[-1]), dest_for=[]))
         print("\n== 3/4  Repair projects")
@@ -1617,12 +1640,22 @@ def cmd_rehearse(args):
                 continue
             totals["projects"] += 1
             for r in refs:
-                before = os.path.exists(r)           # on the old computer
-                after = locate(r, maps)[0] != "missing"  # on the new one
+                if in_program_place(r):
+                    continue                     # comes with an installed program, not part of the move
+                if FL_USER_DATA.match(r):        # FL's own user-data folder: compare old home with new home
+                    rest = FL_USER_DATA.sub("", r).replace("\\", "/").lstrip("/")
+                    original = fl_user_data(real_home).joinpath(*rest.split("/"))
+                    moved = fl_user_data(new_home).joinpath(*rest.split("/"))
+                    moved = moved if moved.exists() else None
+                else:
+                    original = Path(r)
+                    status, moved = locate(r, maps)
+                    moved = moved if status != "missing" else None
+                before = os.path.exists(long_path(original))     # on the old computer (it's still here)
                 if not before:
                     totals["already"] += 1
                     already.append(f"{p.name}: {r}")
-                elif after:
+                elif moved is not None and same_contents(original, moved):
                     totals["kept"] += 1
                 else:
                     totals["lost"] += 1

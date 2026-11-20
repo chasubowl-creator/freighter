@@ -350,10 +350,15 @@ class PathMapping(TempDirCase):
         old = self.tmp / "home"
         keep = old / "rehearsal"
         a, b = write(old / "Desktop" / "a.wav"), write(keep / "b.wav")
-        rm.HIDE = (rm._norm_abs(old), rm._norm_abs(keep))
+        ssd = write(self.tmp / "SSD" / "Samples" / "c.wav")          # a packed folder outside the home folder
+        rm.HIDE = ([rm._norm_abs(old), rm._norm_abs(ssd.parent)], rm._norm_abs(keep))
         self.assertFalse(rm.exists(a))
+        self.assertFalse(rm.exists(ssd), "every packed source counts as gone, not just the home folder (#65)")
         self.assertTrue(rm.exists(b))
         self.assertTrue(rm.exists(self.tmp))
+        rm.HIDE = (None, rm._norm_abs(keep))                          # what a rehearsal uses: all but its folder
+        self.assertFalse(rm.exists(ssd))
+        self.assertTrue(rm.exists(b))
 
 
 # --------------------------------------------------------------------------- full moves
@@ -1012,6 +1017,34 @@ class FullMove(TempDirCase):
     def test_reports_and_rehearsals_default_to_music_freighter(self):
         with as_home(self.tmp):
             self.assertEqual(rs.reports_dir(), self.tmp / "Music" / "Freighter" / "Reports")
+
+    def test_rehearsal_catches_a_moved_sample_with_the_wrong_contents(self):
+        """Issue #65: the rehearsal compares contents, so a mix-up can't pass just because a file exists."""
+        old = self.build_old_computer()
+
+        def damage(_args):   # stands in for any bug that puts the wrong audio where the snare should be
+            moved = next((Path(os.environ["FREIGHTER_HOME"])).rglob("snare.wav"))
+            moved.write_bytes(b"\0" * moved.stat().st_size)
+        with as_home(old), quiet(), mock.patch.object(rm, "cmd_check_fl", side_effect=damage):
+            code = rm.cmd_rehearse(argparse.Namespace(to=str(old / "rehearsal"), include=[], skip=[]))
+        report = (old / "rehearsal" / "Freighter Rehearsal" / "rehearsal-report.txt").read_text()
+        self.assertEqual(code, 2)
+        self.assertIn("LOST in the move: 1", report)
+        self.assertIn("snare.wav", report)
+
+    def test_rehearsal_checks_fl_user_data_samples(self):
+        """%FLStudioUserData% samples (half of a real setup's references) used to be skipped as FL's own sounds."""
+        old = self.tmp / "old"
+        rec = write(old / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Audio" / "take 1.wav",
+                    b"my recording")
+        make_flp(old / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp",
+                 ["%FLStudioUserData%/Projects/Beat/Audio/take 1.wav", "%FLStudioFactoryData%/Data/x.wav"])
+        with as_home(old), quiet():
+            code = rm.cmd_rehearse(argparse.Namespace(to=str(old / "rehearsal"), include=[], skip=[]))
+        report = (old / "rehearsal" / "Freighter Rehearsal" / "rehearsal-report.txt").read_text()
+        self.assertEqual(code, 0)
+        self.assertIn("still found after the move: 1", report)
+        self.assertTrue(rec.is_file())
 
     def test_rehearsal_restores_folders_even_when_it_fails(self):
         old = self.build_old_computer()
