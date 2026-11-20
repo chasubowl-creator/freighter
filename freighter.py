@@ -739,6 +739,44 @@ def unique_stored(rel, taken):
     return stored
 
 
+def previous_entries(landing):
+    """Path-map entries from earlier unpacks from the same computer (for top-up bundles)."""
+    try:
+        return json.loads((landing / "pathmap.json").read_text(encoding="utf-8")).get("entries", [])
+    except (OSError, ValueError):
+        return []
+
+
+def landing_folders(items, landing, previous, fold_case):
+    """A landing folder for each moved item, never shared with another item (issue #58: C:\\...\\Desktop\\Samples
+    and D:\\Samples used to land in the same folder, so repair could point at the wrong file). A folder an earlier
+    unpack already gave to the same source is reused, so top-up bundles land in the same places."""
+    before = {norm(e["old"], fold_case): Path(e["new"]) for e in previous if Path(e["new"]).parent == landing}
+    taken = {p.name.lower() for p in before.values()}
+    out = {}
+    for it in sorted(items, key=lambda i: norm(i["source_path"], True)):
+        key = norm(it["source_path"], fold_case)
+        if key in before:
+            out[it["id"]] = before[key]
+            continue
+        base = landing_name(it["source_path"])
+        name = base
+        if name.lower() in taken:
+            src = it["source_path"].replace("\\", "/").rstrip("/")
+            drive = re.match(r"^([A-Za-z]):", src)
+            parent = Path(src).parent.name
+            hint = f"{drive.group(1).upper()} drive" if drive and not src[2:].strip("/").count("/") else \
+                (safe_rel(parent) if parent and not re.fullmatch(r"[A-Za-z]:", parent) else "")
+            name = f"{base} ({hint})" if hint else base
+        n = 2
+        while name.lower() in taken:
+            name = f"{base} ({n})"
+            n += 1
+        taken.add(name.lower())
+        out[it["id"]] = landing / name
+    return out
+
+
 def cmd_unpack(args):
     bundle = Path(args.bundle).expanduser()
     try:
@@ -753,12 +791,15 @@ def cmd_unpack(args):
     landing = moved_root(src_host)
     landing.mkdir(parents=True, exist_ok=True)
 
+    previous = previous_entries(landing)
+    moved = [it for it in manifest["items"] if not (it["kind"] == "known" and it["id"] in dest_known)]
+    places = landing_folders(moved, landing, previous, manifest["source_os"] == "windows")
     plan = []
     for it in manifest["items"]:
         if it["kind"] == "known" and it["id"] in dest_known:
             dest = dest_known[it["id"]][1]
         else:
-            dest = landing / landing_name(it["source_path"])
+            dest = places[it["id"]]
         if args.dest_for:
             for spec in args.dest_for:
                 iid, _, folder = spec.partition("=")
@@ -805,6 +846,10 @@ def cmd_unpack(args):
             prog.add(rec["size"])
         entries.append({"id": it["id"], "label": it["label"], "old": it["source_path"], "new": str(dest)})
 
+    # keep what earlier unpacks from this computer mapped, unless this one maps the same folder again
+    fold = manifest["source_os"] == "windows"
+    mine = {norm(e["old"], fold) for e in entries}
+    entries += [e for e in previous if norm(e["old"], fold) not in mine]
     entries.sort(key=lambda e: len(e["old"]), reverse=True)
     pathmap = {
         "source_host": src_host, "source_os": manifest["source_os"], "dest_os": THIS_OS,

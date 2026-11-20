@@ -815,8 +815,8 @@ class CrossOSMove(TempDirCase):
     """Issue #20: a bundle packed on Windows unpacks and repairs here, and so does one packed on a Mac.
     The bundles are built exactly as pack writes them, so both directions run on every CI machine."""
 
-    def bundle(self, source_os, items):
-        b = self.tmp / f"Freighter-OLD{source_os.upper()}-2026-01-01"
+    def bundle(self, source_os, items, name=None):
+        b = self.tmp / (name or f"Freighter-OLD{source_os.upper()}-2026-01-01")
         manifest = {"bundle_version": rm.BUNDLE_VERSION, "freighter_version": rm.__version__,
                     "created": "2026-01-01T12:00:00", "source_host": f"OLD{source_os.upper()}", "source_os": source_os,
                     "source_home": items[0]["home"], "items": []}
@@ -884,6 +884,46 @@ class CrossOSMove(TempDirCase):
     def test_mac_to_here(self):
         h = "/Users/producer"
         self.assert_repaired(*self.move("mac", h, "/", h + "/Music/Ableton/User Library"))
+
+    def test_same_named_folders_from_different_places_stay_apart(self):
+        """Issue #58: Desktop\\Samples and D:\\Samples used to land in one folder, so repair could pick the wrong kick."""
+        h = "C:\\Users\\Producer"
+        stage = self.tmp / "stage"
+        als = make_als(stage / "Song.als", ["D:/Samples/Kicks/kick.wav"]).read_bytes()
+        b = self.bundle("windows", [
+            {"id": "ableton_user_library", "kind": "known", "label": "UL", "home": h,
+             "source_path": h + "\\Documents\\Ableton\\User Library", "files": {"Song Project/Song.als": als}},
+            {"id": "used-desk", "kind": "extra", "label": "Samples: Samples", "home": h,
+             "source_path": h + "\\Desktop\\Samples", "files": {"Kicks/kick.wav": b"desktop kick"}},
+            {"id": "used-ddrv", "kind": "extra", "label": "Samples: Samples", "home": h,
+             "source_path": "D:\\Samples", "files": {"Kicks/kick.wav": b"d drive kick"}},
+        ])
+        new = self.tmp / "new"
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=[]))
+            rm.cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
+            song = rm.known_roots(rm.THIS_OS, new)["ableton_user_library"][1] / "Song Project" / "Song.als"
+        landing = new / "Music" / "Freighter" / "OLDWINDOWS"
+        self.assertEqual(sorted(p.name for p in landing.iterdir() if p.is_dir()), ["Samples", "Samples (D drive)"])
+        ref = html.unescape(rm.PATH_RE.search(rm.read_als(song)[0]).group(2))
+        self.assertEqual(Path(ref).read_bytes(), b"d drive kick", "repair points at D:'s kick, not the Desktop's")
+
+    def test_a_top_up_bundle_keeps_the_first_bundles_paths(self):
+        h = "/Users/producer"
+        first = self.bundle("mac", [{"id": "used-a", "kind": "extra", "label": "A", "home": h,
+                                     "source_path": h + "/Desktop/Kits", "files": {"k.wav": b"k"}}], name="Freighter-1")
+        second = self.bundle("mac", [{"id": "used-b", "kind": "extra", "label": "B", "home": h,
+                                      "source_path": h + "/Desktop/Loops", "files": {"l.wav": b"l"}}], name="Freighter-2")
+        new = self.tmp / "new"
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(first), dest_for=[]))
+            rm.cmd_unpack(argparse.Namespace(bundle=str(second), dest_for=[]))
+            maps = rm.load_pathmaps(None)
+        olds = sorted(e["old"] for m in maps for e in m["entries"])
+        self.assertEqual(olds, [h + "/Desktop/Kits", h + "/Desktop/Loops"], "the second unpack kept the first's map")
+        self.assertEqual(rm.locate(h + "/Desktop/Kits/k.wav", maps)[0], "moved")
 
     def test_dest_for_sends_an_item_elsewhere(self):
         h = "C:\\Users\\Producer"
