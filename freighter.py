@@ -525,10 +525,44 @@ def project_sample_folders(items, installed=None):
                 label = "Samples and projects"   # skipping this folder would lose samples too
             folders[f] = label
 
-    # projects outside the packed folders (FL autosave backups aren't projects worth moving on their own)
+    def add_folder(f, label):
+        """Add folder f itself (not its top-level parent), unless it's a base folder or would re-pack a packed item."""
+        if f is None or f == h or f in bases or f.parent == f or any(f in c.parents for c in covered):
+            return False
+        if f.is_dir():
+            if folders.get(f, label) != label:
+                label = "Samples and projects"   # skipping this folder would lose samples too
+            folders[f] = label
+        return True
+
+    usable = {}   # project -> the existing samples it uses that need moving (outside packed folders, not programs)
+    for s, users in refs.items():
+        if not in_program_place(s) and os.path.isfile(s) and not inside_covered(Path(s)):
+            for u in users:
+                usable.setdefault(u, []).append(Path(s))
+
+    # Projects outside the packed folders move with their own folder: an Ableton "... Project" folder, or the folder
+    # an FL project sits in (a project loose on the Desktop comes alone). FL autosave backups aren't moved on
+    # their own. A project that only uses samples from inside the folder tree it sits in, like a sample pack's demo
+    # kit, moves with just that part of the tree: it no longer drags a whole sample library along (issue #61).
+    handled = set()
     for p in flps + alss:
-        if not inside_covered(p) and "backup" not in {x.lower() for x in p.parts[:-1]}:
-            take(p, "Folder with projects")
+        if inside_covered(p) or "backup" in {x.lower() for x in p.parts[:-1]}:
+            continue
+        own = p.parent
+        if own == h or own in bases or own.parent == own:
+            loose.setdefault(str(own), set()).add(p.name)
+            continue
+        used = usable.get(p, [])
+        top = folder_to_move(p, h, bases, covered)
+        if used and top is not None and all(folder_to_move(r, h, bases, covered) == top for r in used):
+            anchor = Path(os.path.commonpath([str(own)] + [str(r.parent) for r in used]))
+            if add_folder(anchor, "A project and the samples it uses"):
+                handled.add(p)
+                continue
+        if not add_folder(own, "Projects"):
+            loose.setdefault(str(own), set()).add(p.name)
+
     missing = {}
     for s, users in refs.items():
         if in_program_place(s):
@@ -538,7 +572,7 @@ def project_sample_folders(items, installed=None):
         if not os.path.isfile(s):
             for p in users:
                 missing.setdefault(str(p), []).append(s)
-        elif not inside_covered(Path(s)):
+        elif not inside_covered(Path(s)) and not all(u in handled for u in users):
             take(Path(s), "Samples your projects use")
     keep = {f: label for f, label in folders.items() if not any(o != f and o in f.parents for o in folders)}
     missing = {p: sorted(v) for p, v in sorted(missing.items(), key=lambda kv: kv[0].lower())}

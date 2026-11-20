@@ -424,6 +424,33 @@ class WhatGetsPacked(TempDirCase):
         self.assertIn("1 sample used by 1 project is already missing", out.getvalue())
         self.assertIn("Beat.flp: " + str(h / "Unplugged" / "kick.wav"), out.getvalue())
 
+    def test_demo_projects_inside_sample_packs_dont_pull_in_the_whole_library(self):
+        """Issue #61: a pack's demo kit project used to drag the whole "Sample Packs" folder into the move."""
+        h = self.tmp / "home"
+        packs = h / "Desktop" / "Sample Packs"
+        pack_a = packs / "Pack A"
+        kit_sample = write(pack_a / "One Shots" / "Kicks" / "kick.wav", b"a" * 200)
+        make_als(pack_a / "Ableton" / "Kit Project" / "Kit.als", [str(kit_sample)])
+        for i in range(5):                                            # the rest of the library
+            write(packs / "Pack B" / f"loop{i}.wav", b"b" * 200)
+        drums = write(h / "Desktop" / "DrumKits" / "snare.wav", b"s" * 200)
+        make_flp(h / "Desktop" / "Beats" / "song.flp", [str(drums)])   # the user's own project
+        paths = [Path(it["source_path"]) for it in self.items(h) if "only" not in it]
+        self.assertNotIn(packs, paths, "the whole library isn't packed")
+        self.assertFalse(any(p == packs / "Pack B" or packs / "Pack B" in p.parents for p in paths), paths)
+        self.assertTrue(any(p == pack_a or pack_a in p.parents for p in paths), "the demo's own pack comes along")
+        self.assertIn(h / "Desktop" / "Beats", paths, "the user's project folder")
+        self.assertIn(h / "Desktop" / "DrumKits", paths, "and the samples it uses")
+
+    def test_a_project_moves_with_its_own_folder_not_the_whole_top_folder(self):
+        h = self.tmp / "home"
+        drums = write(h / "Desktop" / "DrumKits" / "snare.wav", b"s" * 200)
+        make_flp(h / "Desktop" / "Everything" / "2024" / "Beat 7" / "beat7.flp", [str(drums)])
+        write(h / "Desktop" / "Everything" / "Unrelated" / "big.wav", b"u" * 999)
+        paths = [Path(it["source_path"]) for it in self.items(h) if "only" not in it]
+        self.assertIn(h / "Desktop" / "Everything" / "2024" / "Beat 7", paths)
+        self.assertNotIn(h / "Desktop" / "Everything", paths)
+
     def test_user_library_is_not_packed_twice(self):
         """Issue #9: a project next to the User Library used to pull in the whole Ableton folder."""
         h = self.tmp / "home"
