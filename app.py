@@ -148,7 +148,9 @@ JOBS = {"move_list": job_move_list, "plugins": job_plugins}
 class App:
     def __init__(self):
         self.token = secrets.token_urlsafe(24)
-        self.jobs, self.last_seen, self.port, self.server = {}, time.time(), None, None
+        # last_seen stays None until the page first loads, so a slow copy-paste of the address can't time out
+        self.jobs, self.last_seen, self.port, self.server = {}, None, None, None
+        self.lock = threading.Lock()
         self.stopped = threading.Event()   # set by the page's Quit button
         self.router = sys.stdout if isinstance(sys.stdout, OutputRouter) else OutputRouter(sys.stdout)
 
@@ -157,14 +159,18 @@ class App:
         return {f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"}
 
     def busy(self):
-        return any(j.state == "running" for j in self.jobs.values())
+        with self.lock:
+            return any(j.state == "running" for j in list(self.jobs.values()))
 
     def start_job(self, kind):
-        if self.busy():
-            return None
-        job = Job(kind, JOBS[kind], self.router)
-        self.jobs[job.id] = job
-        return job.start()
+        """Start a job unless one is running. The check and the start happen together, so a double click can't
+        start two."""
+        with self.lock:
+            if any(j.state == "running" for j in self.jobs.values()):
+                return None
+            job = Job(kind, JOBS[kind], self.router)
+            self.jobs[job.id] = job
+            return job.start()
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -226,7 +232,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.app.last_seen = time.time()
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(min(n, 65536)) or b"{}") if n else {}
+            if n < 0 or n > 65536:
+                raise ValueError("bad length")
+            body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            if not isinstance(body, dict):
+                raise ValueError("not an object")
         except ValueError:
             return self.send(400, {"error": "bad request"})
         path = urlsplit(self.path).path
@@ -280,7 +290,7 @@ def run(open_browser=True):
         webbrowser.open(url)
     try:
         while not app.stopped.wait(2):
-            if not app.busy() and time.time() - app.last_seen > IDLE_SECONDS:
+            if app.last_seen is not None and not app.busy() and time.time() - app.last_seen > IDLE_SECONDS:
                 print("  The Freighter page was closed, so Freighter stopped.")
                 break
     except KeyboardInterrupt:

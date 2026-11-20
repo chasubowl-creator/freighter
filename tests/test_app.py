@@ -159,6 +159,53 @@ class Server(unittest.TestCase):
         self.assertTrue(view["crash"] and Path(view["crash"]).is_file())
         self.assertEqual(self.request("GET", "/api/ping")[0], 200, "the server keeps running")
 
+    def test_a_double_click_starts_one_job(self):
+        import concurrent.futures
+        release = __import__("threading").Event()
+
+        def slow(job):
+            release.wait(5)
+            return {}
+        with mock.patch.dict(app.JOBS, {"slow": slow}):
+            with concurrent.futures.ThreadPoolExecutor(8) as pool:
+                codes = list(pool.map(lambda _: self.request("POST", "/api/jobs", {"kind": "slow"})[0], range(8)))
+            release.set()
+        self.assertEqual(codes.count(200), 1, codes)
+        self.assertEqual(codes.count(409), 7, codes)
+
+    def test_bad_bodies_are_refused(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.app.port, timeout=10)
+        c.putrequest("POST", "/api/jobs", skip_host=True)
+        c.putheader("Host", f"127.0.0.1:{self.app.port}")
+        c.putheader("X-Freighter-Token", self.app.token)
+        c.putheader("Content-Length", "-5")
+        c.endheaders()
+        self.assertEqual(c.getresponse().status, 400)
+        c.close()
+        self.assertEqual(self.request("POST", "/api/jobs", ["move_list"])[0], 400)
+
+    def test_cancel_isnt_swallowed_by_catch_all_handlers(self):
+        go = __import__("threading").Event()
+
+        def careful(job):
+            go.wait(5)
+            try:
+                rm.report_progress("Copying", 1, 10)
+            except Exception:       # code that carries on after ordinary errors must still stop on cancel
+                pass
+            return {"finished": True}
+        with mock.patch.dict(app.JOBS, {"careful": careful}):
+            job = self.app.start_job("careful")
+            job.cancel_requested = True
+            go.set()
+            job.thread.join(5)
+        self.assertEqual(job.state, "cancelled")
+
+    def test_idle_timer_waits_for_the_page(self):
+        self.assertIsNone(app.App().last_seen)
+        self.request("GET", f"/?t={self.app.token}", token=False)
+        self.assertIsNotNone(self.app.last_seen)
+
     def test_quit_stops(self):
         self.assertEqual(self.request("POST", "/api/quit", {})[0], 200)
         self.assertTrue(self.app.stopped.is_set())

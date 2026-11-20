@@ -316,8 +316,8 @@ def walk_files(root, left_behind=None):
 PROGRESS = threading.local()
 
 
-class Cancelled(Exception):
-    pass
+class Cancelled(BaseException):
+    """Raised to stop a job. A BaseException, so code that catches Exception to carry on can't swallow it."""
 
 
 def report_progress(label, done, total):
