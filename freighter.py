@@ -407,9 +407,9 @@ def item_id(prefix, path):
     return f"{prefix}-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:8]}"
 
 
-def pack_items(includes, skips, missing=None):
+def pack_items(includes, skips, missing=None, installed=None):
     """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
-    already missing on this computer]}."""
+    already missing on this computer]}; if `installed` is a set, with samples that come with installed programs."""
     items = []
     for rid, (label, path) in known_roots(THIS_OS, home()).items():
         if path.is_dir() and rid not in skips:
@@ -421,7 +421,7 @@ def pack_items(includes, skips, missing=None):
         iid = item_id("extra", p)
         if iid not in skips:
             items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
-    folders, loose, gone = project_sample_folders(items)
+    folders, loose, gone = project_sample_folders(items, installed)
     if missing is not None:
         missing.update(gone)
     for folder, label in folders.items():
@@ -464,7 +464,26 @@ def landing_name(source_path):
     return safe_rel(name) if name else "Loose samples"
 
 
-def project_sample_folders(items):
+PROGRAM_BUNDLES = (".app", ".component", ".vst", ".vst3", ".bundle", ".framework", ".aaxplugin", ".plugin", ".clap")
+WIN_PROGRAM_DIRS = {"program files", "program files (x86)", "programdata", "windows"}
+MAC_PROGRAM_DIRS = ("/applications/", "/system/", "/library/application support/", "/library/audio/plug-ins/",
+                    "/usr/", "/opt/")
+
+
+def in_program_place(path):
+    """True for files that come with an installed program or plugin: inside an app or plugin bundle, Program Files,
+    ProgramData, or the Mac's system folders. They come back when the program is installed, so Freighter never
+    packs them as samples (issue #60: a Core Library reference used to pack the Live app itself)."""
+    s = str(path).replace("\\", "/")
+    parts = [x.lower() for x in s.split("/") if x]
+    if any(x.endswith(PROGRAM_BUNDLES) for x in parts[:-1]):
+        return True
+    if len(parts) > 1 and re.fullmatch(r"[a-z]:", parts[0]) and parts[1] in WIN_PROGRAM_DIRS:
+        return True
+    return (s.lower() + ("/" if not s.endswith("/") else "")).startswith(MAC_PROGRAM_DIRS)
+
+
+def project_sample_folders(items, installed=None):
     """What a move needs beyond the packed items: projects found in Desktop, Documents and Music (even ones
     that use no outside samples), and every sample folder FL/Ableton projects use.
     Returns ({folder: label}, {folder: set of file names to take loose},
@@ -486,9 +505,8 @@ def project_sample_folders(items):
     for p in alss:
         try:
             text, _ = read_als(p)
-            for m in PATH_RE.finditer(text):
-                if m.group(2):
-                    refs.setdefault(html.unescape(m.group(2)), set()).add(p)
+            for ref in als_sample_refs(text):
+                refs.setdefault(ref, set()).add(p)
         except Exception:
             pass
     bases = [u for u in user_folders(h).values() if u.is_dir()]
@@ -513,6 +531,10 @@ def project_sample_folders(items):
             take(p, "Folder with projects")
     missing = {}
     for s, users in refs.items():
+        if in_program_place(s):
+            if installed is not None:
+                installed.add(s)
+            continue
         if not os.path.isfile(s):
             for p in users:
                 missing.setdefault(str(p), []).append(s)
@@ -589,9 +611,17 @@ def measure_items(items, include_programs=False):
     return sum(it["bytes"] for it in items), left_behind
 
 
+def say_installed(installed):
+    if installed:
+        n = len(installed)
+        print(f"\n{n} sample{'s' if n != 1 else ''} your projects use come{'s' if n == 1 else ''} with installed programs or "
+              "plugins (for example Ableton's Core Library or FL Studio's own sounds). They aren't moved: installing "
+              "those programs on the new computer brings them back.")
+
+
 def cmd_pack(args):
-    missing = {}
-    items = pack_items(args.include, set(args.skip), missing)
+    missing, installed = {}, set()
+    items = pack_items(args.include, set(args.skip), missing, installed)
     if not items:
         msg = "Nothing to pack: no standard music folders found. Add folders with --include FOLDER."
         if args.list or not args.to:
@@ -616,6 +646,7 @@ def cmd_pack(args):
             print(f"{len(left_behind)} programs or installers will be left behind (reinstall software from its "
                   "maker). Keep them with --include-programs.")
         say_missing(missing)
+        say_installed(installed)
         if not args.to:
             return 0
         if args.list:
@@ -1077,6 +1108,26 @@ def find_projects(roots, ext, include_backups=False):
 
 FILEREF_RE = re.compile(r"<FileRef(?:\s[^>]*)?>(.*?)</FileRef>", re.S)
 PATH_RE = re.compile(r'(<Path Value=")([^"]*)(")')
+# Samples sit in <SampleRef><FileRef>...; other paths in a set are plugin binaries (PluginDesc) or the presets a
+# device came from, which aren't samples. LivePackName marks Core Library / installed Pack content: Live finds it.
+SAMPLEREF_RE = re.compile(r"<SampleRef>(.*?)</SampleRef>", re.S)
+PACK_NAME_RE = re.compile(r'<LivePackName Value="([^"]*)"')
+CREATOR_VERSION_RE = re.compile(r'Creator="Ableton Live (\d+)')
+
+
+def als_sample_refs(text):
+    """Paths of the samples a Live 11+ set uses, as stored (issue #60: only samples, never plugins or Pack content)."""
+    out = []
+    for sm in SAMPLEREF_RE.finditer(text):
+        for fm in FILEREF_RE.finditer(sm.group(1)):
+            block = fm.group(1)
+            pack = PACK_NAME_RE.search(block)
+            if pack and pack.group(1):
+                continue
+            pm = PATH_RE.search(block)
+            if pm and pm.group(2):
+                out.append(html.unescape(pm.group(2)))
+    return list(dict.fromkeys(out))
 REL_RE = re.compile(r'<RelativePath Value="([^"]*)"')
 CREATOR_RE = re.compile(r'Creator="([^"]*)"')
 
@@ -1094,8 +1145,12 @@ def read_als(path):
 
 
 def als_new_format(text):
-    """Live 11+ stores plain <Path Value=...> in each FileRef; Live 10 and older use binary aliases."""
-    return '<Path Value="' in text
+    """Live 11+ stores plain <Path Value=...> in each FileRef; Live 10 and older use binary aliases. (A Live 10 set
+    can still contain <Path Value> for a VST2 plugin, so check the version that saved it first.)"""
+    v = CREATOR_VERSION_RE.search(text[:2000])
+    if v:
+        return int(v.group(1)) >= 11
+    return any(PATH_RE.search(m.group(1)) for m in SAMPLEREF_RE.finditer(text))
 
 
 def write_replace(path, data):
@@ -1127,6 +1182,10 @@ def fix_als(path, maps, dry_run=False):
         old = html.unescape(pm.group(2))
         if not old:
             return block
+        pack = PACK_NAME_RE.search(block)
+        if pack and pack.group(1):
+            result["ok"] += 1   # Core Library / Pack content: Live finds it by itself
+            return block
         rel = REL_RE.search(block)
         if rel and rel.group(1) and exists(proj_dir / html.unescape(rel.group(1))):
             result["ok"] += 1  # Live finds it relative to the project folder
@@ -1142,7 +1201,7 @@ def fix_als(path, maps, dry_run=False):
         new_s = new.as_posix() if THIS_OS != "windows" else str(new).replace("\\", "/")
         return block[:pm.start(2)] + xml_attr_escape(new_s) + block[pm.end(2):]
 
-    new_text = FILEREF_RE.sub(fix_ref, text)
+    new_text = SAMPLEREF_RE.sub(lambda sm: FILEREF_RE.sub(fix_ref, sm.group(0)), text)   # samples only
     if result["fixed"] and not dry_run:
         backup_dir = proj_dir / "Freighter backup"
         backup_dir.mkdir(exist_ok=True)
@@ -1323,7 +1382,7 @@ def cmd_scan(args):
     for p in find_projects(roots, ".als"):
         try:
             text, _ = read_als(p)
-            refs = len(PATH_RE.findall(text)) if als_new_format(text) else None
+            refs = len(als_sample_refs(text)) if als_new_format(text) else None
         except Exception:
             refs = None
         rows.append(("Ableton", p, refs))
@@ -1368,7 +1427,7 @@ def project_refs(p):
         return "Ableton", None
     if not als_new_format(text):
         return "Ableton (Live 10 or older)", None
-    return "Ableton", [v for v in dict.fromkeys(html.unescape(m.group(2)) for m in PATH_RE.finditer(text)) if v]
+    return "Ableton", als_sample_refs(text)
 
 
 def cmd_rehearse(args):

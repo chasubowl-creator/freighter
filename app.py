@@ -105,8 +105,8 @@ class Job:
 
 def job_move_list(job):
     """What a move would take from this computer: the same list as `freighter pack --list`."""
-    missing = {}
-    items = rm.pack_items([], set(), missing)
+    missing, installed = {}, set()
+    items = rm.pack_items([], set(), missing, installed)
     total, left_behind = rm.measure_items(items)
     cloud = list(rm.CLOUD_ONLY)
     gone = rm.missing_lines(missing)
@@ -116,6 +116,7 @@ def job_move_list(job):
         "total": total,
         "missing": gone[:200], "missing_count": len(gone), "missing_projects": len(missing),
         "left_behind": len(left_behind or []),
+        "installed": len(installed),
         "cloud": {"files": len(cloud), "bytes": sum(n for _, n in cloud)},
     }
 
@@ -447,6 +448,9 @@ function moveList() {
     if (r.cloud.files) notes.push(el("div", {class: "note"},
       el("b", {}, `${plural(r.cloud.files, "file")} (${size(r.cloud.bytes)}) only ${r.cloud.files === 1 ? "lives" : "live"} in OneDrive's cloud`),
       el("div", {class: "muted"}, "Packing downloads them first, so stay online. To speed it up, right-click the folder in File Explorer and choose \"Always keep on this device\".")));
+    if (r.installed) notes.push(el("div", {class: "note"},
+      el("b", {}, `${plural(r.installed, "sample")} ${r.installed === 1 ? "comes" : "come"} with installed programs or plugins`),
+      el("div", {class: "muted"}, "For example Ableton's Core Library or FL Studio's own sounds. They aren't moved: installing those programs on the new computer brings them back.")));
     if (r.left_behind) notes.push(el("div", {class: "note"},
       el("b", {}, `${plural(r.left_behind, "program or installer", "programs or installers")} will be left behind`),
       el("div", {class: "muted"}, "Reinstall software from its maker. Installers tucked into sample folders are a common way malware spreads.")));

@@ -55,12 +55,20 @@ def make_flp(path, samples, version="25.1.0"):
                  + b"FLdt" + struct.pack("<I", len(body)) + body)
 
 
-def make_als(path, refs, creator="Ableton Live 12.1"):
-    def fr(p):
+def make_als(path, refs, creator="Ableton Live 12.1", plugins=(), pack_refs=()):
+    """A minimal Live 11/12 set laid out like the real thing: each sample is <SampleRef><FileRef>...<Path Value>.
+    plugins: VST2 binary paths (in PluginDesc, not samples). pack_refs: Core Library samples (LivePackName set)."""
+    def fr(p, pack=""):
         p = p.replace("&", "&amp;")
-        return (f'<FileRef>\n<RelativePathType Value="0" />\n<RelativePath Value="" />\n'
-                f'<Path Value="{p}" />\n<Type Value="1" />\n</FileRef>')
-    xml = f'<?xml version="1.0" encoding="UTF-8"?>\n<Ableton Creator="{creator}">' + "".join(fr(r) for r in refs) + "</Ableton>"
+        return (f'<SampleRef>\n<FileRef>\n<RelativePathType Value="0" />\n<RelativePath Value="" />\n'
+                f'<Path Value="{p}" />\n<Type Value="1" />\n<LivePackName Value="{pack}" />\n'
+                f'<LivePackId Value="" />\n</FileRef>\n<LastModDate Value="0" />\n</SampleRef>')
+    def plug(p):
+        return (f'<PluginDevice><PluginDesc><VstPluginInfo Id="0">\n<Path Value="{p}" />\n'
+                f'<PlugName Value="{Path(p).stem}" />\n</VstPluginInfo></PluginDesc></PluginDevice>')
+    xml = (f'<?xml version="1.0" encoding="UTF-8"?>\n<Ableton Creator="{creator}">'
+           + "".join(fr(r) for r in refs) + "".join(fr(r, "Core Library") for r in pack_refs)
+           + "".join(plug(p) for p in plugins) + "</Ableton>")
     return write(path, gzip.compress(xml.encode()))
 
 
@@ -529,6 +537,50 @@ class LongPaths(TempDirCase):
         self.assertEqual(len(found), 1)
         with open(found[0], "rb") as f:
             self.assertEqual(f.read(), b"deep kick")
+
+
+class ProgramContent(TempDirCase):
+    """Issue #60: files that come with programs are never packed as samples."""
+
+    def test_only_real_samples_are_read_from_live_sets(self):
+        kick = "/Users/p/Desktop/Kits/kick.wav"
+        core = "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Core Library/Samples/clap.wav"
+        als = make_als(self.tmp / "Song.als", [kick], plugins=["C:/Program Files/VSTPlugins/Serum.dll"],
+                       pack_refs=[core])
+        text, _ = rm.read_als(als)
+        self.assertEqual(rm.als_sample_refs(text), [kick], "no plugin binaries, no Core Library content")
+
+    def test_a_live_10_set_with_a_vst2_isnt_mistaken_for_live_11(self):
+        text, _ = rm.read_als(make_als(self.tmp / "Old.als", [], creator="Ableton Live 10.1.30",
+                                       plugins=["C:/VST/Serum.dll"]))
+        self.assertFalse(rm.als_new_format(text))
+        self.assertTrue(rm.als_new_format(rm.read_als(make_als(self.tmp / "New.als", ["/x.wav"]))[0]))
+
+    def test_program_places(self):
+        inside = ["/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Core Library/x.wav",
+                  "C:\\Program Files\\Image-Line\\FL Studio 2024\\Data\\Patches\\x.wav",
+                  "C:/ProgramData/Ableton/Live 12 Suite/Resources/Core Library/x.wav",
+                  "/Library/Application Support/Native Instruments/Kontakt 7/x.wav",
+                  "/Users/p/Music/Cool.vst3/Contents/Resources/x.wav"]
+        outside = ["/Users/p/Desktop/Kits/kick.wav", "D:\\Samples\\kick.wav", "/Volumes/SSD/Applications/kick.wav",
+                   "C:\\Users\\P\\Documents\\Program Files Backup\\kick.wav"]
+        for p in inside:
+            self.assertTrue(rm.in_program_place(p), p)
+        for p in outside:
+            self.assertFalse(rm.in_program_place(p), p)
+
+    def test_a_sample_inside_an_app_is_listed_not_packed(self):
+        h = self.tmp / "home"
+        inside_app = write(h / "Desktop" / "Tools" / "Sampler.app" / "Contents" / "Resources" / "boom.wav", b"x" * 99)
+        kick = write(h / "Desktop" / "Kits" / "kick.wav", b"k" * 99)
+        make_flp(h / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp", [str(inside_app), str(kick)])
+        installed = set()
+        with as_home(h), quiet():
+            items = rm.pack_items([], set(), {}, installed)
+        sources = [it["source_path"] for it in items]
+        self.assertFalse(any("Tools" in p for p in sources), sources)
+        self.assertIn(str(h / "Desktop" / "Kits"), sources)
+        self.assertEqual(installed, {str(inside_app)})
 
 
 class OneDriveFolders(TempDirCase):
