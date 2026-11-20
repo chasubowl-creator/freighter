@@ -77,7 +77,7 @@ In the folder with freighter.exe, click the address bar, type `cmd`, press Enter
 
     freighter.exe pack --list
     freighter.exe rehearse --to E:\freighter-rehearsal
-    freighter.exe rehearse --skip used2
+    freighter.exe rehearse --skip used-3fa2b1c9      (use an ID from the pack --list output)
     manifest.exe --extra-dir "D:\VST"
     manifest.exe --virus-scan
 

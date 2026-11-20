@@ -608,12 +608,19 @@ class FullMove(TempDirCase):
             rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
         return next(drive.glob("Freighter-*"))
 
+    @staticmethod
+    def item(bundle, name):
+        """The bundle item whose folder is called `name` (IDs come from paths, not positions)."""
+        items = json.loads((bundle / "manifest.json").read_text())["items"]
+        return next(it["id"] for it in items if Path(it["source_path"].replace("\\", "/")).name == name)
+
     def test_pack_unpack_repair(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
         bundle = self.pack(old, drive)
         manifest = json.loads((bundle / "manifest.json").read_text())
         ids = {it["id"] for it in manifest["items"]}
-        self.assertTrue({"fl_user", "ableton_user_library", "used1", "loose1"} <= ids)
+        self.assertTrue({"fl_user", "ableton_user_library"} <= ids)
+        self.assertTrue(any(i.startswith("used-") for i in ids) and any(i.startswith("loose-") for i in ids), ids)
         gone = (bundle / "already-missing.txt").read_text()
         self.assertIn("Song.als: /nowhere/gone.wav", gone, "already-missing samples are listed (issue #15)")
         self.assertFalse(any("unrelated.zip" in p.name for p in (bundle / "data").rglob("*")),
@@ -637,21 +644,62 @@ class FullMove(TempDirCase):
     def test_resume_after_interruption(self):
         old, drive = self.build_old_computer(), self.tmp / "drive"
         bundle = self.pack(old, drive)
-        index = bundle / "index" / "used1.jsonl"
-        lines = index.read_text().splitlines()
+        kit = self.item(bundle, "DrumKits")
+        index = bundle / "index" / f"{kit}.jsonl"
+        lines = index.read_text().splitlines()      # a header naming the folder, then one line per file
         victim = json.loads(lines[-1])
-        (bundle / "data" / "used1" / victim["stored"]).unlink()
+        (bundle / "data" / kit / victim["stored"]).unlink()
         index.write_text("\n".join(lines[:-1]) + '\n{"rel": "half-writ')  # cut mid-line
         self.pack(old, drive)
-        self.assertTrue((bundle / "data" / "used1" / victim["stored"]).is_file())
+        self.assertTrue((bundle / "data" / kit / victim["stored"]).is_file())
         recs = rm.read_jsonl(index)
-        self.assertEqual(len(recs), len(lines))
+        self.assertEqual(len(recs), len(lines) - 1)
+
+    def test_resume_after_the_list_changes_keeps_folders_apart(self):
+        """Issue #57: a folder that appears between an interrupted pack and its resume used to take over another
+        folder's records, so the new computer got the wrong files under the right names."""
+        old, new, drive = self.tmp / "old", self.tmp / "new", self.tmp / "drive"
+        beats = write(old / "Desktop" / "Beats" / "kick.wav", b"B" * 500)
+        kits = write(old / "Desktop" / "Kits" / "kick.wav", b"K" * 500)
+        projects = old / "Documents" / "Image-Line" / "FL Studio" / "Projects"
+        make_flp(projects / "One.flp", [str(beats), str(kits)])
+        bundle = self.pack(old, drive)
+        ids_before = {it["source_path"]: it["id"] for it in json.loads((bundle / "manifest.json").read_text())["items"]}
+        # a new folder that sorts first, with a same-named, same-sized file, appears before the resume
+        album = write(old / "Desktop" / "Album" / "kick.wav", b"A" * 500)
+        make_flp(projects / "Two.flp", [str(album)])
+        self.pack(old, drive)
+        items = json.loads((bundle / "manifest.json").read_text())["items"]
+        for it in items:
+            if it["source_path"] in ids_before:
+                self.assertEqual(it["id"], ids_before[it["source_path"]], "an item keeps its ID")
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        landing = new / "Music" / "Freighter" / json.loads((bundle / "manifest.json").read_text())["source_host"]
+        found = {p.parent.name: p.read_bytes()[:1] for p in landing.rglob("kick.wav")}
+        self.assertEqual(found, {"Album": b"A", "Beats": b"B", "Kits": b"K"})
+
+    def test_an_index_from_another_folder_is_set_aside(self):
+        old, drive = self.build_old_computer(), self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        kit = self.item(bundle, "DrumKits")
+        index = bundle / "index" / f"{kit}.jsonl"
+        lines = index.read_text().splitlines()
+        lines[0] = json.dumps({"item": kit, "source_path": "/somewhere/else"})
+        index.write_text("\n".join(lines) + "\n")
+        self.pack(old, drive)
+        self.assertTrue((bundle / "index" / f"{kit}.set-aside-1.jsonl").is_file())
+        self.assertEqual(json.loads(index.read_text().splitlines()[0])["source_path"],
+                         next(it["source_path"] for it in json.loads((bundle / "manifest.json").read_text())["items"]
+                              if it["id"] == kit))
 
     def test_unpack_detects_damage_and_keeps_existing_files(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
         bundle = self.pack(old, drive)
-        rec = next(iter(rm.read_jsonl(bundle / "index" / "used1.jsonl").values()))
-        damaged = bundle / "data" / "used1" / rec["stored"]
+        kit = self.item(bundle, "DrumKits")
+        rec = next(iter(rm.read_jsonl(bundle / "index" / f"{kit}.jsonl").values()))
+        damaged = bundle / "data" / kit / rec["stored"]
         damaged.write_bytes(b"\0" * damaged.stat().st_size)  # same size, wrong content
         # a different file already sits where the snare goes
         landing = new / "Music" / "Freighter" / json.loads((bundle / "manifest.json").read_text())["source_host"]

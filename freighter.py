@@ -312,6 +312,30 @@ class Progress:
                   f"  ({rs.human_size(rate)}/s)", flush=True)
 
 
+def resume_records(bundle, it):
+    """The records already packed for this item, if its index really belongs to this item's folder. An index
+    written for a different folder (or by an older Freighter without a header) is set aside, never reused."""
+    index_path = bundle / "index" / f"{it['id']}.jsonl"
+    if not index_path.exists():
+        return {}
+    header = {}
+    with open(index_path, encoding="utf-8") as f:
+        try:
+            header = json.loads(f.readline() or "{}")
+        except ValueError:
+            pass
+    if norm(header.get("source_path", ""), THIS_OS == "windows") == norm(it["source_path"], THIS_OS == "windows"):
+        return read_jsonl(index_path)
+    n = 1
+    while (bundle / "index" / f"{it['id']}.set-aside-{n}.jsonl").exists():
+        n += 1
+    os.replace(index_path, bundle / "index" / f"{it['id']}.set-aside-{n}.jsonl")
+    data = bundle / "data" / it["id"]
+    if data.exists():
+        os.replace(data, bundle / "data" / f"{it['id']}.set-aside-{n}")
+    return {}
+
+
 def read_jsonl(p):
     out = {}
     if Path(p).is_file():
@@ -329,6 +353,13 @@ def read_jsonl(p):
 
 # --------------------------------------------------------------------------- pack
 
+def item_id(prefix, path):
+    """An item's ID, made from its folder so the same folder gets the same ID on every run. (IDs used to be
+    positions in a list, so a new folder could shift them and a resumed pack read another folder's records: #57.)"""
+    key = norm(str(path), THIS_OS == "windows")
+    return f"{prefix}-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:8]}"
+
+
 def pack_items(includes, skips, missing=None):
     """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
     already missing on this computer]}."""
@@ -336,23 +367,23 @@ def pack_items(includes, skips, missing=None):
     for rid, (label, path) in known_roots(THIS_OS, home()).items():
         if path.is_dir() and rid not in skips:
             items.append({"id": rid, "label": label, "source_path": str(path), "kind": "known"})
-    for i, inc in enumerate(includes, 1):
+    for inc in includes:
         p = Path(inc).expanduser().resolve()
         if not p.is_dir():
             sys.exit(f"Not a folder: {inc}")
-        iid = f"extra{i}"
+        iid = item_id("extra", p)
         if iid not in skips:
             items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
     folders, loose, gone = project_sample_folders(items)
     if missing is not None:
         missing.update(gone)
-    for i, (folder, label) in enumerate(folders.items(), 1):
-        iid = f"used{i}"
+    for folder, label in folders.items():
+        iid = item_id("used", folder)
         if iid not in skips:
             items.append({"id": iid, "label": f"{label}: {folder.name}",
                           "source_path": str(folder), "kind": "extra"})
-    for i, (folder, files) in enumerate(sorted(loose.items()), 1):
-        iid = f"loose{i}"
+    for folder, files in sorted(loose.items()):
+        iid = item_id("loose", folder)
         if iid not in skips:
             items.append({"id": iid, "label": f"Loose files your projects use from {landing_name(folder)}",
                           "source_path": folder, "kind": "extra", "only": sorted(files)})
@@ -562,7 +593,7 @@ def cmd_pack(args):
 
     already = 0
     for it in items:
-        already += sum(r["size"] for r in read_jsonl(bundle / "index" / f"{it['id']}.jsonl").values())
+        already += sum(r["size"] for r in resume_records(bundle, it).values())
     free = shutil.disk_usage(bundle).free
     if total - already > free:
         sys.exit(f"Not enough space on the drive: need {rs.human_size(total - already)}, "
@@ -584,11 +615,11 @@ def cmd_pack(args):
     errors = []
     for it in items:
         index_path = bundle / "index" / f"{it['id']}.jsonl"
-        done = read_jsonl(index_path)
-        if index_path.exists():
-            # Rewrite the index from its complete records, so a line cut off by an interruption
-            # can't swallow the next record appended after it.
-            index_path.write_text("".join(json.dumps(r) + "\n" for r in done.values()), encoding="utf-8")
+        done = resume_records(bundle, it)
+        # (Re)write the index: a header naming this item's folder, then its complete records, so a line cut off
+        # by an interruption can't swallow the next record appended after it.
+        header = {"item": it["id"], "source_path": it["source_path"]}
+        index_path.write_text("".join(json.dumps(r) + "\n" for r in [header, *done.values()]), encoding="utf-8")
         data_root = bundle / "data" / it["id"]
         taken = {r["stored"].lower() for r in done.values()}
         with open(index_path, "a", encoding="utf-8") as index:
@@ -1458,7 +1489,7 @@ def main():
     s = sub.add_parser("unpack", help="put a bundle's files in place on this computer")
     s.add_argument("bundle")
     s.add_argument("--dest-for", action="append", default=[], metavar="ID=FOLDER",
-                   help="put one item somewhere else, e.g. extra1=/Volumes/Samples/Libraries")
+                   help="put one item somewhere else, e.g. used-3fa2b1c9=/Volumes/Samples (IDs are shown by pack --list)")
     s.set_defaults(fn=cmd_unpack)
 
     s = sub.add_parser("fix-ableton", help="repoint samples in Ableton projects (Live 11+)")
