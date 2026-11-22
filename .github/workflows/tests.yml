@@ -76,3 +76,47 @@ jobs:
         with:
           name: freighter-${{ matrix.name }}
           path: dist/
+      # The download people get from a Release. Zipped here, because GitHub's own artifact zips drop the Mac
+      # programs' "executable" permission and they wouldn't start. The Mac zip holds one folder (Archive Utility
+      # unzips it as is); the Windows zip holds the files themselves, because Extract All already makes a folder.
+      - name: Package the download (Mac)
+        if: matrix.name == 'mac'
+        run: |
+          mkdir -p pkg && cp -R dist pkg/freighter-mac
+          cd pkg && zip -r -X -q ../freighter-mac.zip freighter-mac
+      - name: Package the download (Windows)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item -Recurse dist pkg/freighter-windows
+          Compress-Archive -Path pkg/freighter-windows/* -DestinationPath freighter-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: freighter-${{ matrix.name }}.zip
+
+  # Pushing a version tag (v0.9.0, or v0.9.0-test.1 for a test build) publishes both downloads as a GitHub
+  # Release, with download steps and that version's changelog as the notes (issue #36). A tag with a "-" in it
+  # is marked as a pre-release.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/release_notes.py "$GITHUB_REF_NAME" > notes.md
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" freighter-windows.zip freighter-mac.zip $pre \
+            --title "Freighter ${GITHUB_REF_NAME#v}" --notes-file notes.md
