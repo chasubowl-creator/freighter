@@ -47,8 +47,9 @@ Double-click **freighter**:
   - **Ableton Live 11 and 12:** sample paths are rewritten to the new locations. The original of each
     changed project is kept in a `Freighter backup` folder next to it.
   - **Ableton Live 10 or older:** open the project, then File > Manage Files > Locate.
-  - **FL Studio:** Freighter lists the folders to add in FL under Options > File settings > Browser extra
-    search folders. FL then finds the moved samples. Save each project afterwards.
+  - **FL Studio:** sample paths in each project are rewritten to the new locations, the same way, with the
+    original kept in a `Freighter backup` folder. Close FL Studio first; Freighter won't change projects while
+    it's open.
 
 ## 5. Reinstall plugins
 

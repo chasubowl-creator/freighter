@@ -14,7 +14,7 @@ samples, presets - move as files, via a bundle folder on an external drive.
   NEW computer:
     python3 freighter.py unpack /Volumes/DRIVE/Freighter-PC-2026-11-12
     python3 freighter.py fix-ableton                  repoint samples in Ableton projects
-    python3 freighter.py check-fl                     find moved/missing samples in FL projects
+    python3 freighter.py fix-fl                       repoint samples in FL Studio projects (check-fl: report only)
     python3 manifest.py --compare BUNDLE/plugins.csv   plugins still to reinstall
 
 Needs only Python 3.8+. Nothing leaves your computer. Use "py" instead of "python3" on Windows.
@@ -1114,7 +1114,7 @@ def cmd_unpack(args):
         print(f"{len(bad)} problems; see unpack-report.txt.")
     print("\nNext:")
     print("  Repair projects: menu option 6, or " + tool_cmd("freighter", "fix-ableton") + " and "
-          + tool_cmd("freighter", "check-fl"))
+          + tool_cmd("freighter", "fix-fl"))
     print(f"  Plugins to reinstall: {tool_cmd('manifest', '--compare')} \"{landing / f'plugins-{src_host}.csv'}\"")
     return 0
 
@@ -1246,8 +1246,9 @@ PACK_NAME_RE = re.compile(r'<LivePackName Value="([^"]*)"')
 CREATOR_VERSION_RE = re.compile(r'Creator="Ableton Live (\d+)')
 
 
-def als_sample_refs(text):
-    """Paths of the samples a Live 11+ set uses, as stored (issue #60: only samples, never plugins or Pack content)."""
+def als_sample_refs(text, unique=True):
+    """Paths of the samples a Live 11+ set uses, as stored (issue #60: only samples, never plugins or Pack content).
+    unique=False keeps every reference in order (to pair a repaired set with its original)."""
     out = []
     for sm in SAMPLEREF_RE.finditer(text):
         for fm in FILEREF_RE.finditer(sm.group(1)):
@@ -1258,7 +1259,7 @@ def als_sample_refs(text):
             pm = PATH_RE.search(block)
             if pm and pm.group(2):
                 out.append(html.unescape(pm.group(2)))
-    return list(dict.fromkeys(out))
+    return list(dict.fromkeys(out)) if unique else out
 REL_RE = re.compile(r'<RelativePath Value="([^"]*)"')
 CREATOR_RE = re.compile(r'Creator="([^"]*)"')
 
@@ -1393,15 +1394,17 @@ def cmd_fix_ableton(args):
 # --------------------------------------------------------------------------- FL Studio
 
 FLP_TEXT_SAMPLE = 196   # sample file name event
+FLP_TEXT_DATAPATH = 202 # the project's data folder (recordings, renders), stored as an absolute path
 FLP_TEXT_VERSION = 199  # FL version string
 FL_PLACEHOLDER = re.compile(r"^%FL[^%]*%", re.I)
 
 
-def flp_samples(path):
-    """Read the sample paths an .flp project references. Read-only.
-    Returns (FL version string, [paths]). Raises ValueError for unreadable files."""
-    with open(long_path(path), "rb") as f:
-        data = f.read()
+def flp_events(data, strict=False):
+    """Walk an .flp file's events. Returns (data_start, data_end, events) where each event is
+    (event id, start offset, payload start, payload end, unicode flag in effect). Raises ValueError if the file
+    isn't an FL project. A damaged file (e.g. an autosave caught mid-save) raises when strict (the writer never
+    patches one), and otherwise gives the events before the damage, as reading always has.
+    The writer below uses the same walk, so reading and writing can't disagree."""
     if data[:4] != b"FLhd":
         raise ValueError("not an FL Studio project")
     hlen = struct.unpack("<I", data[4:8])[0]
@@ -1409,93 +1412,246 @@ def flp_samples(path):
     if data[pos:pos + 4] != b"FLdt":
         raise ValueError("no data chunk")
     dlen = struct.unpack("<I", data[pos + 4:pos + 8])[0]
-    pos += 8
-    end = min(len(data), pos + dlen)
-    unicode, version, samples = False, "", []
+    start = pos + 8
+    pos, end = start, start + dlen
+    if end > len(data):
+        if strict:
+            raise ValueError("truncated")
+        end = len(data)
+    unicode, events = False, []
     while pos < end:
-        eid = data[pos]
+        at, eid = pos, data[pos]
         pos += 1
         if eid < 64:
-            pos += 1
+            size = 1
         elif eid < 128:
-            pos += 2
+            size = 2
         elif eid < 192:
-            pos += 4
+            size = 4
         else:
-            n = shift = 0
+            size = shift = 0
             while True:
                 if pos >= end:
-                    raise ValueError("truncated")
+                    if strict:
+                        raise ValueError("truncated")
+                    return start, end, events
                 b = data[pos]
                 pos += 1
-                n |= (b & 0x7F) << shift
+                size |= (b & 0x7F) << shift
                 shift += 7
                 if not b & 0x80:
                     break
-            payload = data[pos:pos + n]
-            pos += n
-            if eid == FLP_TEXT_VERSION:
-                version = payload.rstrip(b"\0").decode("ascii", "replace")
-                nums = [int(x) for x in re.findall(r"\d+", version)[:2]] + [0, 0]
-                unicode = nums[0] > 11 or (nums[0] == 11 and nums[1] >= 5)
-            elif eid == FLP_TEXT_SAMPLE and payload:
-                s = payload.decode("utf-16-le" if unicode else "latin-1", "replace").rstrip("\0")
-                if s:
-                    samples.append(s)
+        if pos + size > end:
+            if strict:
+                raise ValueError("damaged: an event runs past the end of the file")
+            return start, end, events
+        events.append((eid, at, pos, pos + size, unicode))
+        if eid == FLP_TEXT_VERSION:
+            version = data[pos:pos + size].rstrip(b"\0").decode("ascii", "replace")
+            nums = [int(x) for x in re.findall(r"\d+", version)[:2]] + [0, 0]
+            unicode = nums[0] > 11 or (nums[0] == 11 and nums[1] >= 5)
+        pos += size
+    return start, end, events
+
+
+def flp_text(data, ev):
+    eid, _at, a, b, unicode = ev
+    return data[a:b].decode("utf-16-le" if unicode else "latin-1", "replace").rstrip("\0")
+
+
+def flp_samples(path):
+    """Read the sample paths an .flp project references. Read-only.
+    Returns (FL version string, [paths]). Raises ValueError for unreadable files."""
+    with open(long_path(path), "rb") as f:
+        data = f.read()
+    _start, _end, events = flp_events(data)
+    version = next((data[a:b].rstrip(b"\0").decode("ascii", "replace")
+                    for eid, _at, a, b, _u in events if eid == FLP_TEXT_VERSION), "")
+    samples = [t for t in (flp_text(data, ev) for ev in events if ev[0] == FLP_TEXT_SAMPLE) if t]
     return version, samples
 
 
-def cmd_check_fl(args):
+def flp_varint(n):
+    out = bytearray()
+    while True:
+        c, n = n & 0x7F, n >> 7
+        out.append(c | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def flp_rewrite(data, new_path_for):
+    """Patch an .flp in memory: each sample-path (196) and project-data-folder (202) event whose path
+    new_path_for(path) maps to something new is re-encoded; every other byte is copied unchanged and the data
+    chunk's length is fixed. Never re-saves the whole project (full re-saves are known to corrupt FL files).
+    Returns (new bytes, {old path: new path} for what changed, [paths that couldn't be written in this format])."""
+    start, end, events = flp_events(data, strict=True)
+    out = bytearray(data[:start])
+    copied, changed, skipped = start, {}, []
+    for ev in events:
+        eid, at, _a, b, unicode = ev
+        if eid not in (FLP_TEXT_SAMPLE, FLP_TEXT_DATAPATH):
+            continue
+        old = flp_text(data, ev)
+        new = new_path_for(old) if old else None
+        if not new or new == old:
+            continue
+        try:
+            payload = new.encode("utf-16-le") + b"\0\0" if unicode else new.encode("latin-1") + b"\0"
+        except UnicodeEncodeError:       # an old (pre-11.5) project can't hold this name
+            skipped.append(new)
+            continue
+        out += data[copied:at] + bytes([eid]) + flp_varint(len(payload)) + payload
+        copied = b
+        changed[old] = new
+    out += data[copied:end]
+    struct.pack_into("<I", out, start - 4, len(out) - start)
+    out += data[end:]                    # anything after the data chunk stays as it was
+    return bytes(out), changed, skipped
+
+
+def flp_same_except_paths(a, b):
+    """True when two .flp files have the same events in the same order, and only path events differ."""
+    _s1, _e1, ev1 = flp_events(a, strict=True)
+    _s2, _e2, ev2 = flp_events(b, strict=True)
+    if [e[0] for e in ev1] != [e[0] for e in ev2]:
+        return False
+    for x, y in zip(ev1, ev2):
+        if x[0] not in (FLP_TEXT_SAMPLE, FLP_TEXT_DATAPATH) and a[x[2]:x[3]] != b[y[2]:y[3]]:
+            return False
+    return a[:8] == b[:8] and a[8:_s1 - 8] == b[8:_s2 - 8]
+
+
+def fl_is_running():
+    """True when FL Studio is open (it could save over a project being repaired). False if unsure."""
+    try:
+        if rs.IS_WIN:
+            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=20).stdout
+            return any(name in out.lower() for name in ('"fl64.exe"', '"fl.exe"', '"fl studio'))
+        out = subprocess.run(["ps", "-Axo", "comm"], capture_output=True, text=True, timeout=20).stdout
+        return any("fl studio" in line.lower() and ".app/contents/macos/" in line.lower() for line in out.splitlines())
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def fix_flp(path, maps, dry_run=False):
+    """Repoint an FL Studio project's samples (and its project-data folder) at their moved copies.
+    Only the path events change; the original is kept in a 'Freighter backup' folder next to the project.
+    Returns what was found and done."""
+    result = {"project": str(path), "version": "", "ok": 0, "fixed": 0, "builtin": 0, "missing": [],
+              "skipped": [], "damaged": False}
+    version, samples = flp_samples(path)
+    result["version"] = version
+    with open(long_path(path), "rb") as f:
+        data = f.read()
+    try:
+        flp_events(data, strict=True)
+    except ValueError:
+        result["damaged"] = True       # never patch a damaged file (often an autosave caught mid-save)
+    found = {}
+
+    def new_path_for(old):
+        if FL_PLACEHOLDER.match(old):
+            return None
+        if old not in found:
+            status, new = locate(old, maps)
+            found[old] = (status, str(new) if new else None)
+        status, new = found[old]
+        return new if status == "moved" else None
+
+    for smp in dict.fromkeys(samples):
+        if FL_PLACEHOLDER.match(smp):
+            result["builtin"] += 1
+            continue
+        new_path_for(smp)
+        status = found[smp][0]
+        if status == "ok":
+            result["ok"] += 1
+        elif status == "missing":
+            result["missing"].append(smp)
+    wanted = [smp for smp in dict.fromkeys(samples) if found.get(smp, ("",))[0] == "moved"]
+    if not wanted or result["damaged"]:
+        return result
+    new_data, changed, skipped = flp_rewrite(data, new_path_for)
+    result["skipped"] = skipped
+    result["fixed"] = sum(1 for smp in wanted if smp in changed)
+    if dry_run or not changed:
+        return result
+    # check the patched file before it replaces anything: same events, only the paths we meant to change
+    _v, new_samples = (None, [t for t in (flp_text(new_data, ev) for ev in flp_events(new_data, strict=True)[2]
+                                          if ev[0] == FLP_TEXT_SAMPLE) if t])
+    if not flp_same_except_paths(data, new_data) or new_samples != [changed.get(x, x) for x in samples]:
+        raise RuntimeError(f"Freighter's FL repair didn't check out for {path}; the project was left unchanged.")
+    backup_dir = Path(path).parent / "Freighter backup"
+    backup_dir.mkdir(exist_ok=True)
+    backup = backup_dir / Path(path).name
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    write_replace(Path(path), new_data)
+    return result
+
+
+def cmd_fix_fl(args):
+    """Repoint FL Studio projects at moved samples. check-fl (dry_run) only reports."""
+    dry = getattr(args, "dry_run", False)
+    if not dry and fl_is_running():
+        print("FL Studio is open. Close it first, so it can't save over a project while it's being repaired.\n"
+              "Checking only; nothing was changed.")
+        dry = True
     maps = load_pathmaps(args.pathmap)
     roots = project_search_roots(maps, args.folder)
     print("Looking for FL Studio projects in:\n  " + "\n  ".join(map(str, roots)), flush=True)
     projects = find_projects(roots, ".flp", include_backups=args.include_backups)
     print(f"Found {len(projects)} projects.\n")
-    counts = {"ok": 0, "builtin": 0, "moved": 0, "missing": 0}
-    unreadable, add_folders = [], set()
-    report = [f"Freighter {__version__} FL Studio check, {dt.datetime.now():%Y-%m-%d %H:%M}", ""]
+    totals = {"ok": 0, "builtin": 0, "fixed": 0, "missing": 0, "projects_fixed": 0}
+    unreadable, damaged, report = [], [], [
+        f"Freighter {__version__} FL Studio {'check' if dry else 'repair'}, {dt.datetime.now():%Y-%m-%d %H:%M}", ""]
     for p in projects:
         try:
-            version, samples = flp_samples(p)
+            r = fix_flp(p, maps, dry_run=dry)
         except (ValueError, OSError, struct.error) as e:
             unreadable.append(f"{p} ({e})")
             continue
-        miss, moved = [], 0
-        for s in dict.fromkeys(samples):
-            if FL_PLACEHOLDER.match(s):
-                counts["builtin"] += 1
-                continue
-            status, new = locate(s, maps)
-            counts[status] += 1
-            if status == "moved":
-                moved += 1
-                for pm in maps:
-                    for e in pm["entries"]:
-                        if str(new).startswith(e["new"]):
-                            add_folders.add(e["new"])
-            elif status == "missing":
-                miss.append(s)
-        if miss or moved:
-            print(f"  {p.name} (FL {version}): {moved} moved, {len(miss)} missing")
-        report.append(f"{p}  FL {version}  samples={len(set(samples))} moved={moved} missing={len(miss)}")
-        report += [f"    missing: {m}" for m in miss]
+        for k in ("ok", "builtin", "fixed"):
+            totals[k] += r[k]
+        totals["missing"] += len(r["missing"])
+        totals["projects_fixed"] += bool(r["fixed"])
+        if r["damaged"]:
+            damaged.append(str(p))
+        if r["fixed"] or r["missing"]:
+            verb = "can be repointed" if dry else "repointed"
+            print(f"  {p.name} (FL {r['version']}): {r['fixed']} {verb}, {len(r['missing'])} missing")
+        report.append(f"{p}  FL {r['version']}  fixed={r['fixed']} missing={len(r['missing'])}"
+                      + ("  DAMAGED: not changed" if r["damaged"] else ""))
+        report += [f"    missing: {m}" for m in r["missing"]]
+        report += [f"    can't be written in this old project format: {x}" for x in r["skipped"]]
 
-    print(f"\nSamples: {counts['ok']} found in place, {counts['builtin']} FL built-in, "
-          f"{counts['moved']} found in their new location, {counts['missing']} missing.")
-    if add_folders:
-        print("\nFL Studio can't be pointed at moved files automatically yet. In FL Studio, open "
-              "Options > File settings, and add these under 'Browser extra search folders':")
-        for f in sorted(add_folders):
-            print(f"  {f}")
-        print("FL then finds moved samples when it opens a project. Save each project afterwards.")
+    if dry:
+        print(f"\nSamples: {totals['ok']} found in place, {totals['builtin']} in FL's own folders (FL finds those "
+              f"itself), {totals['fixed']} can be repointed to their moved copies, {totals['missing']} missing.")
+    else:
+        print(f"\nRepaired {totals['projects_fixed']} FL Studio projects: {totals['fixed']} samples now point to their "
+              f"moved copies. {totals['ok']} were already in place, {totals['builtin']} are in FL's own folders "
+              f"(FL finds those itself), {totals['missing']} are missing.")
+        if totals["projects_fixed"]:
+            print("The original of each changed project is kept in a 'Freighter backup' folder next to it.")
+    if damaged:
+        print(f"\n{len(damaged)} projects look damaged (often an autosave caught mid-save) and were left unchanged.")
     if unreadable:
         print(f"\n{len(unreadable)} projects couldn't be read (listed in the report).")
     out = home() / "Music" / "Freighter"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "fl-check-report.txt").write_text("\n".join(report + ["", "Unreadable:"] + unreadable),
-                                             encoding="utf-8")
-    print(f"Full list: {out / 'fl-check-report.txt'}")
+    name = "fl-check-report.txt" if dry else "fl-repair-report.txt"
+    (out / name).write_text("\n".join(report + ["", "Damaged (left unchanged):"] + damaged
+                                       + ["", "Unreadable:"] + unreadable), encoding="utf-8")
+    print(f"Full list: {out / name}")
     return 0
+
+
+def cmd_check_fl(args):
+    """Report only: what fix-fl would repoint, and what's missing."""
+    args.dry_run = True
+    return cmd_fix_fl(args)
 
 
 # --------------------------------------------------------------------------- scan
@@ -1565,16 +1721,32 @@ def same_contents(a, b):
         return False
 
 
+def repaired_paths(p):
+    """{path as the original project stored it: path the repaired project uses now} for a project a repair
+    rewrote (empty if it wasn't), so a rehearsal can check what the DAW will actually load."""
+    src = p.parent / "Freighter backup" / p.name
+    if not src.is_file():
+        return {}
+    try:
+        if p.suffix.lower() == ".flp":
+            before, after = flp_samples(src)[1], flp_samples(p)[1]
+        else:
+            before, after = (als_sample_refs(read_als(x)[0], unique=False) for x in (src, p))
+    except (ValueError, OSError, struct.error):
+        return {}
+    return dict(zip(before, after)) if len(before) == len(after) else {}
+
+
 def project_refs(p):
     """(kind, [referenced file paths as the project stored them]) or (kind, None) if unreadable."""
+    src = p.parent / "Freighter backup" / p.name  # the original, if a repair rewrote it
     if p.suffix.lower() == ".flp":
         try:
             # FL's own sounds (%FLStudioFactoryData%) come with FL; the user's data (%FLStudioUserData%) is checked
-            return "FL Studio", [s for s in dict.fromkeys(flp_samples(p)[1])
+            return "FL Studio", [s for s in dict.fromkeys(flp_samples(src if src.is_file() else p)[1])
                                  if FL_USER_DATA.match(s) or not FL_PLACEHOLDER.match(s)]
         except (ValueError, OSError, struct.error):
             return "FL Studio", None
-    src = p.parent / "Freighter backup" / p.name  # the original, if fix-ableton rewrote it
     try:
         text, _ = read_als(src if src.is_file() else p)
     except Exception:
@@ -1625,7 +1797,7 @@ def cmd_rehearse(args):
         cmd_unpack(argparse.Namespace(bundle=str(bundles[-1]), dest_for=[]))
         print("\n== 3/4  Repair projects")
         cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
-        cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
+        cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
 
         print("\n== 4/4  Check every project on the new computer")
         maps = load_pathmaps(None)
@@ -1639,6 +1811,7 @@ def cmd_rehearse(args):
                 unchecked.append(f"{p}  ({kind})")
                 continue
             totals["projects"] += 1
+            now = repaired_paths(p)
             for r in refs:
                 if in_program_place(r):
                     continue                     # comes with an installed program, not part of the move
@@ -1647,6 +1820,9 @@ def cmd_rehearse(args):
                     original = fl_user_data(real_home).joinpath(*rest.split("/"))
                     moved = fl_user_data(new_home).joinpath(*rest.split("/"))
                     moved = moved if moved.exists() else None
+                elif now.get(r, r) != r:         # the repair rewrote it: check the path the project uses now
+                    original = Path(r)
+                    moved = Path(now[r]) if os.path.exists(long_path(now[r])) else None
                 else:
                     original = Path(r)
                     status, moved = locate(r, maps)
@@ -1789,7 +1965,7 @@ def interactive_menu():
                     cmd_unpack(argparse.Namespace(bundle=bundle, dest_for=[], anyway=anyway))
             elif choice == "6":
                 cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
-                cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
+                cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
             elif choice == "7":
                 import crate
                 folder = ask_path("  Drag a sample folder (or drum kit) into this window, then press Enter: ")
@@ -1868,7 +2044,14 @@ def main():
     s.add_argument("--dry-run", action="store_true", help="report only, change nothing")
     s.set_defaults(fn=cmd_fix_ableton)
 
-    s = sub.add_parser("check-fl", help="find moved and missing samples in FL Studio projects")
+    s = sub.add_parser("fix-fl", help="repoint FL Studio projects at moved samples (keeps a backup)")
+    s.add_argument("--pathmap", metavar="FILE")
+    s.add_argument("--folder", action="append", default=[], metavar="FOLDER", help="only look here")
+    s.add_argument("--include-backups", action="store_true", help="also repair autosave/backup projects")
+    s.add_argument("--dry-run", action="store_true", help="report only, change nothing")
+    s.set_defaults(fn=cmd_fix_fl)
+
+    s = sub.add_parser("check-fl", help="report moved and missing samples in FL Studio projects (changes nothing)")
     s.add_argument("--pathmap", metavar="FILE")
     s.add_argument("--folder", action="append", default=[], metavar="FOLDER", help="only look here")
     s.add_argument("--include-backups", action="store_true", help="also check autosave/backup projects")

@@ -258,6 +258,96 @@ class FLParser(TempDirCase):
             pass
 
 
+def make_rich_flp(path, samples, data_path="C:\\Users\\Producer\\Documents\\Image-Line\\FL Studio\\Projects\\Beat\\",
+                  version="25.1.0"):
+    """An FL project with the kinds of events real ones have around the sample paths: byte, word and dword events,
+    plugin names (201/203), plugin wrapper and state data (212/213), mixer names (204) and the data folder (202)."""
+    unicode = int(version.split(".")[0]) > 11
+    enc = (lambda x: x.encode("utf-16-le") + b"\0\0") if unicode else (lambda x: x.encode("latin-1") + b"\0")
+    text = lambda eid, payload: bytes([eid]) + varint(len(payload)) + payload
+    body = text(199, version.encode() + b"\0") + bytes([11, 1]) + bytes([66, 0x34, 0x12]) + bytes([156, 1, 2, 3, 4])
+    body += text(202, enc(data_path))
+    for s in samples:
+        body += text(201, enc("Fruity Wrapper")) + text(203, enc("Serum 2"))
+        body += text(212, bytes(range(60))) + text(213, bytes(range(256)) * 3)     # long, opaque plugin state
+        body += text(196, enc(s)) + bytes([21, 0])
+    body += text(204, enc("Insert 1")) + bytes([64, 1, 0])
+    return write(path, b"FLhd" + struct.pack("<I", 6) + struct.pack("<HHH", 0, len(samples), 96)
+                 + b"FLdt" + struct.pack("<I", len(body)) + body)
+
+
+class FLRepair(TempDirCase):
+    """Issue #68: FL projects are repaired by patching only their path events."""
+
+    def test_no_change_means_byte_identical(self):
+        data = make_rich_flp(self.tmp / "a.flp", ["C:\\Kits\\kick.wav", "%FLStudioFactoryData%\\x.wav"]).read_bytes()
+        out, changed, skipped = rm.flp_rewrite(data, lambda s: None)
+        self.assertEqual(out, data)
+        self.assertEqual((changed, skipped), ({}, []))
+
+    def test_only_the_paths_change(self):
+        long_new = "/Users/producer/Music/Freighter/OLDPC/" + "Very Long Sample Pack Name/" * 6 + "kick é.wav"
+        data = make_rich_flp(self.tmp / "a.flp", ["C:\\Kits\\kick é.wav", "C:\\Kits\\snare.wav"]).read_bytes()
+        out, changed, _ = rm.flp_rewrite(data, lambda s: long_new if s.endswith("kick é.wav") else None)
+        self.assertGreater(len(long_new.encode("utf-16-le")), 127, "the new length needs a longer varint")
+        self.assertEqual(changed, {"C:\\Kits\\kick é.wav": long_new})
+        self.assertTrue(rm.flp_same_except_paths(data, out))
+        path = self.tmp / "b.flp"
+        path.write_bytes(out)
+        self.assertEqual(rm.flp_samples(path)[1], [long_new, "C:\\Kits\\snare.wav"])
+        start, end, _ = rm.flp_events(out, strict=True)
+        self.assertEqual(end, len(out), "the data chunk length was fixed")
+
+    def test_data_folder_and_old_format_projects(self):
+        data = make_rich_flp(self.tmp / "a.flp", ["C:\\Kits\\kick.wav"], data_path="C:\\Old\\Beat\\",
+                             version="10.0.9").read_bytes()
+        out, changed, skipped = rm.flp_rewrite(data, lambda s: {"C:\\Old\\Beat\\": "/New/Beat/",
+                                                                "C:\\Kits\\kick.wav": "/New/Kits/kick 中.wav"}.get(s))
+        self.assertEqual(changed, {"C:\\Old\\Beat\\": "/New/Beat/"}, "the data folder moves too")
+        self.assertEqual(skipped, ["/New/Kits/kick 中.wav"], "a pre-11.5 project can't hold that name: left alone")
+        self.assertTrue(rm.flp_same_except_paths(data, out))
+
+    def test_fix_flp_repairs_keeps_a_backup_and_leaves_damaged_files_alone(self):
+        moved = write(self.tmp / "new" / "Kits" / "kick.wav", b"kick")
+        maps = [{"source_os": "windows", "entries": [{"old": "C:\\Users\\P\\Desktop\\Kits",
+                                                       "new": str(moved.parent)}],
+                 "home": {"old": "C:\\Users\\P", "new": str(self.tmp / "new")}}]
+        beat = make_rich_flp(self.tmp / "Projects" / "Beat.flp", ["C:\\Users\\P\\Desktop\\Kits\\kick.wav",
+                                                                 "C:\\Users\\P\\Desktop\\Gone\\x.wav"])
+        original = beat.read_bytes()
+        r = rm.fix_flp(beat, maps)
+        self.assertEqual((r["fixed"], r["missing"]), (1, ["C:\\Users\\P\\Desktop\\Gone\\x.wav"]))
+        self.assertEqual(Path(rm.flp_samples(beat)[1][0]).read_bytes(), b"kick")
+        self.assertEqual((beat.parent / "Freighter backup" / "Beat.flp").read_bytes(), original)
+        self.assertEqual(rm.fix_flp(beat, maps)["fixed"], 0, "a second run finds it already repaired")
+        broken = self.tmp / "Projects" / "Broken.flp"
+        data = bytearray(original)
+        _s, _e, ev = rm.flp_events(original)
+        at = next(e for e in ev if e[0] == 213)[1]
+        data[at + 1:at + 3] = bytes([0xFF, 0x7F])                                     # a length running far past the end
+        broken.write_bytes(bytes(data))
+        r = rm.fix_flp(broken, maps)
+        self.assertTrue(r["damaged"])
+        self.assertEqual(broken.read_bytes(), bytes(data), "a damaged project is never written")
+
+    def test_nothing_is_written_while_fl_is_open(self):
+        new = self.tmp / "new"
+        write(new / "Music" / "Freighter" / "OLD" / "Kits" / "kick.wav", b"kick")
+        write(new / "Music" / "Freighter" / "OLD" / "pathmap.json", json.dumps({
+            "source_host": "OLD", "source_os": "windows", "created": "x",
+            "entries": [{"old": "C:\\Users\\P\\Desktop\\Kits", "new": str(new / "Music" / "Freighter" / "OLD" / "Kits")}],
+            "home": {"old": "C:\\Users\\P", "new": str(new)}}).encode())
+        beat = make_rich_flp(new / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp",
+                             ["C:\\Users\\P\\Desktop\\Kits\\kick.wav"])
+        before = beat.read_bytes()
+        with as_home(new), quiet(), mock.patch.object(rm, "fl_is_running", lambda: True):
+            rm.cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
+        self.assertEqual(beat.read_bytes(), before)
+        with as_home(new), quiet(), mock.patch.object(rm, "fl_is_running", lambda: False):
+            rm.cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
+        self.assertNotEqual(beat.read_bytes(), before)
+
+
 class AbletonFix(TempDirCase):
     def test_rewrites_moved_keeps_missing_and_backs_up(self):
         new = write(self.tmp / "new" / "Kicks" / "kick & co.wav", b"x")
@@ -1025,7 +1115,7 @@ class FullMove(TempDirCase):
         def damage(_args):   # stands in for any bug that puts the wrong audio where the snare should be
             moved = next((Path(os.environ["FREIGHTER_HOME"])).rglob("snare.wav"))
             moved.write_bytes(b"\0" * moved.stat().st_size)
-        with as_home(old), quiet(), mock.patch.object(rm, "cmd_check_fl", side_effect=damage):
+        with as_home(old), quiet(), mock.patch.object(rm, "cmd_fix_fl", side_effect=damage):
             code = rm.cmd_rehearse(argparse.Namespace(to=str(old / "rehearsal"), include=[], skip=[]))
         report = (old / "rehearsal" / "Freighter Rehearsal" / "rehearsal-report.txt").read_text()
         self.assertEqual(code, 2)
@@ -1133,7 +1223,7 @@ class CrossOSMove(TempDirCase):
         with as_home(new), quiet():
             rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=list(dest_for)))
             rm.cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
-            rm.cmd_check_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False))
+            rm.cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
             user_library = rm.known_roots(rm.THIS_OS, new)["ableton_user_library"][1]
         return new, user_library
 
@@ -1148,8 +1238,12 @@ class CrossOSMove(TempDirCase):
             self.assertTrue(Path(refs[0]).is_file(), f"{name} points at the moved kick: {refs[0]}")
             self.assertEqual(Path(refs[0]).read_bytes(), b"kick")
             self.assertIn("&amp;", text, "the & in the file name is escaped in the XML")
-        fl = (new / "Music" / "Freighter" / "fl-check-report.txt").read_text(encoding="utf-8")
-        self.assertIn("moved=1 missing=0", fl)
+        fl = (new / "Music" / "Freighter" / "fl-repair-report.txt").read_text(encoding="utf-8")
+        self.assertIn("fixed=1 missing=0", fl)
+        beat = new / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp"
+        now = rm.flp_samples(beat)[1][0]
+        self.assertEqual(Path(now).read_bytes(), b"snare", "the FL project itself now points at the moved snare")
+        self.assertTrue((beat.parent / "Freighter backup" / "Beat.flp").is_file(), "the original is kept")
 
     def test_windows_to_here(self):
         h = "C:\\Users\\Producer"
