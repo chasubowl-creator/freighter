@@ -82,6 +82,11 @@ The first version with a number. Everything that exists so far:
 - The computer stays awake while packing and unpacking. A rehearsal always tests the FL repair, even with FL open.
 - When Windows or macOS refuses a write, the results say what to allow.
 
+- **Bring only some projects** (issue #76): choose a time range (in the app, the menu, or `--since/--until`)
+  and only the projects last saved in it move. Each sample they use brings its whole kit, never the folder of
+  other kits above it; sample libraries are offered with their size instead of packed whole. Projects left
+  behind are listed in the bundle.
+
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account
   (issue #36). The Mac programs now keep their "executable" permission, so they start after unzipping.

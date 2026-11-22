@@ -105,6 +105,7 @@ Tick the box here when the issue closes.
 - [x] App: Crate screen (#34) · S · Claude
 - [x] Unpack journal, preview and undo (#73) · M · Claude
 - [x] Speed for 500 GB moves (#74) · M · Claude
+- [x] Move only the projects from a time range, with the kits they use (#76) · M · Claude
 - [ ] Usability test with a non-technical producer (#35) · S · You
 
 **Done when:** A non-technical producer completes a move without help.

@@ -29,6 +29,20 @@ Double-click **freighter**. In the menu:
 
 Installers and programs found in sample folders are left behind on purpose, and listed in `left-behind.txt`.
 
+### Bring only some projects (optional)
+
+If moving everything is too much data, bring only the projects you last saved in a time range, for example
+March 2024 to March 2026. In the app, choose **Only projects last saved from … to …** on the "What a move would
+take" screen; in the menu, type the range when it asks **Which projects?** (for example `2024-03 to 2026-03`);
+on the command line, add `--since 2024-03 --until 2026-03`.
+
+- Projects saved outside the range stay on the old computer. The bundle lists them in `projects-left-out.txt`.
+- For every sample those projects use, the **whole kit** it belongs to comes, but never the folder of other
+  kits above it. For example, the "Tech House Kit" in `House`, but not the rest of `House`.
+- Your sample libraries (FL's browser folders) aren't moved whole; each is listed with its size, so you can
+  tick one in the app (or add it with `--include "D:\Samples"`) to take all of it.
+- Your FL Studio and Ableton folders, presets and plugin presets still come, minus the old project files.
+
 ## 3. Before you wipe or sell the old computer
 
 Keep it as it is until your projects open and play on the new one.

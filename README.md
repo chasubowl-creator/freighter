@@ -10,6 +10,7 @@ FL Studio and Ableton Live. Windows and Mac, in any direction. Free, and everyth
 
     python3 manifest.py              # _Manifest: plugin report (use "py" on Windows)
     python3 freighter.py pack --list    # what a move would take, and how big
+    python3 freighter.py pack --list --since 2024-03   # only projects saved since March 2024, with their kits
     python3 freighter.py rehearse       # practise a full move on this computer, safely
     python3 crate.py preview ~/Desktop/DrumKits   # _Crate: see how your samples would be sorted
 

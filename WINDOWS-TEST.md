@@ -39,7 +39,8 @@ Press Enter to go back to the menu.
 
 ## Step 4: See what a move would take (1 min)
 
-Type **2** and press Enter. It lists everything Freighter would move, with a **total** at the bottom.
+Type **2** and press Enter. When it asks **Which projects?**, press Enter (all of them). It lists everything
+Freighter would move, with a **total** at the bottom.
 - Are your FL Studio projects and sample folders there?
 - Are your plugin presets there? They show up as **Plugin presets and data**, for example `Xfer` for Serum.
   Very big plugin folders (sound libraries) are listed separately as "Not packed, because they're big".
@@ -56,13 +57,17 @@ Type **2** and press Enter. It lists everything Freighter would move, with a **t
 The rehearsal needs **free space of about twice the total** from Step 4. To check, open File Explorer →
 **This PC** and look at the C: drive.
 
-Type **3** and press Enter. At the end it prints either:
+Type **3** and press Enter, then press Enter again at **Which projects?** At the end it prints either:
 - **PASS:** every sample your projects use survived the move, or
 - **FAIL:** lists the samples it lost. That's a Freighter bug, and exactly what we're looking for.
 
 **If C: is too small,** rehearse onto an external drive instead: type **9** to open the app, choose
 **Rehearse first**, and under "Somewhere else" type the drive, for example `E:`. (Or use the command version
 below: `freighter.exe rehearse --to E:\`)
+
+**Optional, if the total is very big:** do Step 4 again and, at **Which projects?**, type a time range such as
+`2024-03 to 2026-03`. Only the projects saved in that time come, with the whole kits they use (never a whole
+library). Note how much smaller the total gets.
 
 ## Optional: try the new app window (5 min)
 
