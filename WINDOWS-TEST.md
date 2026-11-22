@@ -7,7 +7,8 @@ into `Music\Freighter` in your user folder, which you can delete at the end. No 
 
 ## Step 1: Download the program (3 min)
 
-1. On the PC, open **https://github.com/chasubowl-creator/freighter/actions** (no account needed)
+1. On the PC, open **https://github.com/chasubowl-creator/freighter/actions** and **sign in to GitHub**
+   (top right). GitHub only lets signed-in accounts download these test builds.
 2. Click the newest run with a **green check**.
 3. Scroll to **Artifacts** at the bottom and click **freighter-windows**. A zip downloads.
 4. In Downloads, right-click **freighter-windows.zip** → **Extract All… → Extract**.
@@ -26,6 +27,8 @@ forcing it.
 
 A window opens with a numbered menu.
 
+Before going on, **close FL Studio and Ableton** if they're open.
+
 ## Step 3: Scan your plugins (2 min)
 
 Type **1** and press Enter. Your plugin report opens in the browser. Check:
@@ -39,6 +42,8 @@ Press Enter to go back to the menu.
 
 Type **2** and press Enter. It lists everything Freighter would move, with a **total** at the bottom.
 - Are your FL Studio projects and sample folders there?
+- Are your plugin presets there? They show up as **Plugin presets and data**, for example `Xfer` for Serum.
+  Very big plugin folders (sound libraries) are listed separately as "Not packed, because they're big".
 - Anything missing, like samples on another drive? Note it down. That's useful feedback.
 - Read any notes under the list:
   - **"already missing"**: samples your projects use that aren't on the PC any more (maybe an unplugged drive).
@@ -56,8 +61,9 @@ Type **3** and press Enter. At the end it prints either:
 - **PASS:** every sample your projects use survived the move, or
 - **FAIL:** lists the samples it lost. That's a Freighter bug, and exactly what we're looking for.
 
-**If C: is too small,** use the command version instead, pointing at an external drive (see "Command
-version" below): `freighter.exe rehearse --to E:\`
+**If C: is too small,** rehearse onto an external drive instead: type **9** to open the app, choose
+**Rehearse first**, and under "Somewhere else" type the drive, for example `E:`. (Or use the command version
+below: `freighter.exe rehearse --to E:\`)
 
 ## Optional: try the new app window (5 min)
 

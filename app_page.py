@@ -572,7 +572,8 @@ function unpacked(r) {
     el("td", {class: "mono path"}, e.new)));
   const parts = [steps(NEW_STEPS, 2), el("h1", {}, (u.problems || []).length || (u.bad || []).length ? "Unpacked, with problems" : "Everything is in place")];
   if ((u.problems || []).length) parts.push(note("bad", "The bundle wasn't complete", el("ul", {}, u.problems.map(p => el("li", {}, p)))));
-  if ((u.bad || []).length) parts.push(note("bad", `${plural(u.bad.length, "file")} had a problem`, el("ul", {}, u.bad.map(p => el("li", {class: "mono"}, p)))));
+  if ((u.bad || []).length) parts.push(note("bad", `${plural(u.bad.length, "file")} had a problem`,
+    u.blocked_hint ? el("div", {}, u.blocked_hint) : null, el("ul", {}, u.bad.map(p => el("li", {class: "mono"}, p)))));
   parts.push(...repairSummary(r.repair));
   if ((u.fl_search || []).length) parts.push(el("h2", {}, "Add these in FL Studio"),
     el("p", {class: "muted"}, "FL keeps its settings per computer. In FL Studio, open Options → File settings and add each folder under Browser extra search folders:"),

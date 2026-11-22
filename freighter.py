@@ -1628,6 +1628,17 @@ def find_bundles(folder, depth=1):
     return out
 
 
+def blocked_hint(os_name=None):
+    """What to do when the system refused to let Freighter write some files."""
+    if (os_name or THIS_OS) == "windows":
+        return ("Windows refused to let Freighter write some files. If Ransomware protection is on, allow Freighter: "
+                "Windows Security > Virus & threat protection > Ransomware protection > Allow an app through "
+                "Controlled folder access. Then unpack again; it skips what's already in place.")
+    return ("macOS refused to let Freighter write some files. Allow it in System Settings > Privacy & Security > "
+            "Files and Folders (or Full Disk Access), and for folders in /Library use an administrator account. "
+            "Then unpack again; it skips what's already in place.")
+
+
 def windows_drive(kind, letter, system):
     """(list it?, removable?) for a Windows drive letter, from GetDriveTypeW's answer. USB hard drives and SSDs
     call themselves "fixed", so only the drive Windows runs from counts as the computer's own disk; other fixed
@@ -1758,7 +1769,7 @@ def cmd_unpack(args):
         journal.write(json.dumps({"kind": "dir", "path": str(d)}) + "\n")
     prog = Progress(total, "Copying", sum(len(idx) for _, _, idx in plan))
     prog.add(0, files=0)
-    conflicts, bad, entries, replaced = [], [], [], 0
+    conflicts, bad, entries, replaced, blocked = [], [], [], 0, False
     for it, dest, idx in plan:
         data_root = bundle / "data" / it["id"]
         for rel, rec in idx.items():
@@ -1786,6 +1797,7 @@ def cmd_unpack(args):
                 digest = copy_and_hash(src, dst)
             except OSError as e:
                 bad.append(f"{src}: {e}")
+                blocked = blocked or isinstance(e, PermissionError)
                 prog.add(rec["size"], copied=False)
                 continue
             st = file_stat(dst)
@@ -1835,9 +1847,12 @@ def cmd_unpack(args):
     if conflicts:
         lines += ["", "Files that already existed here with different contents. The moved copy was saved",
                   f"next to them with '(from {src_host})' in the name:"] + conflicts
+    hint = blocked_hint() if blocked else None
     if bad:
-        lines += ["", "Problems:"] + bad
+        lines += ["", "Problems:"] + bad + ([hint] if hint else [])
     (landing / "unpack-report.txt").write_text("\n".join(lines), encoding="utf-8")
+    if hint:
+        print("\n" + hint)
 
     journal.close()
     for note in notes:
@@ -1865,7 +1880,7 @@ def cmd_unpack(args):
         "source_host": src_host, "source_os": manifest["source_os"], "landing": str(landing),
         "report": str(landing / "unpack-report.txt"), "problems": problems, "notes": notes,
         "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place, "replaced": replaced,
-        "plugin_data": presets, "cross_os": cross_os,
+        "plugin_data": presets, "cross_os": cross_os, "blocked_hint": hint,
         "entries": [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries
                     if e.get("id") in {it["id"] for it in manifest["items"]}],
         "fl_search": [str(locate(sp, [pathmap])[1] or sp) for sp in old_search_paths(manifest)],
@@ -2422,7 +2437,8 @@ def fix_flp(path, maps, dry_run=False):
 def cmd_fix_fl(args):
     """Repoint FL Studio projects at moved samples. check-fl (dry_run) only reports."""
     dry = getattr(args, "dry_run", False)
-    if not dry and fl_is_running():
+    # a rehearsal repairs its own copies, which FL can't have open, so it always tests the repair
+    if not dry and not getattr(args, "copies_only", False) and fl_is_running():
         print("FL Studio is open. Close it first, so it can't save over a project while it's being repaired.\n"
               "Checking only; nothing was changed.")
         dry = True
@@ -2840,7 +2856,7 @@ def cmd_rehearse(args):
         cmd_unpack(argparse.Namespace(bundle=str(bundles[-1]), dest_for=[], rehearsal_root=str(new_home)))
         print("\n== 3/4  Repair projects")
         cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
-        cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
+        cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False, copies_only=True))
 
         print("\n== 4/4  Check every project on the new computer")
         maps = load_pathmaps(None)

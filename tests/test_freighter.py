@@ -1330,6 +1330,14 @@ class FullMove(TempDirCase):
         self.assertIn("still found after the move: 3", report)
         self.assertTrue(self.kick.is_file(), "the real files must not be touched")
 
+    def test_rehearsal_tests_the_fl_repair_even_while_fl_is_open(self):
+        """It repairs its own copies, which FL can't have open, so an open FL mustn't skip that part."""
+        old = self.build_old_computer()
+        with as_home(old), quiet(), mock.patch.object(rm, "fl_is_running", lambda: True):
+            code = rm.cmd_rehearse(argparse.Namespace(to=str(old / "rehearsal"), include=[], skip=[]))
+        self.assertEqual(code, 0)
+        repaired = list((old / "rehearsal" / "Freighter Rehearsal").rglob("Freighter backup/Beat.flp"))
+        self.assertEqual(len(repaired), 1, "the FL project copy was repaired")
 
     def test_a_leftover_rehearsal_is_never_packed(self):
         """Issue #18: a rehearsal folder left on the Desktop must not be packed by the next move."""
@@ -1793,3 +1801,23 @@ class KeepAwake(unittest.TestCase):
             with rm.keep_awake():
                 done = True
         self.assertTrue(done)
+
+
+class BlockedWrites(TempDirCase):
+    def test_a_refused_write_explains_what_to_allow(self):
+        old, new, drive = self.tmp / "old", self.tmp / "new", self.tmp / "drive"
+        write(old / "Documents" / "Xfer" / "Serum Presets" / "Bass.fxp", b"p" * 10)
+        drive.mkdir()
+        with as_home(old), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
+        new.mkdir()
+
+        def refuse(src, dst, direct=False):
+            raise PermissionError(13, "Permission denied")
+        with as_home(new), quiet(), mock.patch.object(rm, "copy_and_hash", refuse):
+            rm.cmd_unpack(argparse.Namespace(bundle=str(next(drive.glob("Freighter-*"))), dest_for=[]))
+        u = rm.LAST["unpack"]
+        self.assertTrue(u["bad"])
+        self.assertEqual(u["blocked_hint"], rm.blocked_hint())
+        self.assertIn("Controlled folder access", rm.blocked_hint("windows"))
+        self.assertIn("Privacy & Security", rm.blocked_hint("mac"))
