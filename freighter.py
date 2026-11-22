@@ -561,7 +561,9 @@ PACK_REPORTS = (("pack-errors.txt", "file couldn't be copied", "files couldn't b
                 ("already-missing.txt", "sample was already missing on the old computer",
                  "samples were already missing on the old computer"),
                 ("left-behind.txt", "program or installer was left behind on purpose",
-                 "programs or installers were left behind on purpose"))
+                 "programs or installers were left behind on purpose"),
+                ("projects-left-out.txt", "project stayed on the old computer (saved outside the time range)",
+                 "projects stayed on the old computer (saved outside the time range)"))
 
 
 def find_bundle(drive, host):
@@ -710,7 +712,7 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None, big=N
         iid = item_id("used", folder)
         if iid not in skips:
             items.append({"id": iid, "label": f"{label}: {folder.name}",
-                          "source_path": str(folder), "kind": "extra"})
+                          "source_path": str(folder), "kind": "extra", "kit": label == "Kit"})
     for folder, files in sorted(loose.items()):
         iid = item_id("loose", folder)
         if iid not in skips:
@@ -797,6 +799,25 @@ def parse_range(text):
     return ProjectRange(parts[0] or None, parts[1] or None)
 
 
+def add_range_args(parser):
+    parser.add_argument("--since", metavar="MONTH", help="only projects last saved from this month on, e.g. 2024-03")
+    parser.add_argument("--until", metavar="MONTH", help="only projects last saved up to this month, e.g. 2026-03")
+
+
+def ask_range():
+    """The menu's question: (since, until) as text, or (None, None) for all projects."""
+    while True:
+        text = input("  Which projects? Press Enter for all of them, or type a time range like  2024-03 to 2026-03 : ")
+        if not text.strip():
+            return None, None
+        try:
+            r = parse_range(text)
+            print(f"  Projects saved {r.label()}.")
+            return r.since_text, r.until_text
+        except ValueError as e:
+            print(f"  {e}")
+
+
 def range_from_args(args):
     """The ProjectRange that --since/--until ask for, or None. Stops with a message when they're not months."""
     since, until = getattr(args, "since", None), getattr(args, "until", None)
@@ -849,7 +870,7 @@ def range_keep(rng):
 # with two or more subfolders that aren't is a container of kits (a library, a genre folder, a maker's folder).
 KIT_PART_WORDS = (set().union(*(w for _c, w, _p in crate.ONE_SHOT_RULES), *(w for _c, w in crate.LOOP_RULES),
                               crate.LOOP_WORDS, crate.ONE_SHOT_WORDS)
-                  | {"one", "shot", "shots", "loop", "loops", "drum", "drums", "hit", "hits", "kit", "kits", "open",
+                  | {"one", "shot", "shots", "loop", "loops", "drum", "drums", "hit", "hits", "open",
                      "closed", "construction", "midi", "preset", "presets", "patch", "patches", "format", "formats",
                      "ableton", "live", "fl", "flstudio", "logic", "serum", "vital", "massive", "wav", "wavs", "aif",
                      "aiff", "rex", "rx2", "sample", "samples", "sound", "sounds", "stem", "stems", "bonus", "extra",
@@ -859,6 +880,8 @@ KIT_PART_WORDS = (set().union(*(w for _c, w, _p in crate.ONE_SHOT_RULES), *(w fo
                      "song", "songs", "starter", "starters", "idea", "ideas", "progression", "progressions",
                      "tonal", "atonal", "textures", "one-shots", "oneshot", "oneshots", "hihats", "hi", "audio"})
 KIT_CONTAINER_CACHE = {}
+# a folder named with one of these is a kit (or a set of them), whatever else its name says: "Bass Kit", "Drum Kit 2"
+KIT_WORDS = {"kit", "kits", "pack", "packs", "vol", "volume", "collection", "bundle", "edition", "library", "series"}
 
 
 def _name_words(name):
@@ -879,6 +902,8 @@ def kit_part(name):
     "UNDRGRND Sounds - Deep Grooves - Wav" is a kit ("deep" is a real word)."""
     vocab, other = 0, 0
     for w in _name_words(name):
+        if w in KIT_WORDS:
+            return False
         if w in KIT_PART_WORDS or (w.endswith("s") and w[:-1] in KIT_PART_WORDS):
             vocab += 1
         elif not _pack_code(w):
@@ -887,22 +912,28 @@ def kit_part(name):
 
 
 def is_kit_container(folder):
-    """True for a folder holding several kits: two or more subfolders that aren't kit parts."""
+    """True for a folder above kits, not a kit itself: one holding two or more subfolders that aren't kit parts
+    (a library, a genre or maker folder), or a wrapper whose only content is one such subfolder and no sounds of
+    its own (Kits/House/<kits>: Kits only wraps House)."""
     key = _key(folder)
     if key not in KIT_CONTAINER_CACHE:
-        kits = 0
+        kits, subfolders, sounds = 0, 0, 0
         try:
             with os.scandir(long_path(folder)) as listing:
                 for e in listing:
                     try:
-                        if e.is_dir(follow_symlinks=False) and not e.name.startswith(".") \
-                                and not skip_dir(str(folder), e.name) and not kit_part(e.name):
-                            kits += 1
+                        if e.is_dir(follow_symlinks=False):
+                            if e.name.startswith(".") or skip_dir(str(folder), e.name):
+                                continue
+                            subfolders += 1
+                            kits += not kit_part(e.name)
+                        elif os.path.splitext(e.name)[1].lower() in crate.AUDIO_EXTS:
+                            sounds += 1
                     except OSError:
                         continue
         except OSError:
             pass
-        KIT_CONTAINER_CACHE[key] = kits >= 2
+        KIT_CONTAINER_CACHE[key] = kits >= 2 or (subfolders == 1 and kits == 1 and not sounds)
     return KIT_CONTAINER_CACHE[key]
 
 
@@ -1115,6 +1146,11 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
     flps += [p for p in extra_projects if p not in flps and not inside_left_out(p)]
     alss = [p for p in both if p.suffix.lower() in ABLETON_EXTS and p.parent.name.lower() != "backup"
             and not inside_left_out(p)]
+    # demo projects inside sample libraries (FL's browser folders) are the packs' own, not yours
+    in_library = Folders(list(libraries)).holds if libraries else (lambda p: False)
+    if rng is not None:
+        flps = [p for p in flps if not in_library(p)]
+        alss = [p for p in alss if not in_library(p)]
     if stats is not None:
         real = [p for p in flps + alss if p.suffix.lower() in (".flp", ".als") and p.parent.name.lower() != "backup"
                 and "templates" not in (x.lower() for x in p.parts[:-1])]   # people's projects, not templates
@@ -1328,7 +1364,9 @@ def measure_item(it, left_behind, keep=None):
                 files.append((name, ap, size))
     else:
         # DAW user-data folders move whole; sample folders leave programs and installers behind
-        files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None, keep))
+        # a kit comes complete, demo projects and all: the time range is about your projects (issue #76)
+        files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None,
+                                None if it.get("kit") else keep))
     it["_files"] = files
     it["files"] = len(files)
     it["bytes"] = sum(f[2] for f in files)
@@ -1382,6 +1420,20 @@ def plan_move(includes=(), skips=(), include_programs=False, rng=None):
             "range": rng.as_dict() if rng is not None else None}
 
 
+def say_range(plan):
+    st = plan["projects"]
+    print(f"\nProjects saved {plan['range']['label']}: {st['in_range']} of {st['total']}. The others stay on this "
+          "computer. Each sample they use brings its whole kit, never the folder of kits above it.")
+
+
+def say_offered_libraries(offered):
+    if offered:
+        print("\nSample libraries left out (only the kits your projects use come from them):")
+        for o in offered:
+            print(f"  {rs.human_size(o['bytes'])}  {o['path']}")
+        print("Take a whole one with --include FOLDER.")
+
+
 def say_big_plugin_data(big):
     if big:
         print("\nNot packed, because they're big (probably sound libraries that reinstall from the maker's app):")
@@ -1400,8 +1452,9 @@ def say_installed(installed):
 
 @staying_awake
 def cmd_pack(args):
+    rng = range_from_args(args)
     print("Looking through your music folders and projects...", flush=True)
-    plan = plan_move(args.include, args.skip, getattr(args, "include_programs", False))
+    plan = plan_move(args.include, args.skip, getattr(args, "include_programs", False), rng)
     items, missing, installed = plan["items"], plan["missing"], plan["installed"]
     if not items:
         msg = "Nothing to pack: no standard music folders found. Add folders with --include FOLDER."
@@ -1411,6 +1464,8 @@ def cmd_pack(args):
         sys.exit(msg)
 
     total, left_behind = plan["total"], plan["left_behind"]
+    if rng is not None:
+        say_range(plan)
     if plan["stragglers"]:
         print(f"Added {plan['stragglers']} sample{'s' if plan['stragglers'] != 1 else ''} your projects use that the "
               "folders above didn't cover (as loose files).")
@@ -1429,6 +1484,7 @@ def cmd_pack(args):
             print(f"{len(left_behind)} programs or installers will be left behind (reinstall software from its "
                   "maker). Keep them with --include-programs.")
         say_big_plugin_data(plan["big_plugin_data"])
+        say_offered_libraries(plan["offered_libraries"])
         say_missing(missing)
         say_installed(installed)
         if not args.to:
@@ -1470,6 +1526,8 @@ def cmd_pack(args):
         "source_host": host, "source_os": THIS_OS, "source_home": str(home()),
         "user_folders": {name: str(path) for name, path in user_folders(home()).items()},
         "fl_search_paths": fl_settings()["search_paths"],
+        "projects_range": dict(plan["range"], in_range=plan["projects"]["in_range"],
+                               total=plan["projects"]["total"]) if rng is not None else None,
         "items": [{k: v for k, v in it.items() if not k.startswith("_")} for it in items],
     }
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -1520,6 +1578,11 @@ def cmd_pack(args):
             "Programs, installers and plugin files left out of this move. Reinstall software from its maker;\n"
             "installers found in sample folders are a common way malware spreads.\n\n" + "\n".join(left_behind),
             encoding="utf-8")
+    if rng is not None and plan["projects"]["left_out"]:
+        (bundle / "projects-left-out.txt").write_text(
+            f"Freighter {__version__}\n\nProjects on {host} last saved outside {plan['range']['label']}, so they "
+            "weren't moved. They're still on the old computer.\n\n" + "\n".join(plan["projects"]["left_out"]),
+            encoding="utf-8")
     if missing:
         (bundle / "already-missing.txt").write_text(
             f"Freighter {__version__}\n\nSamples your projects use that were already missing on {host} when this "
@@ -1541,7 +1604,9 @@ def cmd_pack(args):
     }, indent=1), encoding="utf-8")
     LAST["pack"] = {"bundle": str(bundle), "items": len(items), "files": sum(it["files"] for it in items),
                     "bytes": total, "errors": len(errors), "left_behind": len(left_behind or []),
-                    "missing": len(missing_lines(missing))}
+                    "missing": len(missing_lines(missing)),
+                    "range": plan["range"]["label"] if rng is not None else None,
+                    "projects": plan["projects"]}
     print("Next, on the new computer:  " + tool_cmd("freighter", f"unpack \"{bundle}\""))
     return 0
 
@@ -1744,7 +1809,7 @@ def undo_unpack(host=None):
             else:
                 out["kept"].append(str(p))   # changed since the unpack: it's someone's work now
         for name in (UNPACK_JOURNAL, "pathmap.json", "unpack-report.txt", "pack-errors.txt", "already-missing.txt",
-                     "left-behind.txt"):
+                     "left-behind.txt", "projects-left-out.txt"):
             (landing / name).unlink(missing_ok=True)
         for f in landing.glob("plugins-*.csv"):
             f.unlink()
@@ -1860,7 +1925,8 @@ def bundle_summary(path):
             "created": manifest.get("created", ""), "items": len(manifest.get("items", [])),
             "bytes": sum(it.get("bytes", 0) or 0 for it in manifest.get("items", [])),
             "same_os": manifest.get("source_os") == THIS_OS, "problems": problems,
-            "version": manifest.get("freighter_version", "")}
+            "version": manifest.get("freighter_version", ""),
+            "range": (manifest.get("projects_range") or {}).get("label")}
 
 
 def find_bundles(folder, depth=1):
@@ -2131,6 +2197,7 @@ def cmd_unpack(args):
         "report": str(landing / "unpack-report.txt"), "problems": problems, "notes": notes,
         "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place, "replaced": replaced,
         "plugin_data": presets, "cross_os": cross_os, "blocked_hint": hint,
+        "range": (manifest.get("projects_range") or {}).get("label"),
         "entries": [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries
                     if e.get("id") in {it["id"] for it in manifest["items"]}],
         "fl_search": [str(locate(sp, [pathmap])[1] or sp) for sp in old_search_paths(manifest)],
@@ -3074,7 +3141,8 @@ def cmd_rehearse(args):
     LAST["rehearse_folder"] = str(base)   # known even if the rehearsal stops part-way, so it can be cleaned up
     drive, new_home = base / "drive", base / "new-computer"
     real_home = home()
-    items = pack_items(args.include, set(args.skip))
+    rng = range_from_args(args)
+    items = pack_items(args.include, set(args.skip), rng=rng)
     need = sum(size for it in items
                for _r, _a, size in ([(n, None, (Path(it["source_path"]) / n).stat().st_size)
                                      for n in it["only"]] if "only" in it else walk_files(it["source_path"], [])))
@@ -3088,7 +3156,8 @@ def cmd_rehearse(args):
 
     print("\n== 1/4  Pack, as the old computer")
     cmd_pack(argparse.Namespace(to=str(drive), list=False, include=args.include, skip=args.skip,
-                                include_programs=False))
+                                include_programs=False, since=getattr(args, "since", None),
+                                until=getattr(args, "until", None)))
     bundles = sorted(drive.glob("Freighter-*"), key=lambda p: p.stat().st_mtime)
     if not bundles:
         sys.exit("Packing produced no bundle.")
@@ -3258,13 +3327,18 @@ def interactive_menu():
                 import webbrowser
                 webbrowser.open(html_path.as_uri())
             elif choice == "2":
-                cmd_pack(argparse.Namespace(to=None, list=True, include=[], skip=[], include_programs=False))
+                since, until = ask_range()
+                cmd_pack(argparse.Namespace(to=None, list=True, include=[], skip=[], include_programs=False,
+                                            since=since, until=until))
             elif choice == "3":
-                cmd_rehearse(argparse.Namespace(to=None, include=[], skip=[]))
+                since, until = ask_range()
+                cmd_rehearse(argparse.Namespace(to=None, include=[], skip=[], since=since, until=until))
             elif choice == "4":
                 drive = ask_path("  Drag the drive (or a folder on it) into this window, then press Enter: ")
                 if drive:
-                    cmd_pack(argparse.Namespace(to=drive, list=False, include=[], skip=[], include_programs=False))
+                    since, until = ask_range()
+                    cmd_pack(argparse.Namespace(to=drive, list=False, include=[], skip=[], include_programs=False,
+                                                since=since, until=until))
             elif choice == "5":
                 bundle = ask_path("  Drag the Freighter-... folder from the drive into this window, then press Enter: ")
                 if bundle:
@@ -3351,6 +3425,7 @@ def main():
     s.add_argument("--skip", action="append", default=[], metavar="ID", help="leave out this item")
     s.add_argument("--include-programs", action="store_true",
                    help="also pack programs and installers found in your folders (left out by default)")
+    add_range_args(s)
     s.set_defaults(fn=cmd_pack)
 
     s = sub.add_parser("unpack", help="put a bundle's files in place on this computer")
@@ -3397,6 +3472,7 @@ def main():
     s.add_argument("--include", action="append", default=[], metavar="FOLDER")
     s.add_argument("--skip", action="append", default=[], metavar="ID")
     s.add_argument("--clean", action="store_true", help="delete an earlier rehearsal's files (with the same --to)")
+    add_range_args(s)
     s.set_defaults(fn=cmd_rehearse)
 
     s = sub.add_parser("app", help="open Freighter in your web browser (preview)")

@@ -1414,7 +1414,7 @@ class FullMove(TempDirCase):
 
 class Menu(TempDirCase):
     def test_a_crash_keeps_the_window_open_and_saves_a_report(self):
-        answers = iter(["2", "", "q"])
+        answers = iter(["2", "", "", "q"])     # option 2, all projects, Enter after the error, quit
         with as_home(self.tmp), quiet(), \
                 mock.patch("builtins.input", lambda *_: next(answers)), \
                 mock.patch.object(rm, "cmd_pack", side_effect=ValueError("disk on fire")):
@@ -1424,6 +1424,15 @@ class Menu(TempDirCase):
         self.assertIn(f"Freighter {rm.__version__}", report)
         self.assertIn("ValueError: disk on fire", report)
         self.assertIn("Menu choice: 2", report)
+
+    def test_the_menu_asks_which_projects(self):
+        """Issue #76: Enter means all projects; a time range is asked again until it makes sense."""
+        seen = []
+        answers = iter(["2", "banana", "Mar 2024 - Mar 2026", "", "q"])
+        with as_home(self.tmp), quiet(), mock.patch("builtins.input", lambda *_: next(answers)), \
+                mock.patch.object(rm, "cmd_pack", lambda a: seen.append((a.since, a.until)) or 0):
+            rm.interactive_menu()
+        self.assertEqual(seen, [("2024-03", "2026-03")])
 
     def test_next_step_commands_match_how_freighter_was_started(self):
         """The built program has no manifest.py; tell people the command that exists (issue #21)."""
@@ -1868,10 +1877,10 @@ class TimeRange(TempDirCase):
                 rm.parse_range(bad)
 
     def test_kit_parts_and_kits(self):
-        for part in ("US_DG_One_Shots", "LC_CNTRL_Bass Loops", "Kicks", "808s", "Hi Hats", "FX", "MIDI", "Kit 01"):
+        for part in ("US_DG_One_Shots", "LC_CNTRL_Bass Loops", "Kicks", "808s", "Hi Hats", "FX", "MIDI", "Other FX"):
             self.assertTrue(rm.kit_part(part), part)
         for kit in ("UNDRGRND Sounds - Deep Grooves - Wav", "Loop Cult - CONTROL - Sample Pack", "House", "OPIUM",
-                    "Ultimate Drums Vol 1"):
+                    "Ultimate Drums Vol 1", "Bass Kit", "Drum Kit 2", "Other Kit"):
             self.assertFalse(rm.kit_part(kit), kit)
 
     def test_a_used_sample_brings_its_kit_and_nothing_above_it(self):
@@ -1894,6 +1903,7 @@ class TimeRange(TempDirCase):
         lib = home / "Desktop" / "Samples Library"
         used = write(lib / "House" / "Tech House Kit" / "One Shots" / "Kicks" / "kick.wav", b"k" * 100)
         write(lib / "House" / "Tech House Kit" / "Loops" / "groove.wav", b"g" * 100)   # same kit: comes too
+        self.saved(make_flp(lib / "House" / "Tech House Kit" / "Demo" / "Demo.flp", []), 2018, 1)
         write(lib / "House" / "Other House Kit" / "Kicks" / "kick2.wav", b"o" * 100)  # another kit: stays
         old_only = write(lib / "Trap" / "Old Kit" / "Kicks" / "old.wav", b"x" * 100)
         write(lib / "Trap" / "Rage Kit" / "Hats" / "hat.wav", b"h" * 100)
@@ -1912,7 +1922,7 @@ class TimeRange(TempDirCase):
         kit = lib / "House" / "Tech House Kit"
         self.assertIn(str(kit), paths, "the kit a project uses comes whole")
         self.assertEqual(paths[str(kit)]["label"], "Kit: Tech House Kit")
-        self.assertEqual(paths[str(kit)]["files"], 2)
+        self.assertEqual(paths[str(kit)]["files"], 3, "with its own (old) demo project: kits come complete")
         for not_packed in (lib, lib / "House", lib / "Trap" / "Old Kit", lib / "House" / "Other House Kit"):
             self.assertNotIn(str(not_packed), paths)
         self.assertEqual([o["path"] for o in plan["offered_libraries"]], [str(lib)], "the library is offered")
@@ -1926,3 +1936,51 @@ class TimeRange(TempDirCase):
         self.assertEqual((plan["projects"]["in_range"], plan["projects"]["total"]), (1, 3))
         self.assertEqual(plan["range"]["label"], "Mar 2024 – Mar 2026")
         self.assertLess(plan["total"], whole["total"])
+
+    def test_a_time_range_move_end_to_end(self):
+        old, new, drive = self.tmp / "old", self.tmp / "new", self.tmp / "drive"
+        kit = old / "Desktop" / "Kits" / "House" / "Tech House Kit"
+        kick = write(kit / "Kicks" / "kick.wav", b"k" * 100)
+        write(kit / "Loops" / "groove.wav", b"g" * 100)
+        write(old / "Desktop" / "Kits" / "House" / "Other Kit" / "Snares" / "s.wav", b"s" * 100)
+        projects = old / "Documents" / "Image-Line" / "FL Studio" / "Projects"
+        self.saved(make_flp(projects / "Beat" / "Beat.flp", [str(kick)]), 2025, 6)
+        self.saved(make_flp(projects / "Old" / "Old.flp", [str(kick)]), 2020, 1)
+        drive.mkdir()
+        with as_home(old), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False,
+                                           since="2024-03", until="2026-03"))
+            # and the same range rehearses
+            code = rm.cmd_rehearse(argparse.Namespace(to=str(self.tmp / "reh"), include=[], skip=[],
+                                                      since="2024-03", until="2026-03"))
+        self.assertEqual(code, 0)
+        self.assertEqual(rm.LAST["rehearse"]["totals"]["kept"], 1)
+        bundle = next(drive.glob("Freighter-*"))
+        manifest = json.loads((bundle / "manifest.json").read_text())
+        self.assertEqual(manifest["projects_range"]["label"], "Mar 2024 – Mar 2026")
+        self.assertIn("Old.flp", (bundle / "projects-left-out.txt").read_text())
+        self.assertEqual(rm.bundle_summary(bundle)["range"], "Mar 2024 – Mar 2026")
+        shutil.rmtree(old)
+        new.mkdir()
+        with as_home(new), quiet(), mock.patch.object(rm, "fl_is_running", lambda: False):
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[], keep_together=True))
+            rm.cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
+            u = rm.LAST["unpack"]
+        self.assertEqual(u["range"], "Mar 2024 – Mar 2026")
+        self.assertTrue(any("stayed on the old computer" in n for n in u["notes"]))
+        beat = next(new.rglob("Beat.flp"))
+        self.assertEqual(Path(rm.flp_samples(beat)[1][0]).read_bytes(), b"k" * 100, "the project opens with its kit")
+        self.assertTrue(list(new.rglob("groove.wav")), "the whole kit came")
+        self.assertFalse(list(new.rglob("s.wav")), "another kit in the same genre folder didn't")
+        self.assertFalse(list(new.rglob("Old.flp")), "the old project stayed behind")
+
+    def test_a_folder_that_only_wraps_one_genre_is_stepped_through(self):
+        kits = self.tmp / "Kits"
+        k = write(kits / "House" / "Tech House Kit" / "Kicks" / "kick.wav", b"k")
+        write(kits / "House" / "Other Kit" / "Snares" / "s.wav", b"s")
+        rm.KIT_CONTAINER_CACHE.clear()
+        self.assertEqual(rm.kit_folder(k, kits), kits / "House" / "Tech House Kit")
+        wrapped = self.tmp / "Pack Download"                     # a pack unzipped inside a wrapper folder
+        w = write(wrapped / "Cool Pack - Wav" / "Kicks" / "kick.wav", b"k")
+        write(wrapped / "Cool Pack - Wav" / "Loops" / "loop.wav", b"l")
+        self.assertEqual(rm.kit_folder(w, wrapped), wrapped / "Cool Pack - Wav")
