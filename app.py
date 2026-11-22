@@ -123,6 +123,7 @@ def job_move_list(job):
         "left_behind": len(left_behind or []),
         "installed": len(installed),
         "cloud": {"files": len(cloud), "bytes": sum(n for _, n in cloud)},
+        "big": plan["big_plugin_data"],   # plugin content too big to take unless ticked (probably sound libraries)
     }
 
 
@@ -150,8 +151,8 @@ def job_pack(job):
     """Pack this computer onto a drive or folder, leaving out the items the person unticked."""
     p = job.params
     rm.LAST.pop("pack", None)
-    rm.cmd_pack(argparse.Namespace(to=p["to"], list=False, include=[], skip=list(p.get("skip", [])),
-                                   include_programs=False))
+    rm.cmd_pack(argparse.Namespace(to=p["to"], list=False, include=list(p.get("include", [])),
+                                   skip=list(p.get("skip", [])), include_programs=False))
     return rm.LAST.get("pack")
 
 
@@ -242,16 +243,26 @@ def job_readiness(job):
             "on_old_computer": not any((rm.home() / "Music" / "Freighter").glob("*/pathmap.json"))}
 
 
+def folders_param(value):
+    """Extra folders to take (big plugin content the person ticked): a short list of folders that exist."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 50 or \
+            not all(isinstance(f, str) and Path(f).expanduser().is_dir() for f in value):
+        return None
+    return [str(Path(f).expanduser()) for f in value]
+
+
 def clean_params(kind, body):
     """The options a job may take, checked. Returns (params, error)."""
     if kind == "pack":
         to = body.get("to")
-        skip = body.get("skip", [])
+        skip, include = body.get("skip", []), folders_param(body.get("include"))
         if not isinstance(to, str) or not Path(to).expanduser().is_dir():
             return None, "Choose a drive or folder that exists."
-        if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip):
+        if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip) or include is None:
             return None, "bad request"
-        return {"to": str(Path(to).expanduser()), "skip": skip}, None
+        return {"to": str(Path(to).expanduser()), "skip": skip, "include": include}, None
     if kind == "unpack":
         b = body.get("bundle")
         if not isinstance(b, str) or not (Path(b).expanduser() / "manifest.json").is_file():
@@ -267,12 +278,12 @@ def clean_params(kind, body):
             return None, "bad request"
         return {"folders": [str(Path(f).expanduser()) for f in folders], "by": by}, None
     if kind == "rehearse":
-        to, skip = body.get("to"), body.get("skip", [])
+        to, skip, include = body.get("to"), body.get("skip", []), folders_param(body.get("include"))
         if to is not None and (not isinstance(to, str) or not Path(to).expanduser().is_dir()):
             return None, "Choose a drive or folder that exists."
-        if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip):
+        if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip) or include is None:
             return None, "bad request"
-        return {"to": str(Path(to).expanduser()) if to else None, "skip": skip}, None
+        return {"to": str(Path(to).expanduser()) if to else None, "skip": skip, "include": include}, None
     if kind == "rehearse_cleanup":
         f = body.get("folder")
         if not isinstance(f, str) or not rm.is_rehearsal(Path(f).expanduser()):
@@ -342,7 +353,8 @@ def job_rehearse(job):
     repair, then check every sample. The real files are only read."""
     p = job.params
     rm.LAST.pop("rehearse", None)
-    rm.cmd_rehearse(argparse.Namespace(to=p.get("to"), include=[], skip=list(p.get("skip", []))))
+    rm.cmd_rehearse(argparse.Namespace(to=p.get("to"), include=list(p.get("include", [])),
+                                       skip=list(p.get("skip", []))))
     r = rm.LAST["rehearse"]
     job.files["report"] = r["report"]
     return dict(r, lost=r["lost"][:200], already=r["already"][:200], unchecked=r["unchecked"][:100])

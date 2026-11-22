@@ -212,6 +212,9 @@ class Server(unittest.TestCase):
     def test_job_options_are_checked(self):
         self.assertEqual(self.request("POST", "/api/jobs", {"kind": "pack", "to": str(self.tmp / "nope")})[0], 400)
         self.assertEqual(self.request("POST", "/api/jobs", {"kind": "pack", "to": str(self.tmp), "skip": "x"})[0], 400)
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "pack", "to": str(self.tmp), "include": "x"})[0], 400)
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "pack", "to": str(self.tmp),
+                                                            "include": [str(self.tmp / "nope")]})[0], 400)
         self.assertEqual(self.request("POST", "/api/jobs", {"kind": "unpack", "bundle": str(self.tmp)})[0], 400,
                          "a folder without manifest.json isn't a bundle")
 

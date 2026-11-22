@@ -610,9 +610,10 @@ def item_id(prefix, path):
     return f"{prefix}-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:8]}"
 
 
-def pack_items(includes, skips, missing=None, installed=None, needed=None):
+def pack_items(includes, skips, missing=None, installed=None, needed=None, big=None):
     """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
-    already missing on this computer]}; if `installed` is a set, with samples that come with installed programs."""
+    already missing on this computer]}; if `installed` is a set, with samples that come with installed programs;
+    if `big` is a list, with plugin-data folders too big to pack unless asked for (probably sound libraries)."""
     items = []
     for rid, (label, path) in known_roots(THIS_OS, home()).items():
         if path.is_dir() and rid not in skips:
@@ -637,6 +638,17 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None):
         if iid not in skips:
             items.append({"id": iid, "label": f"FL Studio browser folder: {sp.name}", "source_path": str(sp),
                           "kind": "extra", "fl_search_path": True})
+    # plugin presets and plugin data: "presets come with you" (issue #31)
+    # every DAW folder counts as handled, skipped or not: leaving FL's folder out must keep it out
+    daw_folders = [str(path) for _l, path in known_roots(THIS_OS, home()).values()]
+    found, too_big = plugin_data_folders(home(), [it["source_path"] for it in items] + daw_folders)
+    for folder, _size in found:
+        iid = item_id("plugin", folder)
+        if iid not in skips:
+            items.append({"id": iid, "label": f"Plugin presets and data: {folder.name}", "source_path": str(folder),
+                          "kind": "extra", "plugin_data": True})
+    if big is not None:
+        big.extend({"path": str(f), "label": f.name, "bytes": n} for f, n in too_big)
     left_out = [str(path) for rid, (_l, path) in known_roots(THIS_OS, home()).items() if rid in skips and path.is_dir()]
     recent = [Path(r) for r in fl["recent"] if r.lower().endswith(".flp") and Path(r).is_file()
               and not in_program_place(r)]
@@ -654,6 +666,130 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None):
             items.append({"id": iid, "label": f"Loose files your projects use from {landing_name(folder)}",
                           "source_path": folder, "kind": "extra", "only": sorted(files)})
     return items
+
+
+# --------------------------------------------------------------------------- plugin presets and data (issue #31)
+
+# Files only plugins make: a folder holding one is plugin presets or plugin data. (Kontakt's .nki is left out on
+# purpose: it marks a sound library, which is issue #71's job.)
+PRESET_EXTS = (".fxp", ".fxb", ".vstpreset", ".aupreset", ".nksf", ".nksfx", ".nmsv", ".h2p", ".vital",
+               ".vitalbank", ".vitaltable", ".serumpreset", ".serumfx", ".ffp", ".phaseplant", ".prt_omn",
+               ".mlt_omn", ".wcpreset")
+PLUGIN_DATA_BIG = 10 * 1024 ** 3   # bigger is probably a sound library: offered, not packed unless asked for
+MAKER_WORDS_IGNORED = {"audio", "music", "sound", "sounds", "samples", "plugin", "plugins", "presets", "studio",
+                       "studios", "records", "software", "digital", "labs", "the", "inc", "ltd", "gmbh", "llc"}
+
+
+def _plain(name):
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def plugin_makers():
+    """Names a plugin-data folder may have, from the plugins installed here: each maker's name, and its first word
+    when that's distinctive ("Xfer Records" -> xferrecords, xfer). Empty if the scan fails, and when FREIGHTER_HOME
+    stands in for the home folder (tests), like fl_settings()."""
+    if os.environ.get("FREIGHTER_HOME"):
+        return set()
+    try:
+        rows = rs.scan([])
+    except Exception:
+        return set()
+    names = set()
+    for r in rows:
+        vendor = (r.get("vendor") or "").strip()
+        if not vendor or vendor.lower().startswith("unknown"):
+            continue
+        names.add(_plain(vendor))
+        first = _plain(vendor.split()[0])
+        if len(first) >= 4 and first not in MAKER_WORDS_IGNORED:
+            names.add(first)
+    return {n for n in names if len(n) >= 3}
+
+
+def system_preset_places():
+    """Preset folders shared by everyone on this computer. Left out when FREIGHTER_HOME stands in for the home
+    folder (tests), so a test never picks up this computer's real presets."""
+    if os.environ.get("FREIGHTER_HOME"):
+        return []
+    if THIS_OS == "mac":
+        return [Path("/Library/Audio/Presets")]
+    public = os.environ.get("PUBLIC")
+    return [Path(public) / "Documents"] if public else []
+
+
+def has_preset_files(folder, max_entries=5000, max_depth=5):
+    """Whether a preset file sits in folder (looking at no more than max_entries entries, max_depth levels down)."""
+    seen, stack = 0, [(long_path(folder), 0)]
+    while stack:
+        cur, depth = stack.pop()
+        try:
+            with os.scandir(cur) as listing:
+                for e in listing:
+                    seen += 1
+                    if seen > max_entries:
+                        return False
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if depth < max_depth and not e.name.startswith("."):
+                                stack.append((e.path, depth + 1))
+                        elif e.name.lower().endswith(PRESET_EXTS):
+                            return True
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return False
+
+
+def folder_bytes(folder, stop_at=None):
+    """Total size of the files in folder; stops counting once past stop_at."""
+    total = 0
+    for _rel, _ap, size in walk_files(folder):
+        total += size
+        if stop_at is not None and total > stop_at:
+            break
+    return total
+
+
+def plugin_data_folders(h, covered, makers=None):
+    """Plugin presets and plugin data to move (issue #31): folders in Documents and Music (and the Mac's Audio
+    Presets folders, or Windows' Public Documents) named after an installed plugin's maker, or holding preset
+    files. Returns ([(folder, bytes)], [(folder, bytes)] too big to pack without asking)."""
+    makers = plugin_makers() if makers is None else makers
+    uf = user_folders(h)
+    places = [uf["Documents"], uf["Music"]]
+    if THIS_OS == "mac":
+        places.append(h / "Library" / "Audio" / "Presets")
+    places += system_preset_places()
+    # compare real paths too: folders added with --include are resolved (/var is /private/var on a Mac)
+    cov = Folders(list(covered) + [os.path.realpath(c) for c in covered])
+    found, big, seen = [], [], set()
+    for place in places:
+        try:
+            entries = sorted(os.scandir(long_path(place)), key=lambda e: e.name.lower())
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                if not e.is_dir(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            d = place / e.name
+            key = _key(d)
+            if key in seen or e.name.startswith(".") or e.name.lower().startswith("freighter") \
+                    or skip_dir(str(place), e.name) or in_program_place(d) or cov.holds(d) or cov.has_inside(d) \
+                    or cov.holds(os.path.realpath(d)):
+                continue
+            seen.add(key)
+            if _plain(e.name) not in makers and not has_preset_files(d):
+                continue
+            size = folder_bytes(d, stop_at=PLUGIN_DATA_BIG)
+            if size > PLUGIN_DATA_BIG:
+                big.append((d, folder_bytes(d)))   # its real size, for the choice
+            elif size:
+                found.append((d, size))
+    return found, big
 
 
 def sample_folder_for(sample, h, mac=None):
@@ -947,12 +1083,21 @@ def cover_stragglers(items, needed):
 def plan_move(includes=(), skips=(), include_programs=False):
     """Everything a pack (or the app's move list) needs to know, decided once. Returns a dict with items (measured),
     total, left_behind, missing, installed, cloud_only and stragglers (files the safety net added)."""
-    missing, installed, needed = {}, set(), set()
-    items = pack_items(list(includes), set(skips), missing, installed, needed)
+    missing, installed, needed, big = {}, set(), set(), []
+    items = pack_items(list(includes), set(skips), missing, installed, needed, big)
     total, left_behind = measure_items(items, include_programs) if items else (0, None)
     added = cover_stragglers(items, needed) if items else 0
     return {"items": items, "total": sum(it["bytes"] for it in items), "left_behind": left_behind,
-            "missing": missing, "installed": installed, "cloud_only": list(CLOUD_ONLY), "stragglers": added}
+            "missing": missing, "installed": installed, "cloud_only": list(CLOUD_ONLY), "stragglers": added,
+            "big_plugin_data": big}
+
+
+def say_big_plugin_data(big):
+    if big:
+        print("\nNot packed, because they're big (probably sound libraries that reinstall from the maker's app):")
+        for b in big:
+            print(f"  {rs.human_size(b['bytes'])}+  {b['path']}")
+        print("Take one anyway with --include FOLDER.")
 
 
 def say_installed(installed):
@@ -992,6 +1137,7 @@ def cmd_pack(args):
         if left_behind:
             print(f"{len(left_behind)} programs or installers will be left behind (reinstall software from its "
                   "maker). Keep them with --include-programs.")
+        say_big_plugin_data(plan["big_plugin_data"])
         say_missing(missing)
         say_installed(installed)
         if not args.to:
@@ -1640,6 +1786,18 @@ def cmd_unpack(args):
     journal.close()
     for note in notes:
         print(f"From the old computer: {note}")
+    plugin_ids = {it["id"] for it in manifest["items"] if it.get("plugin_data")}
+    presets = [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries if e.get("id") in plugin_ids]
+    cross_os = manifest["source_os"] != THIS_OS
+    if presets:
+        if cross_os:
+            print("\nPlugin presets and data from the old computer are in these folders. Plugins look in their own "
+                  "folders on this computer, so import them from each plugin's preset browser (or copy them into "
+                  "its preset folder):")
+        else:
+            print("\nPlugin presets and data went back where they were, so your plugins find them:")
+        for e in presets:
+            print(f"  {e['new']}")
     old_search = old_search_paths(manifest)
     if old_search:
         print("\nFL Studio's browser folders on the old computer are now here. FL keeps its settings per computer, so")
@@ -1651,6 +1809,7 @@ def cmd_unpack(args):
         "source_host": src_host, "source_os": manifest["source_os"], "landing": str(landing),
         "report": str(landing / "unpack-report.txt"), "problems": problems, "notes": notes,
         "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place, "replaced": replaced,
+        "plugin_data": presets, "cross_os": cross_os,
         "entries": [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries
                     if e.get("id") in {it["id"] for it in manifest["items"]}],
         "fl_search": [str(locate(sp, [pathmap])[1] or sp) for sp in old_search_paths(manifest)],

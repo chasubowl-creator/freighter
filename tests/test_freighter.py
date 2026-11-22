@@ -1412,7 +1412,7 @@ class CrossOSMove(TempDirCase):
                     "created": "2026-01-01T12:00:00", "source_host": f"OLD{source_os.upper()}", "source_os": source_os,
                     "source_home": items[0]["home"], "items": []}
         for it in items:
-            manifest["items"].append({k: it[k] for k in ("id", "label", "source_path", "kind")})
+            manifest["items"].append({k: it[k] for k in ("id", "label", "source_path", "kind", "plugin_data") if k in it})
             taken, lines = set(), []
             for rel, data in it["files"].items():
                 stored = rm.unique_stored(rel, taken)
@@ -1423,6 +1423,25 @@ class CrossOSMove(TempDirCase):
         write(b / "manifest.json", json.dumps(manifest).encode())
         write(b / rm.COMPLETE, json.dumps({"errors": 0}).encode())   # as a finished pack leaves it
         return b
+
+    def test_presets_from_another_kind_of_computer_are_pointed_out(self):
+        """Issue #31: across Windows and Mac, presets can't go back in place, so the unpack says where they are."""
+        other = "windows" if rm.THIS_OS == "mac" else "mac"
+        h = "C:\\Users\\pat" if other == "windows" else "/Users/pat"
+        sep = "\\" if other == "windows" else "/"
+        b = self.bundle(other, [{"id": "plugin-1", "kind": "extra", "label": "Plugin presets and data: Xfer", "home": h,
+                                 "plugin_data": True, "source_path": sep.join([h, "Documents", "Xfer"]),
+                                 "files": {"Serum Presets/User/Bass.fxp": b"preset"}}])
+        new = self.tmp / "new"
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=[]))
+        u = rm.LAST["unpack"]
+        self.assertTrue(u["cross_os"])
+        self.assertEqual(len(u["plugin_data"]), 1)
+        landed = Path(u["plugin_data"][0]["new"])
+        self.assertEqual((landed / "Serum Presets" / "User" / "Bass.fxp").read_bytes(), b"preset")
+        self.assertIn(new / "Music" / "Freighter", landed.parents)
 
     def projects(self, kick_ref, snare_ref):
         stage = self.tmp / "stage"
@@ -1626,3 +1645,71 @@ class ProgressGuess(unittest.TestCase):
         self.assertEqual(rm.human_time(720), "about 12 minutes")
         self.assertEqual(rm.human_time(3600), "about 1 hour")
         self.assertEqual(rm.human_time(7800), "about 2 hours 10 minutes")
+
+
+class PluginPresets(TempDirCase):
+    """Issue #31: plugin presets and plugin data move too."""
+
+    def plan(self, home, makers=frozenset(), system=()):
+        with as_home(home), quiet(), mock.patch.object(rm, "plugin_makers", lambda: set(makers)), \
+                mock.patch.object(rm, "system_preset_places", lambda: list(system)):
+            return rm.plan_move()
+
+    def packed(self, plan):
+        return {Path(it["source_path"]).name: it for it in plan["items"]}
+
+    def test_folders_with_preset_files_move(self):
+        home = self.tmp / "home"
+        write(home / "Documents" / "Xfer" / "Serum Presets" / "User" / "Bass.fxp", b"p" * 100)
+        write(home / "Music" / "Vital" / "User" / "Presets" / "Lead.vital", b"v" * 100)
+        write(home / "Documents" / "Zoom" / "meeting.mp4", b"z" * 100)            # not plugin data
+        write(home / "Music" / "Freighter" / "old" / "Bass.fxp", b"p")            # Freighter's own folder
+        packed = self.packed(self.plan(home))
+        self.assertIn("Xfer", packed)
+        self.assertIn("Vital", packed)
+        self.assertTrue(packed["Xfer"]["plugin_data"])
+        self.assertEqual(packed["Xfer"]["label"], "Plugin presets and data: Xfer")
+        self.assertNotIn("Zoom", packed)
+        self.assertNotIn("Freighter", packed)
+
+    def test_a_folder_named_after_an_installed_plugins_maker_moves(self):
+        home = self.tmp / "home"
+        write(home / "Documents" / "Drumolution" / "Kits" / "Techno" / "kick.wav", b"k" * 100)
+        write(home / "Documents" / "Holiday Photos" / "a.jpg", b"j")
+        packed = self.packed(self.plan(home, makers={"drumolution"}))
+        self.assertIn("Drumolution", packed)
+        self.assertNotIn("Holiday Photos", packed)
+
+    def test_shared_preset_folders_are_searched_too(self):
+        home, system = self.tmp / "home", self.tmp / "Library" / "Audio" / "Presets"
+        write(system / "Xfer Records" / "Serum 2 Presets" / "Pad.SerumPreset", b"s" * 100)
+        write(home / "Documents" / "notes.txt", b"n")
+        packed = self.packed(self.plan(home, system=[system]))
+        self.assertIn("Xfer Records", packed)
+
+    def test_big_plugin_content_is_offered_not_packed(self):
+        home = self.tmp / "home"
+        lib = write(home / "Documents" / "Spitfire Audio" / "Library" / "Strings.fxp", b"s" * 5000).parents[1]
+        with mock.patch.object(rm, "PLUGIN_DATA_BIG", 1000):
+            plan = self.plan(home)
+        self.assertNotIn("Spitfire Audio", self.packed(plan))
+        self.assertEqual(plan["big_plugin_data"], [{"path": str(lib), "label": "Spitfire Audio", "bytes": 5000}])
+        with as_home(home), quiet(), mock.patch.object(rm, "PLUGIN_DATA_BIG", 1000):
+            taken = rm.plan_move(includes=[str(lib)])           # ticked in the app, or --include on the command line
+        self.assertIn("Spitfire Audio", self.packed(taken))
+        self.assertEqual(taken["big_plugin_data"], [])
+
+    def test_presets_go_back_to_the_same_place(self):
+        old, new, drive = self.tmp / "old", self.tmp / "new", self.tmp / "drive"
+        write(old / "Documents" / "Xfer" / "Serum Presets" / "User" / "Bass.fxp", b"p" * 100)
+        drive.mkdir()
+        with as_home(old), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
+        bundle = next(drive.glob("Freighter-*"))
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        self.assertEqual((new / "Documents" / "Xfer" / "Serum Presets" / "User" / "Bass.fxp").read_bytes(), b"p" * 100)
+        u = rm.LAST["unpack"]
+        self.assertFalse(u["cross_os"])
+        self.assertEqual([Path(p["new"]) for p in u["plugin_data"]], [new / "Documents" / "Xfer"])

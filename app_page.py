@@ -219,9 +219,14 @@ function moveList(mode) {
   const reh = mode === "rehearse";
   runJob("move_list", {}, [backTo(home), steps(reh ? REH_STEPS : OLD_STEPS, 0), el("h1", {}, reh ? "Rehearse a move" : "What a move would take"),
     el("p", {class: "sub"}, "Looking through your music folders and every project for the files they use…")], (r) => {
-    move = Object.assign(r, {skip: new Set(), mode: reh ? "rehearse" : "pack"});
+    move = Object.assign(r, {skip: new Set(), include: new Set(), mode: reh ? "rehearse" : "pack"});
     chooseItems();
   });
+}
+
+function chosenBytes() {   // what's ticked: the items, plus any big plugin content the person chose to take
+  return move.items.filter(it => !move.skip.has(it.id)).reduce((a, it) => a + it.bytes, 0) +
+    (move.big || []).filter(b => move.include.has(b.path)).reduce((a, b) => a + b.bytes, 0);
 }
 
 function chooseItems() {
@@ -231,11 +236,11 @@ function chooseItems() {
   const reh = r.mode === "rehearse";
   const next = el("button", {class: "primary", onclick: reh ? rehearseWhere : pickDrive}, reh ? "Next: where to rehearse" : "Next: pick a drive");
   const refresh = () => {
-    const chosen = r.items.filter(it => !r.skip.has(it.id));
-    totalEl.textContent = size(chosen.reduce((a, it) => a + it.bytes, 0));
-    countEl.textContent = `${plural(chosen.length, "folder")} of ${r.items.length} chosen. ` +
+    const chosen = r.items.filter(it => !r.skip.has(it.id)).length + r.include.size;
+    totalEl.textContent = size(chosenBytes());
+    countEl.textContent = `${plural(chosen, "folder")} of ${r.items.length + (r.big || []).length} chosen. ` +
       (reh ? "A rehearsal needs about twice this much free space." : "Your drive needs at least this much free space.");
-    next.disabled = !chosen.length;
+    next.disabled = !chosen;
   };
   const rows = r.items.map(it => {
     const box = el("input", {type: "checkbox", checked: !r.skip.has(it.id),
@@ -244,6 +249,11 @@ function chooseItems() {
       el("td", {}, el("label", {}, it.label), el("div", {class: "path mono"}, it.path)),
       el("td", {class: "num"}, it.files.toLocaleString()), el("td", {class: "num"}, size(it.bytes)));
   });
+  const bigRows = (r.big || []).map(b => el("tr", {},
+    el("td", {class: "tick"}, el("input", {type: "checkbox", checked: r.include.has(b.path),
+      onchange: (e) => { e.target.checked ? r.include.add(b.path) : r.include.delete(b.path); refresh(); }})),
+    el("td", {}, el("label", {}, `Plugin content: ${b.label}`), el("div", {class: "path mono"}, b.path)),
+    el("td", {class: "num"}, ""), el("td", {class: "num"}, size(b.bytes))));
   const notes = [];
   if (r.missing_count) notes.push(note("bad",
     `${plural(r.missing_count, "sample")} used by ${plural(r.missing_projects, "project")} ${r.missing_count === 1 ? "is" : "are"} already missing on this computer`,
@@ -265,12 +275,15 @@ function chooseItems() {
     el("p", {class: "muted"}, "Untick anything you don't want to take. Your originals stay on this computer either way."),
     el("table", {}, el("thead", {}, el("tr", {}, el("th", {}), el("th", {}, "What"), el("th", {class: "num"}, "Files"), el("th", {class: "num"}, "Size"))),
       el("tbody", {}, rows)),
+    bigRows.length ? el("h2", {}, "Big plugin content, left out unless you tick it") : null,
+    bigRows.length ? el("p", {class: "muted"}, "These are probably sound libraries. They usually come back faster by installing them again from the maker's app (Native Access, Spitfire, Arturia…). Tick one to take it anyway.") : null,
+    bigRows.length ? el("table", {}, el("tbody", {}, bigRows)) : null,
     el("div", {class: "row actions"}, next));
   refresh();
 }
 
 async function pickDrive() {
-  const need = move.items.filter(it => !move.skip.has(it.id)).reduce((a, it) => a + it.bytes, 0);
+  const need = chosenBytes();
   const list = el("div", {class: "choices"}, el("p", {class: "muted"}, "Looking for drives…"));
   const other = el("input", {type: "text", class: "mono", placeholder: "Or type a folder, e.g. E:\\ or /Volumes/My Drive"});
   const otherMsg = el("div", {class: "muted small"});
@@ -320,7 +333,7 @@ function confirmPack(d, need) {
 }
 
 function pack(d) {
-  runJob("pack", {to: d.path, skip: [...move.skip]},
+  runJob("pack", {to: d.path, skip: [...move.skip], include: [...move.include]},
     [steps(OLD_STEPS, 2), el("h1", {}, "Packing"), el("p", {class: "sub"}, `Copying onto ${d.name} and checking every file as it goes.`)],
     (r) => packed(r, d),
     {cancelled: "Stopped. Your files are safe; start packing again and it picks up where it stopped."});
@@ -357,7 +370,7 @@ function licenseList() {
 
 /* ---------- rehearsal: a whole practice move on this computer (the menu's option 3) ---------- */
 async function rehearseWhere() {
-  const need = 2 * move.items.filter(it => !move.skip.has(it.id)).reduce((a, it) => a + it.bytes, 0);
+  const need = 2 * chosenBytes();
   const list = el("div", {class: "choices"}, el("p", {class: "muted"}, "Checking free space…"));
   const other = el("input", {type: "text", class: "mono", placeholder: "Or type a drive or folder, e.g. E:\\ or /Volumes/My Drive"});
   const otherMsg = el("div", {class: "muted small"});
@@ -403,7 +416,7 @@ function confirmRehearse(w, need) {
 }
 
 function rehearse(w) {
-  runJob("rehearse", {to: w.to, skip: [...move.skip]},
+  runJob("rehearse", {to: w.to, skip: [...move.skip], include: [...move.include]},
     [steps(REH_STEPS, 2), el("h1", {}, "Rehearsing"),
       el("p", {class: "sub"}, "Packing, unpacking into a pretend new computer, repairing, then checking every sample. Your real files are only read.")],
     rehearsed, {cancelled: "Stopped. Your real files weren't touched. You can delete the rehearsal's files from the home screen."});
@@ -555,6 +568,13 @@ function unpacked(r) {
   if ((u.fl_search || []).length) parts.push(el("h2", {}, "Add these in FL Studio"),
     el("p", {class: "muted"}, "FL keeps its settings per computer. In FL Studio, open Options → File settings and add each folder under Browser extra search folders:"),
     el("ul", {class: "plain"}, u.fl_search.map(p => el("li", {class: "row"}, el("span", {class: "mono"}, p), copyButton(p)))));
+  if ((u.plugin_data || []).length) parts.push(el("h2", {}, "Your plugin presets"),
+    el("p", {class: "muted"}, u.cross_os
+      ? "Plugins look for presets in their own folders on this computer. Open each plugin's preset browser and import them from here, or copy them into its preset folder:"
+      : "They went back where they were, so your plugins find them once they're installed:"),
+    el("ul", {class: "plain"}, u.plugin_data.map(p => el("li", {class: "row"},
+      el("span", {}, p.label.replace(/^Plugin presets and data: /, "")), el("span", {class: "mono small muted"}, p.new),
+      u.cross_os ? copyButton(p.new) : null))));
   (u.notes || []).forEach(n => parts.push(note("", "From the old computer", el("div", {class: "muted"}, n))));
   parts.push(el("h2", {}, "Where everything went"),
     u.back_in_place ? el("p", {class: "muted"}, `${plural(u.back_in_place, "folder")} went back where ${u.back_in_place === 1 ? "it was" : "they were"} on the old computer.`) : null,
