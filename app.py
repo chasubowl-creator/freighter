@@ -135,6 +135,8 @@ def job_move_list(job):
         "cloud": {"files": len(cloud), "bytes": sum(n for _, n in cloud)},
         "big": plan["big_plugin_data"],   # plugin content too big to take unless ticked (probably sound libraries)
         "offered": plan["offered_libraries"],   # with a time range: sample libraries, taken whole only if ticked
+        "libraries": [{k: lib.get(k) for k in ("path", "name", "maker", "kind", "bytes")}
+                      for lib in plan["libraries"] if not lib.get("moved")],   # sound libraries (issue #71)
         "projects": {k: v for k, v in plan["projects"].items() if k != "left_out"},
         "range": plan["range"],
     }

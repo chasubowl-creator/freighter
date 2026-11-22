@@ -505,7 +505,10 @@ def keep_awake():
         elif rs.IS_MAC:
             proc = subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            undo = proc.terminate
+
+            def undo():
+                proc.terminate()
+                proc.wait(timeout=5)   # and collect it, so no finished process lingers
     except Exception:
         undo = None
     try:
@@ -658,7 +661,7 @@ def item_id(prefix, path):
 
 
 def pack_items(includes, skips, missing=None, installed=None, needed=None, big=None, rng=None, offered=None,
-               stats=None):
+               stats=None, libraries=None):
     """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
     already missing on this computer]}; if `installed` is a set, with samples that come with installed programs;
     if `big` is a list, with plugin-data folders too big to pack unless asked for (probably sound libraries).
@@ -668,13 +671,22 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None, big=N
     for rid, (label, path) in known_roots(THIS_OS, home()).items():
         if path.is_dir() and rid not in skips:
             items.append({"id": rid, "label": label, "source_path": str(path), "kind": "known"})
+    libs = find_libraries()   # sound libraries (issue #71): offered, packed only when ticked or --include'd
+    by_path = {_key(os.path.realpath(lib["path"])): lib for lib in libs}
     for inc in includes:
         p = Path(inc).expanduser().resolve()
         if not p.is_dir():
             sys.exit(f"Not a folder: {inc}")
         iid = item_id("extra", p)
+        lib = by_path.get(_key(os.path.realpath(p)))
+        if lib is not None:
+            lib["item"] = iid
         if iid not in skips:
-            items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
+            items.append({"id": iid, "label": f"Sound library: {lib['name']}" if lib else p.name,
+                          "source_path": str(p), "kind": "extra",
+                          **({"library": {"name": lib["name"], "maker": lib["maker"]}} if lib else {})})
+    if libraries is not None:
+        libraries.extend(libs)
     fl = fl_settings()
     fold = THIS_OS == "windows"
     inside = lambda p, roots: any(norm(str(p), fold) == norm(str(r), fold) or
@@ -955,6 +967,191 @@ def kit_folder(sample, ceiling):
         if not is_kit_container(d):
             return d
     return None
+
+
+# --------------------------------------------------------------------------- sound libraries (issue #71)
+
+# Big sample libraries that plugins play (Kontakt libraries, Omnisphere's STEAM folder, Spitfire, UVI, EastWest,
+# Toontrack). They're found wherever they live, offered (unticked) with their size, and after the move each maker's
+# own way to reconnect a moved library is shown. Found by what's on disk, not by guessing names:
+#   a .nicnt file marks a Kontakt / Native Instruments library's top folder
+#   a STEAM folder holding Omnisphere, Keyscape, Trilian or Stylus RMX is Spectrasonics' library
+#   .ufs files are UVI soundbanks; .ewi files (in an Instruments folder) are EastWest libraries
+#   a "Spitfire Audio" folder holds Spitfire libraries; Superior3 / EZdrummer folders hold Toontrack libraries
+SPECTRASONICS = {"omnisphere", "keyscape", "trilian", "stylus rmx", "sage"}
+LIBRARY_SCAN_LIMIT = 40000   # folder entries looked at per place, so a huge drive can't stall the move list
+
+
+def hfs_path(value):
+    """NI's Mac settings write 'Macintosh HD:Users:Shared:Lib:'. -> /Users/Shared/Lib, or /Volumes/SSD/Lib."""
+    parts = [x for x in value.split(":") if x]
+    if not parts:
+        return None
+    volume, rest = parts[0], parts[1:]
+    on_volume = Path("/Volumes", volume, *rest)
+    if on_volume.exists():
+        return Path(os.path.realpath(on_volume))
+    on_boot = Path("/", *rest)
+    return on_boot if on_boot.exists() else on_volume
+
+
+def ni_content_dirs():
+    """{product: folder} from Native Instruments' own records: the registry on Windows, plists on a Mac."""
+    found = {}
+    if os.environ.get("FREIGHTER_HOME"):
+        return found   # tests stand in for the home folder: never read this computer's real records
+    if rs.IS_MAC:
+        for plist in sorted(Path("/Library/Preferences").glob("com.native-instruments.*.plist")):
+            try:
+                import plistlib
+                with open(plist, "rb") as f:
+                    value = plistlib.load(f).get("ContentDir")
+            except Exception:
+                continue
+            path = hfs_path(value) if isinstance(value, str) and ":" in value and "/" not in value else \
+                (Path(value) if isinstance(value, str) else None)
+            if path:
+                found[plist.stem.replace("com.native-instruments.", "")] = path
+    elif rs.IS_WIN:
+        import winreg
+        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+            try:
+                root = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Native Instruments", 0,
+                                      winreg.KEY_READ | view)
+            except OSError:
+                continue
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(root, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    with winreg.OpenKey(root, name) as k:
+                        value = winreg.QueryValueEx(k, "ContentDir")[0]
+                    if isinstance(value, str) and value.strip():
+                        found.setdefault(name, Path(value.strip().rstrip("\\")))
+                except OSError:
+                    continue
+    return found
+
+
+def library_at(folder, names):
+    """(maker, kind) if folder is a sound library's top folder, judging by the names inside it."""
+    low = {n.lower() for n in names}
+    if any(n.endswith(".nicnt") for n in low):
+        return "Native Instruments", "Kontakt library"
+    if Path(folder).name.lower() == "steam" and low & SPECTRASONICS:
+        return "Spectrasonics", "STEAM library"
+    if Path(folder).name.lower() in ("superior3", "superior drummer 3", "ezdrummer", "ezdrummer 3", "ezdrummer3"):
+        return "Toontrack", "drum library"
+    if any(n.endswith(".ufs") for n in low):
+        return "UVI", "soundbanks"
+    return None
+
+
+def find_libraries(h=None, ni=None):
+    """Sound libraries on this computer: [{path, name, maker, kind}], biggest places first. Looks in the music
+    folders, the shared folders and the top of other drives (a few levels down), plus where NI says its libraries
+    are."""
+    h = h or home()
+    uf = user_folders(h)
+    places = [(uf["Desktop"], 3), (uf["Documents"], 3), (uf["Music"], 3)]
+    if not os.environ.get("FREIGHTER_HOME"):   # tests stand in for the home folder: shared places stay out
+        if rs.IS_MAC:
+            places += [(Path("/Users/Shared"), 3), (Path("/Library/Application Support/Spectrasonics"), 1)]
+            vols = Path("/Volumes")
+            for v in (sorted(vols.iterdir()) if vols.is_dir() else []):
+                if v.is_dir() and not (v.is_symlink() and v.resolve() == Path("/")):
+                    places.append((v, 3))
+        elif rs.IS_WIN:
+            public = os.environ.get("PUBLIC")
+            if public:
+                places.append((Path(public) / "Documents", 3))
+            places.append((Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "Spectrasonics", 1))
+            system = (os.environ.get("SystemDrive") or "C:")[:1].upper()
+            import string
+            for letter in string.ascii_uppercase:
+                if letter != system and os.path.isdir(f"{letter}:\\"):
+                    places.append((Path(f"{letter}:\\"), 3))
+    found, seen = [], set()
+
+    def add(folder, maker, kind):
+        real = os.path.realpath(long_path(folder))
+        if real in seen or any(real.startswith(s + os.sep) for s in seen):
+            return
+        seen.add(real)
+        found.append({"path": str(folder), "name": Path(folder).name if Path(folder).name.lower() != "steam"
+                      else "Spectrasonics STEAM folder", "maker": maker, "kind": kind})
+
+    for product, folder in sorted((ni if ni is not None else ni_content_dirs()).items()):
+        if folder.is_dir() and not in_program_place(folder):
+            add(folder, "Native Instruments", "library")
+    for place, depth in places:
+        budget = [LIBRARY_SCAN_LIMIT]
+        stack = [(place, 0)]
+        while stack:
+            cur, level = stack.pop()
+            try:
+                with os.scandir(long_path(cur)) as listing:
+                    entries = list(listing)
+            except OSError:
+                continue
+            budget[0] -= len(entries)
+            names = [e.name for e in entries]
+            hit = library_at(cur, names)
+            if hit and cur != place:
+                add(cur, *hit)
+                continue
+            if any(n.lower().endswith(".ewi") for n in names) and Path(cur).name.lower() == "instruments":
+                add(Path(cur).parent, "EastWest", "library")
+                continue
+            if Path(cur).name.lower() == "spitfire audio" and cur != place:
+                for e in entries:
+                    if e.is_dir() and not e.name.startswith("."):
+                        add(Path(e.path), "Spitfire Audio", "library")
+                continue
+            if level >= depth or budget[0] <= 0:
+                continue
+            for e in entries:
+                try:
+                    if e.is_dir(follow_symlinks=False) and not e.name.startswith(".") and not skip_dir(str(cur), e.name):
+                        stack.append((Path(cur) / e.name, level + 1))
+                except OSError:
+                    continue
+    return found
+
+
+LIBRARY_STEPS = {
+    # each maker's own way to reconnect a library that moved (from their support pages)
+    "Native Instruments": ["Open Native Access and click the Refresh icon (top right).",
+                           "Go to Library > All, find {name} and click Repair, then Repair again.",
+                           "In the Locate window, click the folder symbol and choose {path}, then click Done."],
+    "Spitfire Audio": ["Close your DAW, open the Spitfire Audio app and log in.",
+                       "Click {name}'s artwork, open the cog menu and choose Repair (on a new computer) or Locate, "
+                       "then choose {path}."],
+    "Spectrasonics": ["Open Omnisphere (or Keyscape, Trilian or Stylus RMX) on its own or in your DAW.",
+                      "When it asks where the STEAM folder is, choose {path}."],
+    "Toontrack": ["In Superior Drummer 3, open Settings > Libraries/Paths and point it at {path}; in EZdrummer, "
+                  "use Locate Folder and choose {path}."],
+    "EastWest": ["Open EW Installation Center and set the library directory path to {path}."],
+    "UVI": ["Open UVI Workstation or Falcon and add {path} to its soundbank folders."],
+}
+
+
+def library_steps(lib, path):
+    steps = LIBRARY_STEPS.get(lib["maker"], ["Open {maker}'s app or plugin and point it at {path}."])
+    return [s.format(name=lib["name"], path=path, maker=lib["maker"]) for s in steps]
+
+
+def reinstall_step(lib):
+    return {"Native Instruments": "Install it again from Native Access.",
+            "Spitfire Audio": "Install it again from the Spitfire Audio app.",
+            "Spectrasonics": "Install it again with Spectrasonics' installer (the STEAM folder).",
+            "Toontrack": "Install it again from Toontrack's Product Manager.",
+            "EastWest": "Install it again from EW Installation Center.",
+            "UVI": "Install it again from UVI Portal."}.get(lib["maker"], f"Install it again from {lib['maker']}.")
 
 
 # --------------------------------------------------------------------------- plugin presets and data (issue #31)
@@ -1413,14 +1610,30 @@ def cover_stragglers(items, needed):
 def plan_move(includes=(), skips=(), include_programs=False, rng=None):
     """Everything a pack (or the app's move list) needs to know, decided once. Returns a dict with items (measured),
     total, left_behind, missing, installed, cloud_only and stragglers (files the safety net added)."""
-    missing, installed, needed, big, offered, stats = {}, set(), set(), [], [], {}
-    items = pack_items(list(includes), set(skips), missing, installed, needed, big, rng, offered, stats)
-    keep = range_keep(rng) if rng is not None else None
+    missing, installed, needed, big, offered, stats, libs = {}, set(), set(), [], [], {}, []
+    items = pack_items(list(includes), set(skips), missing, installed, needed, big, rng, offered, stats, libs)
+    # a sound library never comes inside another folder that's packed (issue #71): it's offered, and when it's
+    # ticked it comes as its own item (whose walk starts at the library itself, so this doesn't stop it)
+    left_libs = {_key(os.path.realpath(lib["path"])) for lib in libs}
+    date_keep = range_keep(rng) if rng is not None else None
+
+    def keep(path, name, is_dir, st):
+        if is_dir and left_libs and _key(os.path.realpath(short_path(path))) in left_libs:
+            return False
+        return date_keep is None or date_keep(path, name, is_dir, st)
     total, left_behind = measure_items(items, include_programs, keep) if items else (0, None)
     added = cover_stragglers(items, needed) if items else 0
+    items = [it for it in items if it["files"]]   # e.g. a DAW folder that only held a library left out
+    for lib in libs:
+        lib["bytes"] = folder_bytes(lib["path"]) if "item" not in lib else \
+            next((it["bytes"] for it in items if it["id"] == lib["item"]), 0)
+    lib_keys = [Path(os.path.realpath(lib["path"])) for lib in libs]
+    big = [b for b in big if not any(k == Path(os.path.realpath(b["path"])) or Path(os.path.realpath(b["path"])) in k.parents
+                                     for k in lib_keys)]   # shown as libraries instead, with how to reconnect them
     return {"items": items, "total": sum(it["bytes"] for it in items), "left_behind": left_behind,
             "missing": missing, "installed": installed, "cloud_only": list(CLOUD_ONLY), "stragglers": added,
             "big_plugin_data": big, "offered_libraries": offered, "projects": stats,
+            "libraries": [dict(lib, moved="item" in lib) for lib in libs],
             "range": rng.as_dict() if rng is not None else None}
 
 
@@ -1428,6 +1641,16 @@ def say_range(plan):
     st = plan["projects"]
     print(f"\nProjects saved {plan['range']['label']}: {st['in_range']} of {st['total']}. The others stay on this "
           "computer. Each sample they use brings its whole kit, never the folder of kits above it.")
+
+
+def say_sound_libraries(libs):
+    left = [lib for lib in libs if not lib.get("moved")]
+    if left:
+        print("\nSound libraries found, left out unless you add them (they can also be installed again from the "
+              "maker's app):")
+        for lib in left:
+            print(f"  {rs.human_size(lib['bytes'])}  {lib['name']} ({lib['maker']})  {lib['path']}")
+        print("Take one with --include FOLDER.")
 
 
 def say_offered_libraries(offered):
@@ -1488,6 +1711,7 @@ def cmd_pack(args):
             print(f"{len(left_behind)} programs or installers will be left behind (reinstall software from its "
                   "maker). Keep them with --include-programs.")
         say_big_plugin_data(plan["big_plugin_data"])
+        say_sound_libraries(plan["libraries"])
         say_offered_libraries(plan["offered_libraries"])
         say_missing(missing)
         say_installed(installed)
@@ -1532,6 +1756,8 @@ def cmd_pack(args):
         "fl_search_paths": fl_settings()["search_paths"],
         "projects_range": dict(plan["range"], in_range=plan["projects"]["in_range"],
                                total=plan["projects"]["total"]) if rng is not None else None,
+        "libraries": [{k: lib.get(k) for k in ("name", "maker", "kind", "path", "bytes", "item")}
+                      for lib in plan["libraries"]],
         "items": [{k: v for k, v in it.items() if not k.startswith("_")} for it in items],
     }
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -2177,6 +2403,19 @@ def cmd_unpack(args):
     journal.close()
     for note in notes:
         print(f"From the old computer: {note}")
+    libraries = []   # sound libraries: how to reconnect the moved ones, where to get the rest (issue #71)
+    for lib in manifest.get("libraries") or []:
+        entry = next((e for e in entries if lib.get("item") and e.get("id") == lib["item"]), None)
+        if entry:
+            libraries.append(dict(lib, moved=True, new=entry["new"], steps=library_steps(lib, entry["new"])))
+        else:
+            libraries.append(dict(lib, moved=False, steps=[reinstall_step(lib)]))
+    if libraries:
+        print("\nSound libraries:")
+        for lib in libraries:
+            print(f"  {lib['name']} ({lib['maker']}): " + ("moved to " + lib["new"] if lib["moved"] else "not moved"))
+            for step in lib["steps"]:
+                print(f"    - {step}")
     plugin_ids = {it["id"] for it in manifest["items"] if it.get("plugin_data")}
     presets = [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries if e.get("id") in plugin_ids]
     cross_os = manifest["source_os"] != THIS_OS
@@ -2200,7 +2439,7 @@ def cmd_unpack(args):
         "source_host": src_host, "source_os": manifest["source_os"], "landing": str(landing),
         "report": str(landing / "unpack-report.txt"), "problems": problems, "notes": notes,
         "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place, "replaced": replaced,
-        "plugin_data": presets, "cross_os": cross_os, "blocked_hint": hint,
+        "plugin_data": presets, "cross_os": cross_os, "blocked_hint": hint, "libraries": libraries,
         "range": (manifest.get("projects_range") or {}).get("label"),
         "entries": [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries
                     if e.get("id") in {it["id"] for it in manifest["items"]}],

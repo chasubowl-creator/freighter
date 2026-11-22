@@ -4,7 +4,7 @@ labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: |
+      value: >-
         Thanks for helping make Freighter better. Nothing from your computer is sent with this form; only what you
         type or attach here.
   - type: textarea

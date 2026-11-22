@@ -288,7 +288,7 @@ function rangePanel(r) {
       "The others stay on this computer. Each sample these projects use brings its whole kit, never the folder of other kits above it.") : null);
 }
 
-function optional() { return (move.big || []).concat(move.offered || []); }   // left out unless ticked
+function optional() { return (move.big || []).concat(move.offered || [], move.libraries || []); }   // left out unless ticked
 function inside(path, folder) {   // same folder, or inside it ("\\" on Windows, "/" on a Mac)
   return path === folder || path.startsWith(folder.replace(/[\\/]$/, "") + (folder.includes("\\") ? "\\" : "/"));
 }
@@ -325,6 +325,7 @@ function chooseItems() {
     el("td", {class: "num"}, ""), el("td", {class: "num"}, size(b.bytes)));
   const bigRows = (r.big || []).map(b => optRow(b, `Plugin content: ${b.label}`));
   const libRows = (r.offered || []).map(b => optRow(b, b.label.replace(/^FL Studio browser folder: /, "Sample library: ")));
+  const soundRows = (r.libraries || []).map(b => optRow(b, `${b.name} (${b.maker})`));
   const notes = [];
   if (r.missing_count) notes.push(note("bad",
     `${plural(r.missing_count, "sample")} used by ${plural(r.missing_projects, "project")} ${r.missing_count === 1 ? "is" : "are"} already missing on this computer`,
@@ -350,6 +351,9 @@ function chooseItems() {
     bigRows.length ? el("h2", {}, "Big plugin content, left out unless you tick it") : null,
     bigRows.length ? el("p", {class: "muted"}, "These are probably sound libraries. They usually come back faster by installing them again from the maker's app (Native Access, Spitfire, Arturia…). Tick one to take it anyway.") : null,
     bigRows.length ? el("table", {}, el("tbody", {}, bigRows)) : null,
+    soundRows.length ? el("h2", {}, "Sound libraries, left out unless you tick them") : null,
+    soundRows.length ? el("p", {class: "muted"}, "Kontakt, Omnisphere, Spitfire and other libraries your plugins play. They can be big; most makers' apps can also install them again on the new computer. After the move, Freighter shows how to reconnect each one you take.") : null,
+    soundRows.length ? el("table", {}, el("tbody", {}, soundRows)) : null,
     libRows.length ? el("h2", {}, "Whole sample libraries, left out with a time range") : null,
     libRows.length ? el("p", {class: "muted"}, "Only the kits your projects use come from these. Tick one to take all of it.") : null,
     libRows.length ? el("table", {}, el("tbody", {}, libRows)) : null,
@@ -666,6 +670,16 @@ function unpacked(r) {
     el("ul", {class: "plain"}, u.plugin_data.map(p => el("li", {class: "row"},
       el("span", {}, p.label.replace(/^Plugin presets and data: /, "")), el("span", {class: "mono small muted"}, p.new),
       u.cross_os ? copyButton(p.new) : null))));
+  const moved = (u.libraries || []).filter(l => l.moved), notMoved = (u.libraries || []).filter(l => !l.moved);
+  if (moved.length) parts.push(el("h2", {}, "Reconnect your sound libraries"),
+    el("p", {class: "muted"}, "Each maker's app needs to be told where a library is now. Install the maker's app first, then:"),
+    el("ul", {class: "plain"}, moved.map(l => el("li", {},
+      el("b", {}, l.name), el("span", {class: "muted"}, ` · ${l.maker}`),
+      el("div", {class: "row"}, el("span", {class: "mono small muted"}, l.new), copyButton(l.new)),
+      el("ol", {class: "small"}, l.steps.map(st => el("li", {}, st)))))));
+  if (notMoved.length) parts.push(el("h2", {}, "Sound libraries to install again"),
+    el("p", {class: "muted"}, "These stayed on the old computer. Install them from each maker's app:"),
+    el("ul", {class: "plain"}, notMoved.map(l => el("li", {}, el("b", {}, l.name), el("span", {class: "muted"}, ` · ${l.maker} · ${l.steps[0]}`)))));
   (u.notes || []).forEach(n => parts.push(note("", "From the old computer", el("div", {class: "muted"}, n))));
   parts.push(el("h2", {}, "Where everything went"),
     u.back_in_place ? el("p", {class: "muted"}, "Same kind of computer, so your folders went back to the same places as on the old one.") : null,

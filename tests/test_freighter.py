@@ -1737,14 +1737,14 @@ class PluginPresets(TempDirCase):
 
     def test_big_plugin_content_is_offered_not_packed(self):
         home = self.tmp / "home"
-        lib = write(home / "Documents" / "Spitfire Audio" / "Library" / "Strings.fxp", b"s" * 5000).parents[1]
+        lib = write(home / "Documents" / "Heavy Synths" / "Library" / "Strings.fxp", b"s" * 5000).parents[1]
         with mock.patch.object(rm, "PLUGIN_DATA_BIG", 1000):
             plan = self.plan(home)
-        self.assertNotIn("Spitfire Audio", self.packed(plan))
-        self.assertEqual(plan["big_plugin_data"], [{"path": str(lib), "label": "Spitfire Audio", "bytes": 5000}])
+        self.assertNotIn("Heavy Synths", self.packed(plan))
+        self.assertEqual(plan["big_plugin_data"], [{"path": str(lib), "label": "Heavy Synths", "bytes": 5000}])
         with as_home(home), quiet(), mock.patch.object(rm, "PLUGIN_DATA_BIG", 1000):
             taken = rm.plan_move(includes=[str(lib)])           # ticked in the app, or --include on the command line
-        self.assertIn("Spitfire Audio", self.packed(taken))
+        self.assertIn("Heavy Synths", self.packed(taken))
         self.assertEqual(taken["big_plugin_data"], [])
 
     def test_presets_go_back_to_the_same_place(self):
@@ -1817,6 +1817,9 @@ class KeepAwake(unittest.TestCase):
         class Proc:
             def terminate(self):
                 calls.append("let go")
+
+            def wait(self, timeout=None):
+                return 0
         with mock.patch.object(rm.rs, "IS_WIN", False), mock.patch.object(rm.rs, "IS_MAC", True), \
                 mock.patch.object(rm.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd[:2]) or Proc()):
             with rm.keep_awake():
@@ -1984,3 +1987,77 @@ class TimeRange(TempDirCase):
         w = write(wrapped / "Cool Pack - Wav" / "Kicks" / "kick.wav", b"k")
         write(wrapped / "Cool Pack - Wav" / "Loops" / "loop.wav", b"l")
         self.assertEqual(rm.kit_folder(w, wrapped), wrapped / "Cool Pack - Wav")
+
+
+class SoundLibraries(TempDirCase):
+    """Issue #71: Kontakt and friends are found wherever they live, offered, and reconnected after the move."""
+
+    def studio(self):
+        home = self.tmp / "home"
+        una = write(home / "Documents" / "Native Instruments" / "Libraries" / "Una Corda" / "Una Corda.nicnt", b"n")
+        write(una.parent / "Samples" / "piano.ncw", b"p" * 3000)
+        steam = home / "Desktop" / "Libraries" / "STEAM"
+        write(steam / "Omnisphere" / "Settings Library" / "pad.prt_omn", b"o" * 2000)
+        write(home / "Music" / "Spitfire Audio" / "BBC Symphony Orchestra" / "Samples" / "violins.wav", b"v" * 1000)
+        write(home / "Desktop" / "Libraries" / "UVI" / "Vintage Vault.ufs", b"u" * 500)
+        write(home / "Documents" / "EastWest" / "Hollywood Strings" / "Instruments" / "Violins.ewi", b"e")
+        write(home / "Documents" / "Toontrack" / "Superior3" / "Core.sdx", b"t")
+        write(home / "Documents" / "Native Instruments" / "User Content" / "my preset.nksf", b"x")
+        return home, una.parent, steam
+
+    def test_each_makers_libraries_are_found(self):
+        home, una, steam = self.studio()
+        with as_home(home):
+            libs = {Path(lib["path"]).name: lib for lib in rm.find_libraries(ni={})}
+        self.assertEqual(libs["Una Corda"]["maker"], "Native Instruments")
+        self.assertEqual(libs["STEAM"]["maker"], "Spectrasonics")
+        self.assertEqual(libs["STEAM"]["name"], "Spectrasonics STEAM folder")
+        self.assertEqual(libs["BBC Symphony Orchestra"]["maker"], "Spitfire Audio")
+        self.assertEqual(libs["UVI"]["maker"], "UVI")
+        self.assertEqual(libs["Hollywood Strings"]["maker"], "EastWest")
+        self.assertEqual(libs["Superior3"]["maker"], "Toontrack")
+        self.assertNotIn("User Content", libs, "a preset folder isn't a sound library")
+
+    def test_native_instruments_mac_paths(self):
+        self.assertEqual(rm.hfs_path("Nope Disk:Libraries:Strings:"), Path("/Volumes/Nope Disk/Libraries/Strings"))
+        self.assertIsNone(rm.hfs_path(""))
+
+    def test_libraries_are_offered_not_packed_and_carved_out_of_packed_folders(self):
+        home, una, steam = self.studio()
+        with as_home(home), quiet():
+            plan = rm.plan_move()
+            ni = next(it for it in plan["items"] if it["id"] == "ni_user")
+            self.assertFalse([1 for _r, ap, _n in ni["_files"] if "Una Corda" in str(ap)],
+                             "a library inside a packed folder stays out unless ticked")
+            self.assertTrue([1 for _r, ap, _n in ni["_files"] if "my preset" in str(ap)], "the rest of it still comes")
+            offered = {lib["name"]: lib for lib in plan["libraries"]}
+            self.assertEqual(offered["Una Corda"]["bytes"], 3001)
+            self.assertFalse(offered["Una Corda"]["moved"])
+            taken = rm.plan_move(includes=[str(una)])
+        item = next(it for it in taken["items"] if it.get("library"))
+        self.assertEqual(item["label"], "Sound library: Una Corda")
+        self.assertEqual(item["files"], 2)
+        ni = next(it for it in taken["items"] if it["id"] == "ni_user")
+        self.assertFalse([1 for _r, ap, _n in ni["_files"] if "Una Corda" in str(ap)],
+                         "a ticked library comes once, as its own item, not again inside the NI folder")
+        self.assertTrue(next(lib for lib in taken["libraries"] if lib["name"] == "Una Corda")["moved"])
+
+    def test_after_unpacking_each_library_says_how_to_reconnect_it(self):
+        home, una, steam = self.studio()
+        drive, new = self.tmp / "drive", self.tmp / "new"
+        drive.mkdir()
+        with as_home(home), quiet():
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[str(una)], skip=[],
+                                           include_programs=False))
+        bundle = next(drive.glob("Freighter-*"))
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        libs = {lib["name"]: lib for lib in rm.LAST["unpack"]["libraries"]}
+        moved = libs["Una Corda"]
+        self.assertTrue(moved["moved"])
+        self.assertTrue((Path(moved["new"]) / "Samples" / "piano.ncw").is_file())
+        self.assertIn("Native Access", moved["steps"][0])
+        self.assertIn(moved["new"], " ".join(moved["steps"]), "the steps name where it is now")
+        self.assertFalse(libs["Spectrasonics STEAM folder"]["moved"])
+        self.assertIn("Spectrasonics", libs["Spectrasonics STEAM folder"]["steps"][0])
