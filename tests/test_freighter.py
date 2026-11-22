@@ -802,6 +802,66 @@ class ProgramContent(TempDirCase):
         self.assertEqual(installed, {str(inside_app)})
 
 
+class FLSettings(TempDirCase):
+    """Issue #69: what FL Studio's own settings say about folders."""
+    REG_XML = """<?xml version="1.0" encoding="utf-8"?>
+<XMLReg><Key Name="Key1"><Key Name="HKEY_CURRENT_USER"><Key Name="Software"><Key Name="Image-Line">
+  <Key Name="Shared"><Key Name="Paths">
+    <Value Name="FL Studio engine" Type="2">/Applications/FL Studio 2025.app/Contents/Libs/FLEngine_x64.dylib</Value>
+    <Value Name="Shared data" Type="2">/Users/me/Music/My FL Data/</Value></Key></Key>
+  <Key Name="FL Studio 21"><Key Name="Search paths"><Value Name="0" Type="2">/Users/me/Old Kits/,</Value></Key></Key>
+  <Key Name="FL Studio 25">
+    <Key Name="Search paths"><Value Name="0" Type="2">"/Users/me/Desktop/Sampels for FL Studio/",</Value>
+      <Value Name="1" Type="2">/Users/me/Desktop/DrumKits/,</Value></Key>
+    <Key Name="MRU"><Value Name="0" Type="2">/Volumes/SSD/Projects/Beat/Beat.flp</Value><Value Name="1" Type="2"></Value></Key>
+  </Key>
+</Key></Key></Key></Key></XMLReg>"""
+
+    def test_reads_the_settings_file(self):
+        import xml.etree.ElementTree as ET
+        got = rm.fl_settings_from_tree(ET.fromstring(self.REG_XML))
+        self.assertEqual(got["user_data"], "/Users/me/Music/My FL Data/")
+        self.assertEqual(got["search_paths"], ["/Users/me/Desktop/Sampels for FL Studio/", "/Users/me/Desktop/DrumKits/",
+                                               "/Users/me/Old Kits/"], "newest FL first, quotes and commas gone")
+        self.assertEqual(got["recent"], ["/Volumes/SSD/Projects/Beat/Beat.flp"])
+
+    def test_search_folders_and_recent_projects_move(self):
+        h = self.tmp / "home"
+        library = h / "Desktop" / "My Library"                        # no project uses it, but FL browses it
+        write(library / "Pack" / "loop.wav", b"l" * 50)
+        elsewhere = self.tmp / "D" / "Projects" / "Album" / "song.flp"  # a recent project outside the usual folders
+        make_flp(elsewhere, [])
+        fl = {"user_data": None, "search_paths": [str(library) + "/"], "recent": [str(elsewhere)]}
+        with as_home(h), quiet(), mock.patch.object(rm, "fl_settings", lambda: fl):
+            items = rm.pack_items([], set())
+        by_path = {Path(it["source_path"]): it for it in items}
+        self.assertIn(library, by_path)
+        self.assertEqual(by_path[library]["label"], "FL Studio browser folder: My Library")
+        self.assertIn(elsewhere.parent, by_path, "the recent project's folder is found too")
+
+    def test_a_custom_fl_user_data_folder_is_used(self):
+        h = self.tmp / "home"
+        custom = h / "Music" / "My FL Data"
+        custom.mkdir(parents=True)
+        with as_home(h), mock.patch.object(rm, "fl_settings", lambda: {"user_data": str(custom) + "/",
+                                                                       "search_paths": [], "recent": []}):
+            self.assertEqual(rm.known_roots(rm.THIS_OS, h)["fl_user"][1], custom)
+
+    def test_unpack_lists_the_browser_folders_to_add_back(self):
+        old, new, drive = self.tmp / "old", self.tmp / "new", self.tmp / "drive"
+        library = write(old / "Desktop" / "My Library" / "loop.wav", b"l").parent
+        drive.mkdir()
+        new.mkdir()
+        fl = {"user_data": None, "search_paths": [str(library)], "recent": []}
+        with as_home(old), quiet(), mock.patch.object(rm, "fl_settings", lambda: fl):
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
+        out = io.StringIO()
+        with as_home(new), contextlib.redirect_stdout(out):
+            rm.cmd_unpack(argparse.Namespace(bundle=str(next(drive.glob("Freighter-*"))), dest_for=[]))
+        self.assertIn("Browser extra search folders", out.getvalue())
+        self.assertIn(str(new / "Desktop" / "My Library"), out.getvalue())
+
+
 class OneDriveFolders(TempDirCase):
     """Windows can keep Desktop and Documents somewhere else, usually in OneDrive (issue #6)."""
 

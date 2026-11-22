@@ -111,6 +111,108 @@ def user_folders(h=None):
     return folders
 
 
+def fl_clean_path(value):
+    """FL stores folder values like '"/Users/me/Desktop/Kits/",' : drop the quotes and the trailing comma."""
+    v = (value or "").strip().rstrip(",").strip().strip('"').strip()
+    return v or None
+
+
+def fl_settings_from_tree(root):
+    """FL's folder settings from its reg.xml (Mac). Same keys as the Windows registry."""
+    out = {"user_data": None, "search_paths": [], "recent": []}
+    versions = []
+    for il in root.iter("Key"):
+        if il.get("Name") != "Image-Line":
+            continue
+        for k in il.findall("Key"):
+            name = k.get("Name") or ""
+            if name == "Shared":
+                for paths in k.findall("Key[@Name='Paths']"):
+                    for v in paths.findall("Value[@Name='Shared data']"):
+                        out["user_data"] = fl_clean_path(v.text)
+            m = re.fullmatch(r"FL Studio (\d+)", name)
+            if m:
+                versions.append((int(m.group(1)), k))
+    for _ver, k in sorted(versions, key=lambda x: -x[0]):   # newest FL first
+        for sp in k.findall("Key[@Name='Search paths']"):
+            for v in sp.findall("Value"):
+                path = fl_clean_path(v.text)
+                if path and path not in out["search_paths"]:
+                    out["search_paths"].append(path)
+        if not out["recent"]:
+            for mru in k.findall("Key[@Name='MRU']"):
+                out["recent"] = [x for x in (fl_clean_path(v.text) for v in mru.findall("Value")) if x]
+    return out
+
+
+def fl_settings_from_registry():
+    out = {"user_data": None, "search_paths": [], "recent": []}
+    import winreg
+    base = r"Software\Image-Line"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base + r"\Shared\Paths") as k:
+            out["user_data"] = fl_clean_path(winreg.QueryValueEx(k, "Shared data")[0])
+    except OSError:
+        pass
+    versions = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(k, i)
+                except OSError:
+                    break
+                m = re.fullmatch(r"FL Studio (\d+)", name)
+                if m:
+                    versions.append((int(m.group(1)), name))
+                i += 1
+    except OSError:
+        return out
+
+    def values(path):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as k:
+                found, i = [], 0
+                while True:
+                    try:
+                        _n, v, _t = winreg.EnumValue(k, i)
+                    except OSError:
+                        return found
+                    if isinstance(v, str) and fl_clean_path(v):
+                        found.append(fl_clean_path(v))
+                    i += 1
+        except OSError:
+            return []
+    for _ver, name in sorted(versions, key=lambda x: -x[0]):
+        for path in values(f"{base}\\{name}\\Search paths"):
+            if path not in out["search_paths"]:
+                out["search_paths"].append(path)
+        if not out["recent"]:
+            out["recent"] = values(f"{base}\\{name}\\MRU")
+    return out
+
+
+def fl_settings():
+    """What FL Studio's own settings say about folders on this computer (issue #69): its user-data folder
+    ("Shared data"), the browser's extra search folders (usually the user's sample libraries) and recent projects.
+    Only for the real home folder: a rehearsal's stand-in or a test has no FL settings of its own."""
+    empty = {"user_data": None, "search_paths": [], "recent": []}
+    if os.environ.get("FREIGHTER_HOME"):
+        return empty
+    try:
+        if rs.IS_WIN:
+            return fl_settings_from_registry()
+        if rs.IS_MAC:
+            import xml.etree.ElementTree as ET
+            f = real_home() / "Library" / "Preferences" / "Image-Line" / "reg.xml"
+            if f.is_file():
+                return fl_settings_from_tree(ET.parse(f).getroot())
+    except Exception:            # unreadable settings mean "nothing extra", never a failed move
+        pass
+    return empty
+
+
 def all_user_folders(h=None):
     """Every Desktop, Documents and Music folder worth searching: where Windows says they are (e.g. in OneDrive)
     and the usual ones in the home folder, which can still hold files from before the move to OneDrive."""
@@ -137,6 +239,10 @@ def known_roots(os_name, h):
     if os_name == "mac":
         roots["logic"] = ("Logic projects", music / "Logic")
         roots["audio_music_apps"] = ("Logic / GarageBand content", music / "Audio Music Apps")
+    if os_name == THIS_OS and _norm_abs(h) == _norm_abs(home()):
+        fl = fl_settings().get("user_data")
+        if fl and Path(fl).is_dir():
+            roots["fl_user"] = (roots["fl_user"][0], Path(fl))   # FL says where its user-data folder really is
     if os_name == THIS_OS:
         # a DAW folder left in the local Documents (from before OneDrive took Documents over) is still the one
         for rid, (label, path) in list(roots.items()):
@@ -451,8 +557,23 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None):
         iid = item_id("extra", p)
         if iid not in skips:
             items.append({"id": iid, "label": p.name, "source_path": str(p), "kind": "extra"})
+    fl = fl_settings()
+    fold = THIS_OS == "windows"
+    inside = lambda p, roots: any(norm(str(p), fold) == norm(str(r), fold) or
+                                  norm(str(p), fold).startswith(norm(str(r), fold) + "/") for r in roots)
+    for sp in fl["search_paths"]:
+        # FL's browser folders are the user's sample libraries: they move on purpose, used by a project or not
+        sp = Path(sp)
+        if not sp.is_dir() or in_program_place(sp) or inside(sp, [it["source_path"] for it in items]):
+            continue
+        iid = item_id("search", sp)
+        if iid not in skips:
+            items.append({"id": iid, "label": f"FL Studio browser folder: {sp.name}", "source_path": str(sp),
+                          "kind": "extra", "fl_search_path": True})
     left_out = [str(path) for rid, (_l, path) in known_roots(THIS_OS, home()).items() if rid in skips and path.is_dir()]
-    folders, loose, gone = project_sample_folders(items, installed, left_out, needed)
+    recent = [Path(r) for r in fl["recent"] if r.lower().endswith(".flp") and Path(r).is_file()
+              and not in_program_place(r)]
+    folders, loose, gone = project_sample_folders(items, installed, left_out, needed, recent)
     if missing is not None:
         missing.update(gone)
     for folder, label in folders.items():
@@ -514,7 +635,7 @@ def in_program_place(path):
     return (s.lower() + ("/" if not s.endswith("/") else "")).startswith(MAC_PROGRAM_DIRS)
 
 
-def project_sample_folders(items, installed=None, excluded=(), needed=None):
+def project_sample_folders(items, installed=None, excluded=(), needed=None, extra_projects=()):
     """What a move needs beyond the packed items: projects found in Desktop, Documents and Music (even ones
     that use no outside samples), and every sample folder FL/Ableton projects use.
     Returns ({folder: label}, {folder: set of file names to take loose},
@@ -526,6 +647,8 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None):
     left_out = [Path(e) for e in excluded]
     inside_left_out = lambda p: any(e == p or e in p.parents for e in left_out)
     flps = [p for p in find_projects(roots, ".flp", include_backups=True) if not inside_left_out(p)]
+    # recent projects FL knows about, wherever they are (e.g. D:\\Projects), are found too
+    flps += [p for p in extra_projects if p not in flps and not inside_left_out(p)]
     alss = [p for p in find_projects(roots, ".als") if not inside_left_out(p)]
     refs = {}   # sample -> projects that use it
     for p in flps:
@@ -799,6 +922,7 @@ def cmd_pack(args):
         "bundle_version": BUNDLE_VERSION, "freighter_version": __version__, "created": dt.datetime.now().isoformat(timespec="seconds"),
         "source_host": host, "source_os": THIS_OS, "source_home": str(home()),
         "user_folders": {name: str(path) for name, path in user_folders(home()).items()},
+        "fl_search_paths": fl_settings()["search_paths"],
         "items": [{k: v for k, v in it.items() if not k.startswith("_")} for it in items],
     }
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -1153,6 +1277,13 @@ def cmd_unpack(args):
 
     for note in notes:
         print(f"From the old computer: {note}")
+    old_search = manifest.get("fl_search_paths") or []
+    if old_search:
+        print("\nFL Studio's browser folders on the old computer are now here. FL keeps its settings per computer, so")
+        print("add them in FL Studio under Options > File settings > Browser extra search folders:")
+        for sp in old_search:
+            status, where = locate(sp, [pathmap])
+            print(f"  {where if status != 'missing' else sp}")
     if problems or bad:
         print(f"\nUnpacked, with problems: see {landing / 'unpack-report.txt'}. Path map: {pm_path}")
     else:
