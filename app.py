@@ -8,6 +8,7 @@ and requests from other websites are refused, so a web page can't drive Freighte
 Nothing leaves your computer. Needs only Python 3.8+.
 """
 
+import argparse
 import csv
 import hmac
 import http.server
@@ -51,9 +52,9 @@ class OutputRouter(io.TextIOBase):
 
 
 class Job:
-    def __init__(self, kind, fn, router):
+    def __init__(self, kind, fn, router, params=None):
         self.id = secrets.token_hex(6)
-        self.kind, self.fn, self.router = kind, fn, router
+        self.kind, self.fn, self.router, self.params = kind, fn, router, params or {}
         self.state, self.progress, self.result, self.error, self.crash = "running", None, None, None, None
         self.lines, self.partial, self.cancel_requested = [], "", False
         self.files = {}   # things the page may ask to open, by name -> local path
@@ -69,7 +70,7 @@ class Job:
         rm.PROGRESS.listener = self.on_progress
         try:
             self.result = self.fn(self)
-            self.state = "done"
+            self.state = "done"   # last: the page stops polling as soon as it sees this
         except rm.Cancelled:
             self.state = "cancelled"
         except SystemExit as e:   # the commands stop with a message when something's wrong
@@ -140,7 +141,101 @@ def job_plugins(job):
     }
 
 
-JOBS = {"move_list": job_move_list, "plugins": job_plugins}
+def job_pack(job):
+    """Pack this computer onto a drive or folder, leaving out the items the person unticked."""
+    p = job.params
+    rm.LAST.pop("pack", None)
+    rm.cmd_pack(argparse.Namespace(to=p["to"], list=False, include=[], skip=list(p.get("skip", [])),
+                                   include_programs=False))
+    return rm.LAST.get("pack")
+
+
+def job_unpack(job):
+    """Unpack a bundle, then repair every project so it points at the moved samples."""
+    p = job.params
+    rm.LAST.pop("unpack", None)
+    rm.cmd_unpack(argparse.Namespace(bundle=p["bundle"], dest_for=[], keep_together=bool(p.get("keep_together")),
+                                     anyway=bool(p.get("anyway"))))
+    rm.report_progress("Repairing projects", 0, 0)
+    repair = rm.repair_projects()
+    return {"unpack": rm.LAST.get("unpack"), "repair": dict(repair, missing=repair["missing"][:100],
+                                                            missing_count=len(repair["missing"]))}
+
+
+# where to get each maker's plugins (their own site; installers often come through the maker's app)
+MAKER_LINKS = {
+    "xfer records": "https://xferrecords.com/", "native instruments": "https://www.native-instruments.com/",
+    "waves": "https://www.waves.com/", "arturia": "https://www.arturia.com/", "fabfilter": "https://www.fabfilter.com/",
+    "u-he": "https://u-he.com/", "spitfire audio": "https://www.spitfireaudio.com/", "valhalla dsp": "https://valhalladsp.com/",
+    "izotope": "https://www.izotope.com/", "kilohearts": "https://kilohearts.com/", "image-line": "https://www.image-line.com/",
+    "plugin alliance": "https://www.plugin-alliance.com/", "output": "https://output.com/", "soundtoys": "https://www.soundtoys.com/",
+    "vital audio": "https://vital.audio/", "spectrasonics": "https://www.spectrasonics.net/", "toontrack": "https://www.toontrack.com/",
+    "universal audio": "https://www.uaudio.com/", "slate digital": "https://slatedigital.com/", "eastwest": "https://www.soundsonline.com/",
+    "nicky romero": "https://kickstart-plugin.com/", "cableguys": "https://www.cableguys.com/", "xln audio": "https://www.xlnaudio.com/",
+    "lennardigital": "https://www.lennardigital.com/", "reveal sound": "https://revealsound.com/",
+}
+
+
+def maker_link(vendor):
+    v = (vendor or "").lower()
+    return next((url for name, url in MAKER_LINKS.items() if name in v), None)
+
+
+def job_readiness(job):
+    """Which plugins this computer's projects need, most useful first (issue #70), ready for a checklist."""
+    maps = rm.load_pathmaps(None)
+    roots = rm.project_search_roots(maps, [])
+    rm.report_progress("Reading your projects", 0, 0)
+    projects = {str(p): rm.project_plugins(p) for p in rm.find_projects(roots, ".flp") + rm.find_projects(roots, ".als")}
+    rm.report_progress("Scanning installed plugins", 0, 0)
+    r = rm.plugin_readiness(projects, rs.scan([]))
+    # makers the projects didn't name: take them from the old computer's plugin list, copied over on unpack
+    known = {}
+    for f in (rm.home() / "Music" / "Freighter").glob("*/plugins-*.csv"):
+        try:
+            with open(f, newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    for k in rs.match_keys(row.get("name", ""), row.get("vendor", ""), row.get("key", "")):
+                        known.setdefault(k, row.get("vendor", ""))
+        except OSError:
+            pass
+    missing = []
+    for e in r["missing"]:
+        vendor = e["vendor"] or next((known[k] for k in rs.match_keys(e["name"], "") if known.get(k)), "")
+        missing.append({"name": e["name"], "vendor": vendor, "link": maker_link(vendor), "opens": e["opens"],
+                        "projects": [Path(x).name for x in e["projects"]]})
+    return {"total": r["total"], "ready": len(r["ready"]), "missing": missing, "warnings": r["warnings"],
+            "versions": [{"daw": d, "version": v, "example": n} for d, (v, n) in sorted(r["versions"].items())],
+            "on_old_computer": not any((rm.home() / "Music" / "Freighter").glob("*/pathmap.json"))}
+
+
+def clean_params(kind, body):
+    """The options a job may take, checked. Returns (params, error)."""
+    if kind == "pack":
+        to = body.get("to")
+        skip = body.get("skip", [])
+        if not isinstance(to, str) or not Path(to).expanduser().is_dir():
+            return None, "Choose a drive or folder that exists."
+        if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip):
+            return None, "bad request"
+        return {"to": str(Path(to).expanduser()), "skip": skip}, None
+    if kind == "unpack":
+        b = body.get("bundle")
+        if not isinstance(b, str) or not (Path(b).expanduser() / "manifest.json").is_file():
+            return None, "That isn't a Freighter bundle (it has no manifest.json)."
+        return {"bundle": str(Path(b).expanduser()), "keep_together": bool(body.get("keep_together")),
+                "anyway": bool(body.get("anyway"))}, None
+    return {}, None
+
+
+def job_repair(job):
+    """Repair projects again (e.g. after closing FL Studio)."""
+    r = rm.repair_projects()
+    return dict(r, missing=r["missing"][:100], missing_count=len(r["missing"]))
+
+
+JOBS = {"move_list": job_move_list, "plugins": job_plugins, "pack": job_pack, "unpack": job_unpack,
+        "readiness": job_readiness, "repair": job_repair}
 
 
 # --------------------------------------------------------------------------- server
@@ -162,13 +257,13 @@ class App:
         with self.lock:
             return any(j.state == "running" for j in list(self.jobs.values()))
 
-    def start_job(self, kind):
+    def start_job(self, kind, params=None):
         """Start a job unless one is running. The check and the start happen together, so a double click can't
         start two."""
         with self.lock:
             if any(j.state == "running" for j in self.jobs.values()):
                 return None
-            job = Job(kind, JOBS[kind], self.router)
+            job = Job(kind, JOBS[kind], self.router, params)
             self.jobs[job.id] = job
             return job.start()
 
@@ -221,6 +316,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.app.last_seen = time.time()
         if url.path == "/api/ping":
             return self.send(200, {"version": __version__, "busy": self.app.busy()})
+        if url.path == "/api/drives":
+            return self.send(200, {"drives": rm.list_drives(), "os": rm.THIS_OS})
         if url.path.startswith("/api/jobs/"):
             job = self.app.jobs.get(url.path.split("/")[3])
             return self.send(200, job.view()) if job else self.send(404, {"error": "no such job"})
@@ -244,7 +341,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             kind = body.get("kind")
             if kind not in JOBS:
                 return self.send(400, {"error": "unknown job"})
-            job = self.app.start_job(kind)
+            params, problem = clean_params(kind, body)
+            if problem:
+                return self.send(400, {"error": problem})
+            job = self.app.start_job(kind, params)
             return self.send(200, {"id": job.id}) if job else self.send(409, {"error": "Something is already running."})
         parts = path.split("/")
         if len(parts) == 5 and parts[2] == "jobs" and parts[4] == "cancel":
@@ -260,6 +360,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(404, {"error": "nothing to open"})
             webbrowser.open(Path(target).resolve().as_uri())
             return self.send(200, {"ok": True})
+        if path == "/api/folder":
+            # a folder typed in by hand: does it exist, how much room, and any bundles in or at it
+            f = body.get("path")
+            if not isinstance(f, str) or not f.strip():
+                return self.send(400, {"error": "bad request"})
+            folder = Path(f.strip().strip('"')).expanduser()
+            if not folder.is_dir():
+                return self.send(200, {"exists": False, "path": str(folder)})
+            here = rm.bundle_summary(folder)
+            return self.send(200, {"exists": True, "path": str(folder), "free": rm.shutil.disk_usage(folder).free,
+                                   "fs": rm.filesystem(folder),
+                                   "bundles": [here] if here else [b for b in (rm.bundle_summary(x)
+                                                                               for x in rm.find_bundles(folder)) if b]})
         if path == "/api/quit":
             self.app.stopped.set()   # before answering, so whoever sees the answer sees Freighter stopping
             return self.send(200, {"ok": True})
@@ -301,203 +414,7 @@ def run(open_browser=True):
 
 # --------------------------------------------------------------------------- the page
 
-LOCKED_PAGE = """<!doctype html><meta charset=utf-8><title>Freighter</title>
-<body style="font:16px/1.5 -apple-system,'Segoe UI',sans-serif;background:#0f1114;color:#eef0f2;padding:40px">
-<p>This page only opens from Freighter's own window. Start Freighter again and use the address it shows.</p>"""
-
-PAGE = r"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Freighter</title>
-<style>
-:root{--bg:#0f1114;--panel:#171a1f;--panel2:#1d2127;--line:#272c33;--ink:#eef0f2;--muted:#9aa1ab;--blue:#3d8bff;
---blue2:#2f6fd6;--warn:#f0b44b;--bad:#ff6b6b;--ok:#4cc38a}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink)}
-body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line)}
-.logo{font-weight:700;letter-spacing:.2px}.logo b{color:var(--blue)}
-.ver{color:var(--muted);font-size:12px}header .sp{flex:1}
-main{max-width:980px;margin:0 auto;padding:28px 16px 64px}
-h1{font-size:30px;line-height:1.15;margin:6px 0 6px}h2{font-size:19px;margin:28px 0 10px}
-.sub{color:var(--muted);margin:0 0 22px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:8px}
-.card h3{margin:0;font-size:16px}.card h3 b{color:var(--blue)}.card p{margin:0;color:var(--muted);font-size:14px;flex:1}
-button{font:inherit;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:8px 14px;cursor:pointer}
-button.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
-button.primary:hover{background:var(--blue2)}button:disabled{opacity:.45;cursor:default}
-button.link{background:none;border:none;color:var(--blue);padding:0}
-.soon{font-size:12px;color:var(--muted)}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:12px 0}
-.bar{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;margin:10px 0}
-.bar i{display:block;height:100%;width:0;background:var(--blue);transition:width .3s}
-.bar.indef i{width:30%;animation:slide 1.2s infinite ease-in-out}
-@keyframes slide{0%{margin-left:-30%}100%{margin-left:100%}}
-.log{color:var(--muted);font-size:12.5px;white-space:pre-wrap;max-height:130px;overflow:auto}
-.big{font-size:34px;font-weight:700}.muted{color:var(--muted)}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:500;font-size:12.5px}th.num{text-align:right}td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-td .path{color:var(--muted);font-size:12px;word-break:break-all}
-.note{border-left:3px solid var(--warn);background:var(--panel);padding:10px 14px;border-radius:4px;margin:10px 0}
-.note.bad{border-color:var(--bad)}.note ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px;word-break:break-all}
-.err{color:var(--bad)}.okc{color:var(--ok)}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.back{margin-bottom:6px}
-@media (max-width:600px){h1{font-size:24px}.big{font-size:28px}}
-</style></head>
-<body>
-<header><span class="logo mono"><b>_</b>freighter</span><span class="ver">{{version}} · preview</span><span class="sp"></span>
-<button id="quit" title="Stop Freighter">Quit</button></header>
-<main id="view"></main>
-<script>
-"use strict";
-const TOKEN = new URLSearchParams(location.search).get("t") || "";
-const $view = document.getElementById("view");
-
-function el(tag, attrs, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (k === "onclick") e.addEventListener("click", v);
-    else if (k === "class") e.className = v;
-    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
-  }
-  for (const k of kids.flat()) if (k != null && k !== false) e.append(k instanceof Node ? k : String(k));
-  return e;
-}
-function plural(n, one, many) { return `${Number(n).toLocaleString()} ${n === 1 ? one : (many || one + "s")}`; }
-function size(n) {
-  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; n = Number(n) || 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return (i ? n.toFixed(1) : n.toFixed(0)) + " " + u[i];
-}
-async function api(path, body) {
-  const r = await fetch(path, {method: body ? "POST" : "GET", cache: "no-store",
-    headers: {"X-Freighter-Token": TOKEN, "Content-Type": "application/json"},
-    body: body ? JSON.stringify(body) : undefined});
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || ("Error " + r.status));
-  return data;
-}
-setInterval(() => api("/api/ping").catch(() => {}), 5000);
-document.getElementById("quit").onclick = async () => {
-  await api("/api/quit", {}).catch(() => {});
-  document.body.replaceChildren(el("main", {}, el("h1", {}, "Freighter has stopped."),
-    el("p", {class: "sub"}, "You can close this tab.")));
-};
-
-function show(...kids) { $view.replaceChildren(...kids); window.scrollTo(0, 0); }
-function backButton() { return el("button", {class: "link back", onclick: home}, "← Back"); }
-
-/* Runs a job, shows its progress, and calls render(result) when it's done. */
-async function runJob(kind, title, intro, render) {
-  const bar = el("div", {class: "bar indef"}, el("i"));
-  const label = el("div", {class: "muted"}, "Starting…");
-  const log = el("div", {class: "log mono"});
-  const cancel = el("button", {}, "Cancel");
-  const box = el("div", {class: "panel"}, label, bar, log, el("div", {class: "row"}, cancel));
-  show(backButton(), el("h1", {}, title), el("p", {class: "sub"}, intro), box);
-  let id;
-  try { id = (await api("/api/jobs", {kind})).id; }
-  catch (e) { label.replaceChildren(el("span", {class: "err"}, e.message)); cancel.remove(); return; }
-  cancel.onclick = () => { cancel.disabled = true; cancel.textContent = "Stopping…"; api(`/api/jobs/${id}/cancel`, {}); };
-  while (true) {
-    await new Promise(r => setTimeout(r, 400));
-    let j;
-    try { j = await api(`/api/jobs/${id}`); } catch (e) { label.textContent = "Lost contact with Freighter. Is its window still open?"; return; }
-    if (j.progress) {
-      const p = j.progress, pct = p.total ? Math.min(100, 100 * p.done / p.total) : 0;
-      bar.classList.toggle("indef", !p.total);
-      bar.firstChild.style.width = pct.toFixed(1) + "%";
-      label.textContent = p.label.startsWith("Measuring") ? p.label + "…" : `${p.label}: ${pct.toFixed(0)}%`;
-    } else if (j.log.length) label.textContent = j.log[j.log.length - 1];
-    log.textContent = j.log.join("\n");
-    if (j.state === "running") continue;
-    if (j.state === "done") return render(j.result, id);
-    box.replaceChildren(el("p", {class: j.state === "cancelled" ? "muted" : "err"},
-      j.state === "cancelled" ? "Stopped. Nothing was changed." : j.error || "Something went wrong."),
-      j.crash ? el("p", {class: "muted"}, "Details were saved in " + j.crash + ". Please send that file with a bug report.") : null,
-      el("div", {class: "row"}, el("button", {onclick: () => runJob(kind, title, intro, render)}, "Try again")));
-    return;
-  }
-}
-
-function home() {
-  const card = (name, text, action) => el("div", {class: "card"},
-    el("h3", {}, el("b", {}, "_"), name), el("p", {}, text), action);
-  const soon = (cmd) => el("div", {class: "soon"}, "Coming to this window soon. For now: ", el("span", {class: "mono"}, cmd));
-  show(
-    el("h1", {}, "Move your studio to a new computer."),
-    el("p", {class: "sub"}, "Projects, presets and every sample your projects use. Freighter only reads your files here, and nothing leaves your computer."),
-    el("div", {class: "cards"},
-      card("old computer", "See what a move would take: your FL Studio and Ableton folders, projects, and every sample folder they use.",
-        el("div", {class: "row"}, el("button", {class: "primary", onclick: moveList}, "See what would move"))),
-      card("new computer", "Unpack a bundle from the drive, put everything where your DAW expects it, and repair projects.",
-        soon("freighter menu → 5 and 6")),
-      card("manifest", "Scan this computer's plugins: what's installed, by which maker, and anything that looks wrong.",
-        el("div", {class: "row"}, el("button", {class: "primary", onclick: plugins}, "Scan my plugins"))),
-      card("crate", "Sort drum kits and sample packs into one library by genre, pack and sound type.",
-        soon("freighter menu → 8"))
-    )
-  );
-}
-
-function moveList() {
-  runJob("move_list", "What a move would take", "Looking through your music folders and every project for the files they use…", (r) => {
-    const rows = r.items.map(it => el("tr", {},
-      el("td", {}, it.label, el("div", {class: "path mono"}, it.path)),
-      el("td", {class: "num"}, it.files.toLocaleString()),
-      el("td", {class: "num"}, size(it.bytes))));
-    const notes = [];
-    if (r.missing_count) notes.push(el("div", {class: "note bad"},
-      el("b", {}, `${plural(r.missing_count, "sample")} used by ${plural(r.missing_projects, "project")} ${r.missing_count === 1 ? "is" : "are"} already missing on this computer`),
-      el("div", {class: "muted"}, "They can't be moved. If they're on a drive that isn't plugged in, plug it in and look again."),
-      el("ul", {}, r.missing.slice(0, 30).map(m => el("li", {class: "mono"}, m))),
-      r.missing_count > 30 ? el("div", {class: "muted"}, `… and ${r.missing_count - 30} more`) : null));
-    if (r.cloud.files) notes.push(el("div", {class: "note"},
-      el("b", {}, `${plural(r.cloud.files, "file")} (${size(r.cloud.bytes)}) only ${r.cloud.files === 1 ? "lives" : "live"} in OneDrive's cloud`),
-      el("div", {class: "muted"}, "Packing downloads them first, so stay online. To speed it up, right-click the folder in File Explorer and choose \"Always keep on this device\".")));
-    if (r.installed) notes.push(el("div", {class: "note"},
-      el("b", {}, `${plural(r.installed, "sample")} ${r.installed === 1 ? "comes" : "come"} with installed programs or plugins`),
-      el("div", {class: "muted"}, "For example Ableton's Core Library or FL Studio's own sounds. They aren't moved: installing those programs on the new computer brings them back.")));
-    if (r.left_behind) notes.push(el("div", {class: "note"},
-      el("b", {}, `${plural(r.left_behind, "program or installer", "programs or installers")} will be left behind`),
-      el("div", {class: "muted"}, "Reinstall software from its maker. Installers tucked into sample folders are a common way malware spreads.")));
-    show(backButton(), el("h1", {}, "What a move would take"),
-      el("div", {class: "panel row"}, el("div", {}, el("div", {class: "big"}, size(r.total)),
-        el("div", {class: "muted"}, `${plural(r.items.length, "folder")} to move. Your drive needs at least this much free space.`))),
-      ...notes,
-      el("h2", {}, "What would move"),
-      el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "What"), el("th", {class: "num"}, "Files"), el("th", {class: "num"}, "Size"))),
-        el("tbody", {}, rows)),
-      el("p", {class: "muted"}, "Packing onto a drive is coming to this window next. For now use ",
-        el("span", {class: "mono"}, "freighter menu"), ", option 4."));
-  });
-}
-
-function plugins() {
-  runJob("plugins", "Your plugins", "Reading plugin information files. Plugins are never loaded or run.", (r, id) => {
-    const makers = r.makers.map(([m, n]) => el("tr", {}, el("td", {}, m), el("td", {class: "num"}, n)));
-    const flagged = r.flagged.map(f => el("tr", {}, el("td", {}, f.name, el("div", {class: "path"}, `${f.vendor} · ${f.format}`)),
-      el("td", {}, f.flags.split(" | ").map(x => el("div", {}, x)))));
-    show(backButton(), el("h1", {}, "Your plugins"),
-      el("div", {class: "panel row"},
-        el("div", {style: "flex:1"}, el("div", {class: "big"}, r.plugins.toLocaleString()),
-          el("div", {class: "muted"}, `${r.plugins === 1 ? "plugin" : "plugins"} from ${plural(r.maker_count, "maker")} (${plural(r.count, "file")} across formats)`)),
-        el("button", {class: "primary", onclick: () => api(`/api/jobs/${id}/open`, {file: "report"})}, "Open the full report")),
-      r.flagged.length ? el("div", {class: "note bad"}, el("b", {}, `${plural(r.flagged.length, "plugin")} ${r.flagged.length === 1 ? "needs" : "need"} a look`),
-        el("div", {class: "muted"}, "Broken signatures, old 32-bit or Intel-only versions, or duplicates. Details are in the full report.")) :
-        el("div", {class: "note"}, el("b", {class: "okc"}, "Nothing looks wrong.")),
-      r.flagged.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Plugin"), el("th", {}, "What's wrong"))), el("tbody", {}, flagged)) : null,
-      el("h2", {}, "By maker"),
-      el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Maker"), el("th", {class: "num"}, "Plugins"))), el("tbody", {}, makers)));
-  });
-}
-
-home();
-</script>
-</body></html>
-"""
+from app_page import LOCKED_PAGE, PAGE  # noqa: E402  (its own file: it's long)
 
 
 if __name__ == "__main__":

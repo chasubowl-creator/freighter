@@ -206,6 +206,54 @@ class Server(unittest.TestCase):
         self.request("GET", f"/?t={self.app.token}", token=False)
         self.assertIsNotNone(self.app.last_seen)
 
+    # ---- the old- and new-computer screens (issues #27, #28)
+
+    def test_job_options_are_checked(self):
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "pack", "to": str(self.tmp / "nope")})[0], 400)
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "pack", "to": str(self.tmp), "skip": "x"})[0], 400)
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "unpack", "bundle": str(self.tmp)})[0], 400,
+                         "a folder without manifest.json isn't a bundle")
+
+    def test_pack_then_unpack_and_repair_through_the_app(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_freighter import make_flp
+        old, new, drive = self.tmp / "old", self.tmp / "new", self.tmp / "drive"
+        kick = old / "Desktop" / "Kits" / "kick.wav"
+        kick.parent.mkdir(parents=True)
+        kick.write_bytes(b"kick" * 100)
+        (old / "Desktop" / "Kits" / "unused.wav").write_bytes(b"u" * 50)
+        make_flp(old / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp", [str(kick)])
+        drive.mkdir()
+        with as_home(old):
+            status, started = self.request("POST", "/api/jobs", {"kind": "pack", "to": str(drive), "skip": []})
+            self.assertEqual(status, 200)
+            packed = self.wait(started["id"])
+        self.assertEqual(packed["state"], "done", packed.get("error"))
+        self.assertEqual(packed["result"]["errors"], 0)
+        self.assertTrue(Path(packed["result"]["bundle"]).is_dir())
+        status, f = self.request("POST", "/api/folder", {"path": str(drive)})
+        self.assertEqual([b["path"] for b in f["bundles"]], [packed["result"]["bundle"]], "the bundle is found")
+        self.assertEqual(f["bundles"][0]["problems"], [])
+        shutil.rmtree(old)                      # the old computer is gone
+        new.mkdir()
+        with as_home(new), mock.patch.object(rm, "fl_is_running", lambda: False):
+            status, started = self.request("POST", "/api/jobs", {"kind": "unpack", "bundle": packed["result"]["bundle"]})
+            self.assertEqual(status, 200)
+            done = self.wait(started["id"])
+        self.assertEqual(done["state"], "done", done.get("error"))
+        u, rep = done["result"]["unpack"], done["result"]["repair"]
+        self.assertEqual(u["problems"], [])
+        self.assertEqual(rep["repaired"], 1)
+        self.assertEqual(rep["samples_fixed"], 1)
+        beat = new / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp"
+        self.assertEqual(Path(rm.flp_samples(beat)[1][0]).read_bytes(), b"kick" * 100)
+
+    def test_drives_are_listed(self):
+        status, d = self.request("GET", "/api/drives")
+        self.assertEqual(status, 200)
+        self.assertTrue(d["drives"], "at least this computer's own disk")
+        self.assertTrue(all({"name", "path", "free", "total", "bundles"} <= set(x) for x in d["drives"]))
+
     def test_quit_stops(self):
         self.assertEqual(self.request("POST", "/api/quit", {})[0], 200)
         self.assertTrue(self.app.stopped.is_set())

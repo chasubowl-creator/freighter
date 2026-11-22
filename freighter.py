@@ -417,6 +417,9 @@ def walk_files(root, left_behind=None):
             yield rel, ap, st.st_size
 
 
+# What the last pack / unpack did, for the app to show (one job runs at a time).
+LAST = {}
+
 # The app watches long jobs through this: set PROGRESS.listener(label, done, total) on the job's thread.
 # A listener may raise Cancelled to stop the job; an interrupted pack resumes where it stopped.
 PROGRESS = threading.local()
@@ -991,6 +994,9 @@ def cmd_pack(args):
         "items": {it["id"]: {"files": it["files"], "packed": len(read_jsonl(bundle / "index" / f"{it['id']}.jsonl"))}
                   for it in items},
     }, indent=1), encoding="utf-8")
+    LAST["pack"] = {"bundle": str(bundle), "items": len(items), "files": sum(it["files"] for it in items),
+                    "bytes": total, "errors": len(errors), "left_behind": len(left_behind or []),
+                    "missing": len(missing_lines(missing))}
     print("Next, on the new computer:  " + tool_cmd("freighter", f"unpack \"{bundle}\""))
     return 0
 
@@ -1111,6 +1117,10 @@ def landing_folders(items, landing, previous, fold_case):
     return out
 
 
+def old_search_paths(manifest):
+    return manifest.get("fl_search_paths") or []
+
+
 def same_place(manifest, src, rehearsal_root=None):
     """Where an item goes back to on a same-OS move: the same place it came from (issue #67). Folders inside the
     old home folder go to the same spot in this one, following Desktop, Documents and Music to wherever they are
@@ -1150,6 +1160,77 @@ def same_place(manifest, src, rehearsal_root=None):
     if rehearsal_root is not None:
         return Path(rehearsal_root, "Other drives", safe_rel(label), *rest)
     return p if anchor is not None and anchor.exists() else None
+
+
+def bundle_summary(path):
+    """What the app shows about a bundle on a drive: whose, when, how big, whether it's finished."""
+    path = Path(path)
+    try:
+        manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        problems = bundle_problems(path, manifest)
+    except (OSError, ValueError, KeyError):
+        problems = ["This bundle couldn't be checked."]
+    return {"path": str(path), "host": manifest.get("source_host", "?"), "os": manifest.get("source_os", "?"),
+            "created": manifest.get("created", ""), "items": len(manifest.get("items", [])),
+            "bytes": sum(it.get("bytes", 0) or 0 for it in manifest.get("items", [])),
+            "same_os": manifest.get("source_os") == THIS_OS, "problems": problems,
+            "version": manifest.get("freighter_version", "")}
+
+
+def find_bundles(folder, depth=1):
+    """Freighter bundles in a folder and (depth) the folders inside it."""
+    out, folder = [], Path(folder)
+    try:
+        children = sorted(folder.iterdir())
+    except OSError:
+        return out
+    for child in children:
+        if child.name.startswith("Freighter-") and (child / "manifest.json").is_file():
+            out.append(child)
+        elif depth and child.is_dir() and not child.name.startswith(".") and not skip_dir(str(folder), child.name):
+            out += find_bundles(child, depth - 1)
+    return out
+
+
+def list_drives():
+    """Drives and volumes to pack onto or unpack from: [{name, path, free, total, fs, removable, bundles}]."""
+    found = []
+    if rs.IS_WIN:
+        import ctypes
+        import string
+        k32 = ctypes.windll.kernel32
+        for letter in string.ascii_uppercase:
+            root = f"{letter}:\\"
+            kind = k32.GetDriveTypeW(root)
+            if kind not in (2, 3, 4):          # removable, fixed, network (not CD drives or empty letters)
+                continue
+            label = ctypes.create_unicode_buffer(256)
+            k32.GetVolumeInformationW(root, label, 256, None, None, None, None, 0)
+            found.append((f"{label.value or 'Local Disk'} ({letter}:)", Path(root), kind == 2))
+    else:
+        vols = Path("/Volumes")
+        for v in sorted(vols.iterdir()) if vols.is_dir() else []:
+            try:
+                if v.is_symlink() and v.resolve() == Path("/"):
+                    continue                     # the Mac's own disk, listed below as "This Mac"
+            except OSError:
+                continue
+            if v.is_dir():
+                found.append((v.name, v, True))
+        found.append(("This Mac (your user folder)", real_home(), False))
+    out = []
+    for name, path, removable in found:
+        try:
+            du = shutil.disk_usage(path)
+        except OSError:
+            continue
+        out.append({"name": name, "path": str(path), "free": du.free, "total": du.total, "fs": filesystem(path),
+                    "removable": removable,
+                    "bundles": [b for b in (bundle_summary(x) for x in find_bundles(path)) if b]})
+    return out
 
 
 def cmd_unpack(args):
@@ -1277,13 +1358,21 @@ def cmd_unpack(args):
 
     for note in notes:
         print(f"From the old computer: {note}")
-    old_search = manifest.get("fl_search_paths") or []
+    old_search = old_search_paths(manifest)
     if old_search:
         print("\nFL Studio's browser folders on the old computer are now here. FL keeps its settings per computer, so")
         print("add them in FL Studio under Options > File settings > Browser extra search folders:")
         for sp in old_search:
             status, where = locate(sp, [pathmap])
             print(f"  {where if status != 'missing' else sp}")
+    LAST["unpack"] = {
+        "source_host": src_host, "source_os": manifest["source_os"], "landing": str(landing),
+        "report": str(landing / "unpack-report.txt"), "problems": problems, "notes": notes,
+        "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place,
+        "entries": [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries
+                    if e.get("id") in {it["id"] for it in manifest["items"]}],
+        "fl_search": [str(locate(sp, [pathmap])[1] or sp) for sp in old_search_paths(manifest)],
+    }
     if problems or bad:
         print(f"\nUnpacked, with problems: see {landing / 'unpack-report.txt'}. Path map: {pm_path}")
     else:
@@ -1525,6 +1614,43 @@ def fix_als(path, maps, dry_run=False):
         data = new_text.encode("utf-8")
         write_replace(Path(path), gzip.compress(data) if gz else data)
     return result
+
+
+def repair_projects(dry_run=False):
+    """Repoint every Ableton and FL project on this computer at its moved samples. Returns a summary."""
+    maps = load_pathmaps(None)
+    roots = project_search_roots(maps, [])
+    fl_open = fl_is_running()
+    out = {"projects": 0, "repaired": 0, "samples_fixed": 0, "in_place": 0, "missing": [], "old_format": [],
+           "damaged": [], "unreadable": [], "fl_open": fl_open}
+    for p in find_projects(roots, ".als"):
+        try:
+            r = fix_als(p, maps, dry_run)
+        except Exception:
+            out["unreadable"].append(str(p))
+            continue
+        out["projects"] += 1
+        if r["old_format"]:
+            out["old_format"].append(str(p))
+            continue
+        out["repaired"] += bool(r["fixed"])
+        out["samples_fixed"] += r["fixed"]
+        out["in_place"] += r["ok"]
+        out["missing"] += [f"{p.name}: {m}" for m in r["missing"]]
+    for p in find_projects(roots, ".flp"):
+        try:
+            r = fix_flp(p, maps, dry_run=dry_run or fl_open)
+        except (ValueError, OSError, struct.error):
+            out["unreadable"].append(str(p))
+            continue
+        out["projects"] += 1
+        out["repaired"] += bool(r["fixed"]) and not (dry_run or fl_open)
+        out["samples_fixed"] += r["fixed"]
+        out["in_place"] += r["ok"]
+        out["missing"] += [f"{p.name}: {m}" for m in r["missing"]]
+        if r["damaged"]:
+            out["damaged"].append(str(p))
+    return out
 
 
 def cmd_fix_ableton(args):
@@ -2244,6 +2370,7 @@ MENU = """
   Tidy up
     8  Sort my sample folders into one library (_Crate)
 
+    9  Open the Freighter app in your web browser (new)
     q  Quit
 """
 
@@ -2286,7 +2413,7 @@ def interactive_menu():
     while True:
         print(MENU.format(version=__version__))
         try:
-            choice = input("  Choose 1-8 (or q): ").strip().lower()
+            choice = input("  Choose 1-9 (or q): ").strip().lower()
         except EOFError:   # nothing more to read (input closed): same as quitting
             return 0
         try:
@@ -2336,10 +2463,13 @@ def interactive_menu():
                         if input(f"  The preview is open. Build the library in {lib}? (y/n): ").strip().lower().startswith("y"):
                             made, links, copies, skipped = crate.build(items, lib, False)
                             print(f"  {made} files added to {lib} ({skipped} duplicates skipped). Originals untouched.")
+            elif choice == "9":
+                import app
+                app.run()
             elif choice in ("q", "quit", "exit", ""):
                 return 0
             else:
-                print("  Type a number from 1 to 8, or q to quit.")
+                print("  Type a number from 1 to 9, or q to quit.")
                 continue
         except SystemExit as e:  # commands exit with a message on problems; show it and keep the menu
             if e.code not in (None, 0):

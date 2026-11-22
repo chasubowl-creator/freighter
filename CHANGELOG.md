@@ -48,8 +48,14 @@ The first version with a number. Everything that exists so far:
 - FL Studio's browser folders, user-data folder and recent projects are read and moved on purpose.
 - `freighter plugins` (menu option 7) shows which plugins your projects need and which to install first.
 
-### Preview: Freighter in your web browser
-- `freighter app` opens a private local page with the move list and the plugin scan. More screens are coming.
+### Freighter in your web browser (milestone M3, in progress)
+- `freighter app` (or menu option 9) opens a private local page that runs a whole move:
+  - **Old computer:** see what would move and untick what you don't want, pick a drive (with warnings for FAT32,
+    read-only drives and not enough room), pack with progress and cancel, then a license-deactivation checklist.
+  - **New computer:** pick a bundle found on your drives, choose "back where they were" on a same-OS move, unpack and
+    repair in one go, then see where everything went and which FL browser folders to add back.
+  - **Plugins:** which plugins your projects need, most useful first, with each maker's website; tick them off and
+    check again.
 
 ### Known problems
 The fixes planned before the public beta are listed in the
