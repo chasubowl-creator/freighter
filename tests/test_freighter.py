@@ -1168,6 +1168,71 @@ class FullMove(TempDirCase):
         self.assertTrue(list(new.rglob("already-missing.txt")))
         self.assertIn("Done. Every file is in place", out.getvalue())
 
+    # ---- issue #73: preview, undo and top-ups
+
+    def unpack(self, bundle, new, **kw):
+        with as_home(new), quiet(), mock.patch.object(rm, "fl_is_running", lambda: False):
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[], **kw))
+            if not kw.get("preview"):
+                rm.cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
+
+    def test_preview_changes_nothing(self):
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        new.mkdir()
+        self.unpack(bundle, new, preview=True)
+        self.assertEqual(list(new.iterdir()), [], "a preview creates nothing")
+        dests = [Path(x["dest"]) for x in rm.LAST["unpack_preview"]]
+        self.assertIn(new / "Desktop" / "DrumKits", dests)
+
+    def test_undo_removes_what_unpack_made_and_keeps_your_changes(self):
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        mine = write(new / "Desktop" / "my notes.txt", b"mine")                  # already on the new computer
+        # a project already on the new computer that uses the old computer's snare path: repair rewrites it
+        own = make_flp(new / "Documents" / "Old Beats" / "Old Beat.flp", [str(self.snare)])
+        own_before = own.read_bytes()
+        shutil.rmtree(old)
+        self.unpack(bundle, new)
+        kick = next((new / "Desktop" / "DrumKits" / "Kicks").iterdir())
+        edited = new / "Desktop" / "DrumKits" / "Snares" / "snare.wav"
+        edited.write_bytes(b"I changed this")                                   # the user's work now
+        self.assertNotEqual(own.read_bytes(), own_before, "repair rewrote the existing project")
+        with as_home(new):
+            r = rm.undo_unpack()
+        self.assertEqual(r["restored"], 1)
+        self.assertEqual(own.read_bytes(), own_before, "the project already here is back as it was")
+        self.assertFalse((own.parent / "Freighter backup").exists())
+        self.assertFalse(kick.exists(), "unpacked files are gone")
+        self.assertEqual(edited.read_bytes(), b"I changed this", "a file changed since the unpack is kept")
+        self.assertIn(str(edited), r["kept"])
+        self.assertEqual(mine.read_bytes(), b"mine", "files that were already here are untouched")
+        self.assertFalse((new / "Documents" / "Image-Line").exists(), "folders the unpack created are removed")
+        landing = new / "Music" / "Freighter" / json.loads((bundle / "manifest.json").read_text())["source_host"]
+        self.assertFalse(landing.exists(), "the unpack's own folder (path map, reports, journal) is gone")
+        self.assertFalse((new / "Music").exists(), "and so are the folders it made to hold it")
+
+    def test_a_top_up_replaces_untouched_files_and_keeps_edited_ones(self):
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        new.mkdir()
+        self.unpack(bundle, new)
+        kit = new / "Desktop" / "DrumKits"
+        snare_here = kit / "Snares" / "snare.wav"
+        kick_here = next((kit / "Kicks").iterdir())
+        kick_here.write_bytes(b"edited on the new computer")
+        self.snare.write_bytes(b"N" * 3000)                      # both changed on the old computer since
+        self.kick.write_bytes(b"M" * 4000)
+        later = self.snare.stat().st_mtime + 100
+        os.utime(self.snare, (later, later))
+        os.utime(self.kick, (later, later))
+        bundle = self.pack(old, drive)
+        self.unpack(bundle, new)
+        self.assertEqual(snare_here.read_bytes()[:1], b"N", "untouched: the newer one replaced it")
+        self.assertFalse(list(kit.rglob("snare (from *")), "no side copy for an untouched file")
+        self.assertEqual(kick_here.read_bytes(), b"edited on the new computer", "an edited file is kept")
+        self.assertTrue(list(kit.rglob("* (from *).wav")), "and the newer one is saved next to it")
+
     def test_unpack_detects_damage_and_keeps_existing_files(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
         bundle = self.pack(old, drive)

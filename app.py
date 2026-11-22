@@ -225,7 +225,17 @@ def clean_params(kind, body):
             return None, "That isn't a Freighter bundle (it has no manifest.json)."
         return {"bundle": str(Path(b).expanduser()), "keep_together": bool(body.get("keep_together")),
                 "anyway": bool(body.get("anyway"))}, None
+    if kind == "undo":
+        host = body.get("host")
+        if host is not None and (not isinstance(host, str) or "/" in host or "\\" in host or host in (".", "..")):
+            return None, "bad request"
+        return {"host": host}, None
     return {}, None
+
+
+def job_undo(job):
+    """Undo the unpack from one computer (or all): remove what it created, put repaired projects back."""
+    return rm.undo_unpack(job.params.get("host"))
 
 
 def job_repair(job):
@@ -235,7 +245,7 @@ def job_repair(job):
 
 
 JOBS = {"move_list": job_move_list, "plugins": job_plugins, "pack": job_pack, "unpack": job_unpack,
-        "readiness": job_readiness, "repair": job_repair}
+        "readiness": job_readiness, "repair": job_repair, "undo": job_undo}
 
 
 # --------------------------------------------------------------------------- server
@@ -373,6 +383,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                    "fs": rm.filesystem(folder),
                                    "bundles": [here] if here else [b for b in (rm.bundle_summary(x)
                                                                                for x in rm.find_bundles(folder)) if b]})
+        if path == "/api/unpack-preview":
+            # where everything would go, before anything is copied
+            params, problem = clean_params("unpack", body)
+            if problem:
+                return self.send(400, {"error": problem})
+            rm.LAST.pop("unpack_preview", None)
+            try:
+                rm.cmd_unpack(argparse.Namespace(bundle=params["bundle"], dest_for=[], preview=True,
+                                                 keep_together=params["keep_together"]))
+            except SystemExit as e:
+                return self.send(400, {"error": str(e.code)})
+            return self.send(200, {"plan": rm.LAST.get("unpack_preview", [])})
         if path == "/api/quit":
             self.app.stopped.set()   # before answering, so whoever sees the answer sees Freighter stopping
             return self.send(200, {"ok": True})

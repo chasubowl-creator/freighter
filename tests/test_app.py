@@ -247,6 +247,15 @@ class Server(unittest.TestCase):
         self.assertEqual(rep["samples_fixed"], 1)
         beat = new / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp"
         self.assertEqual(Path(rm.flp_samples(beat)[1][0]).read_bytes(), b"kick" * 100)
+        # and the whole unpack can be undone from the app (issue #73)
+        status, p = self.request("POST", "/api/unpack-preview", {"bundle": packed["result"]["bundle"]})
+        self.assertEqual(status, 200)
+        with as_home(new):
+            status, started = self.request("POST", "/api/jobs", {"kind": "undo", "host": u["source_host"]})
+            undone = self.wait(started["id"])
+        self.assertEqual(undone["state"], "done", undone.get("error"))
+        self.assertFalse(beat.exists())
+        self.assertFalse((new / "Desktop" / "Kits").exists())
 
     def test_drives_are_listed(self):
         status, d = self.request("GET", "/api/drives")

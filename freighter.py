@@ -1117,6 +1117,132 @@ def landing_folders(items, landing, previous, fold_case):
     return out
 
 
+UNPACK_JOURNAL = "unpack-journal.jsonl"
+REPAIR_JOURNAL = "repair-journal.jsonl"
+
+
+def read_journal(path):
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    pass     # a line cut off by an interruption
+    except OSError:
+        pass
+    return out
+
+
+def missing_folders(folder):
+    """The folders that don't exist yet on the way to `folder`, outermost first (they're about to be created)."""
+    out, f = [], Path(folder)
+    while not os.path.exists(long_path(f)) and f.parent != f:
+        out.append(f)
+        f = f.parent
+    return list(reversed(out))
+
+
+def journal_repair(project, backup, made_backup):
+    """Record a project a repair rewrote, so undo can put the original back if nobody changed it since."""
+    j = home() / "Music" / "Freighter" / REPAIR_JOURNAL
+    j.parent.mkdir(parents=True, exist_ok=True)
+    with open(j, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"project": str(project), "sha256": hash_file(project), "backup": str(backup),
+                            "made_backup": made_backup}) + "\n")
+
+
+def undo_unpack(host=None):
+    """Undo unpacks (all, or the one from `host`): remove what they created and put repaired projects back.
+    Anything changed since is kept and listed. Returns a summary."""
+    base = home() / "Music" / "Freighter"
+    landings = [d for d in sorted(base.iterdir()) if d.is_dir() and (d / UNPACK_JOURNAL).is_file()] \
+        if base.is_dir() else []
+    if host:
+        landings = [d for d in landings if d.name == host]
+    fold = THIS_OS == "windows"
+    repairs = {norm(e["project"], fold): e for e in read_journal(base / REPAIR_JOURNAL)}
+    done_repairs, made_dirs = set(), []
+    out = {"hosts": [d.name for d in landings], "removed": 0, "restored": 0, "kept": []}
+
+    def current(p):
+        try:
+            return hash_file(p)
+        except OSError:
+            return None
+
+    for landing in landings:
+        entries = read_journal(landing / UNPACK_JOURNAL)
+        for e in reversed([e for e in entries if e.get("kind") == "file"]):
+            p, key = Path(e["path"]), norm(e["path"], fold)
+            if not os.path.exists(long_path(p)):
+                continue
+            now, rep = current(p), repairs.get(key)
+            if now == e["sha256"] or (rep and now == rep["sha256"]):
+                os.remove(long_path(p))
+                out["removed"] += 1
+                if rep:
+                    done_repairs.add(key)
+            else:
+                out["kept"].append(str(p))   # changed since the unpack: it's someone's work now
+        for name in (UNPACK_JOURNAL, "pathmap.json", "unpack-report.txt", "pack-errors.txt", "already-missing.txt",
+                     "left-behind.txt"):
+            (landing / name).unlink(missing_ok=True)
+        for f in landing.glob("plugins-*.csv"):
+            f.unlink()
+        made_dirs += [e["path"] for e in entries if e.get("kind") == "dir"] + [str(landing)]
+    # projects a repair rewrote that the unpack didn't create (they were already here): put the original back
+    for key, rep in repairs.items():
+        if key in done_repairs:
+            if rep.get("made_backup"):
+                Path(rep["backup"]).unlink(missing_ok=True)
+            continue
+        p, b = Path(rep["project"]), Path(rep["backup"])
+        if p.is_file() and b.is_file() and current(p) == rep["sha256"]:
+            shutil.copy2(b, p)
+            if rep.get("made_backup"):
+                b.unlink()
+            out["restored"] += 1
+            done_repairs.add(key)
+        elif p.is_file():
+            out["kept"].append(str(p))
+    for key in done_repairs:
+        try:
+            Path(repairs[key]["backup"]).parent.rmdir()   # the Freighter backup folder, if now empty
+        except OSError:
+            pass
+    left = [e for k, e in repairs.items() if k not in done_repairs]
+    if not left:   # the repair reports describe what was just undone
+        for name in ("fl-repair-report.txt", "ableton-fix-report.txt", "fl-check-report.txt"):
+            (base / name).unlink(missing_ok=True)
+    if left:
+        (base / REPAIR_JOURNAL).write_text("".join(json.dumps(e) + "\n" for e in left), encoding="utf-8")
+    else:
+        (base / REPAIR_JOURNAL).unlink(missing_ok=True)
+    # last, the folders the unpacks created, deepest first, each only if it's empty now
+    for d in sorted(set(made_dirs), key=len, reverse=True):
+        try:
+            os.rmdir(long_path(d))
+        except OSError:
+            pass
+    return out
+
+
+def cmd_undo_unpack(args):
+    r = undo_unpack(args.source)
+    if not r["hosts"]:
+        print("Nothing to undo: no unpack journal found in Music/Freighter.")
+        return 0
+    print(f"Undid the unpack from {', '.join(r['hosts'])}: removed {r['removed']} files and put back "
+          f"{r['restored']} repaired projects.")
+    if r["kept"]:
+        print(f"Kept {len(r['kept'])} files that changed since (they're your work now):")
+        for k in r["kept"][:20]:
+            print(f"  {k}")
+    return 0
+
+
 def old_search_paths(manifest):
     return manifest.get("fl_search_paths") or []
 
@@ -1243,14 +1369,13 @@ def cmd_unpack(args):
         sys.exit(f"This bundle was made by a newer Freighter ({manifest.get('freighter_version', 'unknown version')}) "
                  f"than this one ({__version__}). Update Freighter on this computer, then unpack again.")
     problems = bundle_problems(bundle, manifest)
-    if problems and not getattr(args, "anyway", False):
+    if problems and not getattr(args, "anyway", False) and not getattr(args, "preview", False):
         sys.exit("This bundle isn't complete, so nothing was unpacked:\n" + "\n".join(f"  - {p}" for p in problems)
                  + "\nOn the old computer, pack onto the drive again: it picks up where it stopped.\n"
                  "If the old computer is gone, unpack what's there with --anyway (or answer y in the menu).")
     src_host = manifest["source_host"]
     dest_known = known_roots(THIS_OS, home())
     landing = moved_root(src_host)
-    landing.mkdir(parents=True, exist_ok=True)
 
     previous = previous_entries(landing)
     moved = [it for it in manifest["items"] if not (it["kind"] == "known" and it["id"] in dest_known)]
@@ -1286,9 +1411,24 @@ def cmd_unpack(args):
             f"  {where}: needs {rs.human_size(need)}, has {rs.human_size(free)} free" for where, need, free in short)
             + "\nFree up space, or send big items elsewhere with --dest-for ID=FOLDER.")
 
+    if getattr(args, "preview", False):
+        LAST["unpack_preview"] = [{"label": it["label"], "files": len(idx), "bytes": sum(r["size"] for r in idx.values()),
+                                   "dest": str(dest), "known": it["kind"] == "known" and it["id"] in dest_known}
+                                  for it, dest, idx in plan]
+        return 0
+    new_landing = missing_folders(landing)
+    landing.mkdir(parents=True, exist_ok=True)
+    # The journal: every file and folder this unpack creates, so it can be undone exactly (issue #73), and so a
+    # later top-up can tell a file an earlier unpack put there (and nobody changed since) from the user's own.
+    journal_path = landing / UNPACK_JOURNAL
+    earlier = {norm(e["path"], THIS_OS == "windows"): e["sha256"] for e in read_journal(journal_path)
+               if e.get("kind") == "file"}
+    journal = open(journal_path, "a", encoding="utf-8")
+    for d in new_landing:       # e.g. Music/Freighter itself, on a computer that never had it
+        journal.write(json.dumps({"kind": "dir", "path": str(d)}) + "\n")
     prog = Progress(total, "Copying")
     prog.add(0)
-    conflicts, bad, entries = [], [], []
+    conflicts, bad, entries, replaced = [], [], [], 0
     for it, dest, idx in plan:
         data_root = bundle / "data" / it["id"]
         for rel, rec in idx.items():
@@ -1299,16 +1439,23 @@ def cmd_unpack(args):
                 if file_size(dst) == rec["size"] and hash_file(dst) == rec["sha256"]:
                     prog.add(rec["size"])
                     continue  # already there, identical
-                dst = dst.with_name(f"{dst.stem} (from {src_host}){dst.suffix}")
-                if file_size(dst) == rec["size"]:
-                    prog.add(rec["size"])
-                    continue
-                conflicts.append(str(dst))
+                if earlier.get(norm(str(dst), THIS_OS == "windows")) == hash_file(dst):
+                    replaced += 1   # an earlier unpack put it there and nobody changed it since: the newer one wins
+                else:
+                    dst = dst.with_name(f"{dst.stem} (from {src_host}){dst.suffix}")
+                    if file_size(dst) == rec["size"]:
+                        prog.add(rec["size"])
+                        continue
+                    conflicts.append(str(dst))
+            for d in missing_folders(dst.parent):
+                journal.write(json.dumps({"kind": "dir", "path": str(d)}) + "\n")
             try:
                 digest = copy_and_hash(src, dst)
             except OSError as e:
                 bad.append(f"{src}: {e}")
                 continue
+            journal.write(json.dumps({"kind": "file", "path": str(dst), "sha256": digest}) + "\n")
+            journal.flush()
             if digest != rec["sha256"]:
                 bad.append(f"{dst}: checksum mismatch (the copy on the drive may be damaged)")
             prog.add(rec["size"])
@@ -1316,7 +1463,7 @@ def cmd_unpack(args):
         if THIS_OS == "windows":
             # files unpacked under a different name (Windows can't hold the original, or two names clashed):
             # repair must find them by this record, never by guessing (issue #63)
-            renamed = {rec["rel"]: rec["stored"] for rec in index.values() if rec["stored"] != rec["rel"]}
+            renamed = {rec["rel"]: rec["stored"] for rec in idx.values() if rec["stored"] != rec["rel"]}
             if renamed:
                 entry["renamed"] = renamed
         entries.append(entry)
@@ -1356,6 +1503,7 @@ def cmd_unpack(args):
         lines += ["", "Problems:"] + bad
     (landing / "unpack-report.txt").write_text("\n".join(lines), encoding="utf-8")
 
+    journal.close()
     for note in notes:
         print(f"From the old computer: {note}")
     old_search = old_search_paths(manifest)
@@ -1368,7 +1516,7 @@ def cmd_unpack(args):
     LAST["unpack"] = {
         "source_host": src_host, "source_os": manifest["source_os"], "landing": str(landing),
         "report": str(landing / "unpack-report.txt"), "problems": problems, "notes": notes,
-        "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place,
+        "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place, "replaced": replaced,
         "entries": [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries
                     if e.get("id") in {it["id"] for it in manifest["items"]}],
         "fl_search": [str(locate(sp, [pathmap])[1] or sp) for sp in old_search_paths(manifest)],
@@ -1609,10 +1757,12 @@ def fix_als(path, maps, dry_run=False):
         backup_dir = proj_dir / "Freighter backup"
         backup_dir.mkdir(exist_ok=True)
         backup = backup_dir / Path(path).name
-        if not backup.exists():
+        made = not backup.exists()
+        if made:
             shutil.copy2(path, backup)
         data = new_text.encode("utf-8")
         write_replace(Path(path), gzip.compress(data) if gz else data)
+        journal_repair(path, backup, made)
     return result
 
 
@@ -1892,9 +2042,11 @@ def fix_flp(path, maps, dry_run=False):
     backup_dir = Path(path).parent / "Freighter backup"
     backup_dir.mkdir(exist_ok=True)
     backup = backup_dir / Path(path).name
-    if not backup.exists():
+    made = not backup.exists()
+    if made:
         shutil.copy2(path, backup)
     write_replace(Path(path), new_data)
+    journal_repair(path, backup, made)
     return result
 
 
@@ -2521,6 +2673,7 @@ def main():
     s.add_argument("bundle")
     s.add_argument("--anyway", action="store_true",
                    help="unpack what's there even if packing the bundle wasn't finished")
+    s.add_argument("--preview", action="store_true", help="only show where everything would go")
     s.add_argument("--keep-together", action="store_true",
                    help="put moved folders in Music/Freighter/<old computer> even on a same-OS move")
     s.add_argument("--dest-for", action="append", default=[], metavar="ID=FOLDER",
@@ -2539,6 +2692,10 @@ def main():
     s.add_argument("--include-backups", action="store_true", help="also repair autosave/backup projects")
     s.add_argument("--dry-run", action="store_true", help="report only, change nothing")
     s.set_defaults(fn=cmd_fix_fl)
+
+    s = sub.add_parser("undo-unpack", help="remove what unpacking created and put repaired projects back")
+    s.add_argument("--from", dest="source", metavar="COMPUTER", help="only the unpack from this computer")
+    s.set_defaults(fn=cmd_undo_unpack)
 
     s = sub.add_parser("plugins", help="which plugins your projects need, and which this computer is missing")
     s.add_argument("--folder", action="append", default=[], metavar="FOLDER", help="only look here")

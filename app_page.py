@@ -354,6 +354,15 @@ function bundleChoice(b) {
 
 function confirmUnpack(b) {
   let together = false, anyway = false;
+  const where = el("div", {}, el("p", {class: "muted"}, "Working out where everything goes…"));
+  const preview = async () => {
+    try {
+      const r = await api("/api/unpack-preview", {bundle: b.path, keep_together: together});
+      where.replaceChildren(el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "What"), el("th", {class: "num"}, "Size"), el("th", {}, "Goes to"))),
+        el("tbody", {}, r.plan.map(x => el("tr", {}, el("td", {}, x.label), el("td", {class: "num"}, size(x.bytes)),
+          el("td", {class: "mono path"}, x.dest))))));
+    } catch (e) { where.replaceChildren(el("p", {class: "err"}, e.message)); }
+  };
   const go = el("button", {class: "primary", disabled: !!b.problems.length, onclick: () => unpack(b, together, anyway)}, "Unpack and repair");
   const parts = [backTo(pickBundle), steps(NEW_STEPS, 0), el("h1", {}, `Unpack from ${b.host}`),
     el("div", {class: "muted mono small"}, b.path)];
@@ -364,14 +373,16 @@ function confirmUnpack(b) {
       " The old computer is gone: unpack what's there anyway")));
   if (b.same_os) parts.push(el("div", {class: "panel"},
     el("b", {}, "Where should the folders go?"),
-    el("label", {class: "radio"}, el("input", {type: "radio", name: "where", checked: true, onchange: () => { together = false; }}),
+    el("label", {class: "radio"}, el("input", {type: "radio", name: "where", checked: true, onchange: () => { together = false; preview(); }}),
       " Back where they were on the old computer ", el("span", {class: "muted"}, "(recommended: projects open without repair)")),
-    el("label", {class: "radio"}, el("input", {type: "radio", name: "where", onchange: () => { together = true; }}),
+    el("label", {class: "radio"}, el("input", {type: "radio", name: "where", onchange: () => { together = true; preview(); }}),
       " All together in Music/Freighter")));
   else parts.push(el("p", {class: "muted"}, "This bundle comes from a different kind of computer, so your FL Studio and Ableton folders go where this computer expects them and everything else into Music/Freighter, then your projects are repaired to match."));
-  parts.push(el("p", {class: "muted"}, "Nothing already on this computer is overwritten: a different file with the same name is kept, and the moved one saved next to it."),
+  parts.push(el("h2", {}, "Where everything will go"), where,
+    el("p", {class: "muted"}, "Nothing already on this computer is overwritten: a different file with the same name is kept, and the moved one saved next to it. You can undo the whole unpack afterwards."),
     el("div", {class: "row actions"}, go));
   show(...parts);
+  preview();
 }
 
 function unpack(b, together, anyway) {
@@ -418,8 +429,24 @@ function unpacked(r) {
     el("p", {class: "muted small"}, "The full list is in ", el("span", {class: "mono"}, u.report || "unpack-report.txt"), "."),
     el("h2", {}, "Next: plugins"),
     el("p", {class: "muted"}, "Plugins can't be copied; they're installed from each maker. See which ones your projects need, most useful first."),
-    el("div", {class: "row actions"}, el("button", {class: "primary", onclick: readiness}, "Check my plugins"), el("button", {onclick: home}, "Home")));
+    el("div", {class: "row actions"}, el("button", {class: "primary", onclick: readiness}, "Check my plugins"), el("button", {onclick: home}, "Home")),
+    el("h2", {}, "Changed your mind?"),
+    el("p", {class: "muted"}, "Undo removes everything this unpack created and puts repaired projects back as they were. Files you've changed since are kept."),
+    el("div", {class: "row"}, el("button", {onclick: () => undoUnpack(u.source_host)}, "Undo this unpack")));
   show(...parts);
+}
+
+function undoUnpack(host) {
+  if (!confirm(`Remove everything the unpack from ${host} created, and put repaired projects back as they were?`)) return;
+  runJob("undo", {host}, [el("h1", {}, "Undoing the unpack")], (r) =>
+    show(backTo(home), el("h1", {}, "Undone"),
+      el("div", {class: "panel"}, el("div", {class: "big"}, plural(r.removed, "file")),
+        el("div", {class: "muted"}, `removed, and ${plural(r.restored, "project")} put back as ${r.restored === 1 ? "it was" : "they were"}.`)),
+      r.kept.length ? note("", `Kept ${plural(r.kept.length, "file")} that changed since the unpack`,
+        el("div", {class: "muted"}, "They're your work now, so Freighter left them alone."),
+        el("details", {}, el("summary", {}, "Show them"), el("ul", {}, r.kept.map(k => el("li", {class: "mono"}, k))))) : null,
+      el("div", {class: "row actions"}, el("button", {onclick: home}, "Home"))),
+    {noCancel: true});
 }
 
 function repairAgain() {

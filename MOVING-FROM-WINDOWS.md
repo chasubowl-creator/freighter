@@ -56,6 +56,9 @@ Double-click **freighter**:
     original kept in a `Freighter backup` folder. Close FL Studio first; Freighter won't change projects while
     it's open.
 
+Unpacked into the wrong place, or changed your mind? `freighter undo-unpack` removes everything the unpack
+created and puts repaired projects back. Files you've changed since are kept.
+
 ## 5. Reinstall plugins
 
 Unpack prints the exact command at the end. In a command window opened in Freighter's folder it looks like:
