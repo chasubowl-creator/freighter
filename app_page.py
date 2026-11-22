@@ -161,7 +161,7 @@ async function runJob(kind, params, head, render, opts) {
       bar.classList.toggle("indef", !p.total);
       bar.firstChild.style.width = pct.toFixed(1) + "%";
       label.textContent = !p.total ? p.label + "…" :
-        (p.label === "Copying" ? `Copying: ${pct.toFixed(0)}% (${size(p.done)} of ${size(p.total)}` +
+        (p.label === "Copying" || p.label === "Checking" ? `${p.label}: ${pct.toFixed(0)}% (${size(p.done)} of ${size(p.total)}` +
           (p.files_total ? `, ${p.files.toLocaleString()} of ${plural(p.files_total, "file")}` : "") + ")" +
           (p.eta != null && p.done < p.total ? ` · ${timeLeft(p.eta)} left` : "") : `${p.label}: ${pct.toFixed(0)}%`);
     } else if (j.log.length) label.textContent = j.log[j.log.length - 1];
@@ -432,6 +432,9 @@ function packed(r, d) {
       r.range ? el("div", {class: "muted"}, `Projects saved ${rangeText(r.range)}: ${r.projects.in_range} of ${r.projects.total}. The others stay on this computer (listed in projects-left-out.txt on the drive).`) : null,
       el("div", {class: "muted mono small"}, r.bundle)),
     ...notes,
+    el("h2", {}, "Check the drive"),
+    el("p", {class: "muted"}, "Freighter reads every file back from the drive and compares it with the original, to catch a bad drive or cable while this computer still has your files. For the best check, eject the drive, plug it back in, then:"),
+    el("div", {class: "row"}, el("button", {class: "primary", onclick: () => checkDrive(r.bundle, d)}, "Check the drive")),
     el("h2", {}, "Before you wipe or sell this computer"),
     el("p", {class: "muted"}, "Free up your plugin licenses so they can move with you:"),
     licenseList(),
@@ -446,6 +449,21 @@ function packed(r, d) {
     note("", "Keep this computer as it is for now",
       el("div", {class: "muted"}, "Don't wipe or sell it until your projects open and play on the new one. Your files here weren't changed.")),
     el("div", {class: "row actions"}, el("button", {onclick: home}, "Home")));
+}
+
+function checkDrive(bundle, d) {   // issue #77
+  runJob("verify", {bundle}, [steps(OLD_STEPS, 3), el("h1", {}, "Checking the drive"),
+      el("p", {class: "sub"}, "Reading every file back from the drive and comparing it with the original.")], (r) => {
+    const ok = !r.bad_count;
+    show(steps(OLD_STEPS, 3), el("h1", {class: ok ? "okc" : "err"}, ok ? "The drive is good" : `${plural(r.bad_count, "copy", "copies")} on the drive ${r.bad_count === 1 ? "was" : "were"} damaged`),
+      el("div", {class: "panel"}, el("div", {class: "big"}, `${(r.files - r.bad_count).toLocaleString()} of ${r.files.toLocaleString()}`),
+        el("div", {class: "muted"}, ok ? `files read back and match the originals (${size(r.bytes)}). It's safe to take this drive to the new computer.`
+          : "files read back and match. The damaged copies were removed from the drive: pack again and Freighter copies just those, then check again.")),
+      ok ? null : note("bad", "Damaged or missing", el("ul", {}, r.bad.map(b => el("li", {class: "mono"}, `${b.item}: ${b.file} (${b.problem})`))),
+        el("div", {class: "muted"}, "If it keeps happening, try another USB port or cable, or another drive.")),
+      el("div", {class: "row actions"}, ok ? null : (move ? el("button", {class: "primary", onclick: () => pack(d)}, "Pack again") : null),
+        el("button", {onclick: home}, "Home")));
+  }, {cancelled: "Stopped. Nothing on the drive was changed."});
 }
 
 function licenseList() {

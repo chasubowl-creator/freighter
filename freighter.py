@@ -357,9 +357,17 @@ def copy_and_hash(src, dst, direct=False):
     return h.hexdigest()
 
 
-def hash_file(p):
+def hash_file(p, from_drive=False):
+    """SHA-256 of a file. from_drive asks a Mac to read the drive itself rather than a copy still in memory
+    (the drive check, issue #77); elsewhere, unplugging and replugging the drive first does that."""
     h = hashlib.sha256()
     with open(long_path(p), "rb") as f:
+        if from_drive and rs.IS_MAC:
+            try:
+                import fcntl
+                fcntl.fcntl(f.fileno(), 48, 1)   # F_NOCACHE
+            except Exception:
+                pass
         while True:
             chunk = f.read(1 << 20)
             if not chunk:
@@ -1838,6 +1846,79 @@ def cmd_pack(args):
                     "range": plan["range"]["label"] if rng is not None else None,
                     "projects": {k: v for k, v in plan["projects"].items() if k != "left_out"}}
     print("Next, on the new computer:  " + tool_cmd("freighter", f"unpack \"{bundle}\""))
+    return 0
+
+
+# --------------------------------------------------------------------------- check the drive (issue #77)
+
+def bundle_for(path):
+    """A bundle folder, or the newest bundle on a drive or folder. None if there isn't one."""
+    p = Path(path).expanduser()
+    if (p / "manifest.json").is_file():
+        return p
+    found = find_bundles(p)
+    return max(found, key=lambda b: b.stat().st_mtime) if found else None
+
+
+def verify_bundle(bundle, repair=True):
+    """Read every file on the drive back and check it against the checksum taken when it was copied. Damaged or
+    missing copies are deleted (they're Freighter's copies, never originals) and the bundle is marked unfinished,
+    so packing again re-copies just those. Returns a summary; also written to drive-check.txt on the drive."""
+    bundle = Path(bundle)
+    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    records = [(it, rec) for it in manifest["items"]
+               for rec in read_jsonl(bundle / "index" / f"{it['id']}.jsonl").values()]
+    prog = Progress(sum(rec["size"] for _it, rec in records), "Checking", len(records))
+    prog.add(0, files=0)
+    bad = []
+    for it, rec in records:
+        p = bundle / "data" / it["id"] / rec["stored"]
+        try:
+            ok = file_size(p) == rec["size"] and hash_file(p, from_drive=True) == rec["sha256"]
+            problem = None if ok else ("missing" if file_size(p) is None else "damaged (it doesn't match the original)")
+        except OSError as e:
+            problem = f"couldn't be read ({e.strerror or e})"
+        if problem:
+            bad.append({"file": rec["rel"], "item": it["label"], "problem": problem, "path": str(p)})
+        prog.add(rec["size"])
+    if bad and repair:
+        for b in bad:
+            try:
+                Path(long_path(b["path"])).unlink(missing_ok=True)
+            except OSError:
+                pass
+        (bundle / COMPLETE).unlink(missing_ok=True)   # not finished until those are copied again
+    lines = [f"Freighter {__version__} drive check, {dt.datetime.now():%Y-%m-%d %H:%M}",
+             f"{len(records) - len(bad)} of {len(records)} files read back and match the originals."]
+    if bad:
+        lines += ["", "These copies were damaged or missing. They were removed from the drive: pack again and "
+                  "Freighter copies just these again.", ""] + [f"{b['item']}: {b['file']} ({b['problem']})" for b in bad]
+    report = bundle / "drive-check.txt"
+    try:
+        report.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        report = None
+    out = {"bundle": str(bundle), "files": len(records), "bytes": prog.total, "bad": bad[:200],
+           "bad_count": len(bad), "report": str(report) if report else None}
+    LAST["verify"] = out
+    return out
+
+
+def cmd_verify(args):
+    bundle = bundle_for(args.bundle)
+    if bundle is None:
+        sys.exit(f"No Freighter bundle in {args.bundle}.")
+    print(f"Checking {bundle}: reading every file back from the drive...")
+    print("(For the best check, unplug the drive and plug it back in first, so nothing comes from memory.)", flush=True)
+    r = verify_bundle(bundle)
+    if r["bad_count"]:
+        print(f"\n{r['bad_count']} of {r['files']} copies on the drive were damaged or missing:")
+        for b in r["bad"][:10]:
+            print(f"  {b['item']}: {b['file']} ({b['problem']})")
+        print("They were removed. Pack again onto this drive and Freighter copies just those again; then check again.")
+        print("If it keeps happening, try another USB port or cable, or another drive.")
+        return 2
+    print(f"\nThe drive is good: all {r['files']:,} files read back and match the originals.")
     return 0
 
 
@@ -3691,8 +3772,13 @@ def interactive_menu():
                 drive = ask_path("  Drag the drive (or a folder on it) into this window, then press Enter: ")
                 if drive:
                     since, until = ask_range()
-                    cmd_pack(argparse.Namespace(to=drive, list=False, include=[], skip=[], include_programs=False,
-                                                since=since, until=until))
+                    code = cmd_pack(argparse.Namespace(to=drive, list=False, include=[], skip=[],
+                                                       include_programs=False, since=since, until=until))
+                    if code == 0 and LAST.get("pack") and input(
+                            "\n  Check the drive now? It reads everything back to catch a bad drive or cable while "
+                            "this\n  computer still has the originals. For the best check, unplug the drive and plug it "
+                            "back in first. (y/n): ").strip().lower().startswith("y"):
+                        cmd_verify(argparse.Namespace(bundle=LAST["pack"]["bundle"]))
             elif choice == "5":
                 bundle = ask_path("  Drag the Freighter-... folder from the drive into this window, then press Enter: ")
                 if bundle:
@@ -3829,6 +3915,10 @@ def main():
     s.add_argument("--clean", action="store_true", help="delete an earlier rehearsal's files (with the same --to)")
     add_range_args(s)
     s.set_defaults(fn=cmd_rehearse)
+
+    s = sub.add_parser("verify", help="check the drive: read every packed file back and compare it")
+    s.add_argument("bundle", metavar="DRIVE_OR_BUNDLE")
+    s.set_defaults(fn=cmd_verify)
 
     s = sub.add_parser("check-update", help="ask GitHub whether a newer Freighter is out")
     s.set_defaults(fn=cmd_check_update)

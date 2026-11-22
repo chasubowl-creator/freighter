@@ -2061,3 +2061,36 @@ class SoundLibraries(TempDirCase):
         self.assertIn(moved["new"], " ".join(moved["steps"]), "the steps name where it is now")
         self.assertFalse(libs["Spectrasonics STEAM folder"]["moved"])
         self.assertIn("Spectrasonics", libs["Spectrasonics STEAM folder"]["steps"][0])
+
+
+class DriveCheck(TempDirCase):
+    """Issue #77: read the drive back before leaving the old computer."""
+
+    def test_a_damaged_copy_is_caught_removed_and_copied_again(self):
+        old, drive = self.tmp / "old", self.tmp / "drive"
+        kick = write(old / "Desktop" / "Kits" / "kick.wav", b"k" * 1000)
+        snare = write(old / "Desktop" / "Kits" / "snare.wav", b"s" * 1000)
+        make_flp(old / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp", [str(kick), str(snare)])
+        drive.mkdir()
+        pack = argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False)
+        with as_home(old), quiet():
+            rm.cmd_pack(pack)
+            bundle = next(drive.glob("Freighter-*"))
+            good = rm.verify_bundle(bundle)
+        self.assertEqual(good["bad_count"], 0)
+        self.assertIn("read back and match", (bundle / "drive-check.txt").read_text())
+        copies = {p.name: p for p in (bundle / "data").rglob("*.wav")}
+        copies["kick.wav"].write_bytes(b"X" * 1000)            # same size, wrong content: a bad drive or cable
+        copies["snare.wav"].unlink()
+        with as_home(old), quiet():
+            r = rm.verify_bundle(bundle)
+            self.assertEqual(r["bad_count"], 2)
+            self.assertEqual(sorted(b["file"] for b in r["bad"]), ["kick.wav", "snare.wav"])
+            self.assertFalse(copies["kick.wav"].exists(), "the damaged copy was removed")
+            self.assertTrue(rm.bundle_summary(bundle)["problems"], "so the bundle shows as unfinished")
+            self.assertEqual(rm.cmd_verify(argparse.Namespace(bundle=str(drive))), 2, "found from the drive too")
+            rm.cmd_pack(pack)                                    # pack again: only those are copied again
+            again = rm.verify_bundle(bundle)
+        self.assertEqual(again["bad_count"], 0)
+        self.assertEqual(copies["kick.wav"].read_bytes(), b"k" * 1000)
+        self.assertEqual(rm.bundle_summary(bundle)["problems"], [])

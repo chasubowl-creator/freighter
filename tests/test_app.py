@@ -250,6 +250,7 @@ class Server(unittest.TestCase):
                                                             "include": [str(self.tmp / "nope")]})[0], 400)
         self.assertEqual(self.request("POST", "/api/jobs", {"kind": "unpack", "bundle": str(self.tmp)})[0], 400,
                          "a folder without manifest.json isn't a bundle")
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "verify", "bundle": str(self.tmp)})[0], 400)
 
     def test_pack_then_unpack_and_repair_through_the_app(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent))

@@ -315,6 +315,11 @@ def clean_job_params(kind, body):
         if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip) or include is None:
             return None, "bad request"
         return {"to": str(typed_folder(to)), "skip": skip, "include": include}, None
+    if kind == "verify":
+        b = body.get("bundle")
+        if not isinstance(b, str) or not (typed_folder(b) / "manifest.json").is_file():
+            return None, "That isn't a Freighter bundle (it has no manifest.json)."
+        return {"bundle": str(typed_folder(b))}, None
     if kind == "unpack":
         b = body.get("bundle")
         if not isinstance(b, str) or not (typed_folder(b) / "manifest.json").is_file():
@@ -427,6 +432,11 @@ def leftover_rehearsals():
     return found
 
 
+def job_verify(job):
+    """Read every file on the drive back and compare it (issue #77)."""
+    return rm.verify_bundle(job.params["bundle"])
+
+
 def job_repair(job):
     """Repair projects again (e.g. after closing FL Studio)."""
     r = rm.repair_projects()
@@ -435,7 +445,7 @@ def job_repair(job):
 
 JOBS = {"move_list": job_move_list, "plugins": job_plugins, "pack": job_pack, "unpack": job_unpack,
         "readiness": job_readiness, "repair": job_repair, "undo": job_undo,
-        "rehearse": job_rehearse, "rehearse_cleanup": job_rehearse_cleanup,
+        "rehearse": job_rehearse, "rehearse_cleanup": job_rehearse_cleanup, "verify": job_verify,
         "crate_preview": job_crate_preview, "crate_build": job_crate_build, "crate_undo": job_crate_undo}
 
 
