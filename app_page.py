@@ -262,9 +262,13 @@ function rangePanel(r) {
 }
 
 function optional() { return (move.big || []).concat(move.offered || []); }   // left out unless ticked
+function inside(path, folder) {   // same folder, or inside it ("\\" on Windows, "/" on a Mac)
+  return path === folder || path.startsWith(folder.replace(/[\\/]$/, "") + (folder.includes("\\") ? "\\" : "/"));
+}
 function chosenBytes() {   // what's ticked: the items, plus any big plugin content or library the person chose to take
-  return move.items.filter(it => !move.skip.has(it.id)).reduce((a, it) => a + it.bytes, 0) +
-    optional().filter(b => move.include.has(b.path)).reduce((a, b) => a + b.bytes, 0);
+  const taken = optional().filter(b => move.include.has(b.path));
+  return move.items.filter(it => !move.skip.has(it.id) && !taken.some(b => inside(it.path, b.path)))   // a ticked library holds its kits
+      .reduce((a, it) => a + it.bytes, 0) + taken.reduce((a, b) => a + b.bytes, 0);
 }
 
 function chooseItems() {
@@ -601,8 +605,9 @@ function repairSummary(rep) {
     el("div", {class: "row"}, el("button", {onclick: repairAgain}, "Repair again"))));
   parts.push(el("div", {class: "panel"},
     el("div", {class: "big"}, plural(rep.repaired, "project")),
-    el("div", {class: "muted"}, `repaired: ${plural(rep.samples_fixed, "sample")} now point to their moved copies. ` +
-      `${plural(rep.in_place, "sample")} were already in place. Originals are kept in "Freighter backup" folders.`)));
+    el("div", {class: "muted"}, `repaired: ${plural(rep.samples_fixed, "sample")} now ` +
+      (rep.samples_fixed === 1 ? "points to its moved copy. " : "point to their moved copies. ") +
+      `${plural(rep.in_place, "sample")} ${rep.in_place === 1 ? "was" : "were"} already in place. Originals are kept in "Freighter backup" folders.`)));
   if (rep.missing_count) parts.push(note("bad", `${plural(rep.missing_count, "sample")} still missing`,
     el("div", {class: "muted"}, "Usually samples that were already missing on the old computer."),
     el("details", {}, el("summary", {}, "Show them"), el("ul", {}, rep.missing.map(m => el("li", {class: "mono"}, m))))));
