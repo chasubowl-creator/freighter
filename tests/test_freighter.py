@@ -1233,6 +1233,30 @@ class FullMove(TempDirCase):
         self.assertEqual(kick_here.read_bytes(), b"edited on the new computer", "an edited file is kept")
         self.assertTrue(list(kit.rglob("* (from *).wav")), "and the newer one is saved next to it")
 
+    def test_unpacking_again_doesnt_read_what_it_already_copied(self):
+        """Issue #74: the journal says what an earlier unpack copied; unchanged files aren't read again."""
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        new.mkdir()
+        self.unpack(bundle, new)
+        read = []
+        real = rm.hash_file
+        with mock.patch.object(rm, "hash_file", lambda p: read.append(Path(p)) or real(p)):
+            self.unpack(bundle, new)
+        self.assertEqual([p for p in read if new in p.parents], [])
+
+    def test_a_same_size_edit_after_unpacking_is_still_noticed(self):
+        old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
+        bundle = self.pack(old, drive)
+        new.mkdir()
+        self.unpack(bundle, new)
+        kick_here = next((new / "Desktop" / "DrumKits" / "Kicks").iterdir())
+        edit = os.urandom(4000)                       # same size as the original kick
+        kick_here.write_bytes(edit)
+        self.unpack(bundle, new)
+        self.assertEqual(kick_here.read_bytes(), edit, "the edit is kept")
+        self.assertTrue(list((new / "Desktop" / "DrumKits").rglob("* (from *).wav")), "the moved one sits next to it")
+
     def test_unpack_detects_damage_and_keeps_existing_files(self):
         old, new, drive = self.build_old_computer(), self.tmp / "new", self.tmp / "drive"
         bundle = self.pack(old, drive)

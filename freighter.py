@@ -300,6 +300,19 @@ def short_path(s):
     return s[4:] if s.startswith("\\\\?\\") else s
 
 
+def file_stat(p):
+    """os.stat of the file at p, or None if there isn't one (a folder doesn't count)."""
+    try:
+        st = os.stat(long_path(p))
+    except OSError:
+        return None
+    return None if stat_is_dir(st) else st
+
+
+def stat_is_dir(st):
+    return (st.st_mode & 0o170000) == 0o040000
+
+
 def file_size(p):
     """Size of the file at p, or None if there isn't one (works for long Windows paths)."""
     try:
@@ -309,22 +322,29 @@ def file_size(p):
     return st.st_size if not os.path.isdir(long_path(p)) else None
 
 
-def copy_and_hash(src, dst):
-    """Copy src to dst through a temporary name; return the SHA-256 of what was copied."""
+def copy_and_hash(src, dst, direct=False):
+    """Copy src to dst; return the SHA-256 of what was copied. Unpack copies through a temporary name, so a copy
+    cut off part-way never sits in someone's folders under the real name. Pack writes straight into the bundle
+    (direct): a file only counts as packed once its index line is written after the copy, so a cut-off copy is
+    simply copied again, and that saves a rename per file. Only the file's times are copied, not its permissions
+    or flags: two system calls fewer per file (issue #74)."""
     dst = Path(dst)
     os.makedirs(long_path(dst.parent), exist_ok=True)
-    tmp = dst.with_name(dst.name + ".freighter-part")
+    final = long_path(dst)
+    target = final if direct else long_path(dst.with_name(dst.name + ".freighter-part"))
     h = hashlib.sha256()
-    with open(long_path(src), "rb") as f, open(long_path(tmp), "wb") as out:
+    with open(long_path(src), "rb") as f, open(target, "wb") as out:
+        st = os.fstat(f.fileno())
         while True:
             chunk = f.read(1 << 20)
             if not chunk:
                 break
             h.update(chunk)
             out.write(chunk)
-    os.replace(long_path(tmp), long_path(dst))
+    if not direct:
+        os.replace(target, final)
     try:
-        shutil.copystat(long_path(src), long_path(dst))
+        os.utime(final, ns=(st.st_atime_ns, st.st_mtime_ns))   # keep "date modified" for sorting by date
     except OSError:
         pass
     return h.hexdigest()
@@ -383,38 +403,51 @@ def is_cloud_only(st):
 
 
 def walk_files(root, left_behind=None):
-    """Yield (relative posix path, absolute path, size) for every real file under root.
-    With a left_behind list, programs and installers are skipped and recorded there instead."""
+    """Yield (relative posix path, absolute path, size) for every real file under root, folder by folder in the
+    same order os.walk would. With a left_behind list, programs and installers are skipped and recorded there
+    instead. Uses scandir's directory entries, so links are spotted without asking the disk again, and on Windows
+    sizes come free with the listing (issue #74)."""
     root = Path(root)
-    lroot = long_path(root)   # walk the long form so deep folders on Windows aren't skipped
-    for cur, dirs, files in os.walk(lroot, onerror=lambda e: None):
-        keep = []
-        for d in dirs:
-            if skip_dir(cur, d) or os.path.islink(os.path.join(cur, d)):
-                continue
-            if left_behind is not None and is_program(os.path.join(cur, d)):  # app and plugin bundles are folders
-                left_behind.append(short_path(os.path.join(cur, d)))
-                continue
-            keep.append(d)
-        dirs[:] = keep
-        for fn in files:
-            if fn.lower() in JUNK_FILES or fn.startswith("._") or fn.endswith(".freighter-part"):
-                continue
-            full = os.path.join(cur, fn)
-            if left_behind is not None and is_program(full):
-                left_behind.append(short_path(full))
-                continue
-            if os.path.islink(full):
-                continue
+    stack = [(long_path(root), "")]   # walk the long form so deep folders on Windows aren't skipped
+    while stack:
+        cur, prefix = stack.pop()
+        try:
+            with os.scandir(cur) as listing:
+                entries = list(listing)
+        except OSError:
+            continue
+        subdirs = []
+        for e in entries:
             try:
-                st = os.stat(full)
+                if e.is_symlink():
+                    continue
+                is_dir = e.is_dir()
             except OSError:
                 continue
-            rel = Path(os.path.relpath(full, lroot)).as_posix()
+            if is_dir:
+                if skip_dir(cur, e.name):
+                    continue
+                if left_behind is not None and is_program(e.path):   # app and plugin bundles are folders
+                    left_behind.append(short_path(e.path))
+                    continue
+                subdirs.append((e.path, prefix + e.name + "/"))
+                continue
+            fn = e.name
+            if fn.lower() in JUNK_FILES or fn.startswith("._") or fn.endswith(".freighter-part"):
+                continue
+            if left_behind is not None and is_program(e.path):
+                left_behind.append(short_path(e.path))
+                continue
+            try:
+                st = e.stat()
+            except OSError:
+                continue
+            rel = prefix + fn
             ap = root.joinpath(*rel.split("/"))
             if is_cloud_only(st):
                 CLOUD_ONLY.append((ap, st.st_size))
             yield rel, ap, st.st_size
+        stack.extend(reversed(subdirs))   # depth first, in listing order, like os.walk
 
 
 # What the last pack / unpack did, for the app to show (one job runs at a time).
@@ -678,12 +711,13 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
     # excluded: DAW folders the user chose to leave out (--skip). They count as handled, so nothing re-adds them.
     covered = [Path(it["source_path"]) for it in items] + [Path(e) for e in excluded]
     roots = all_user_folders(h) + [c for c in covered if c.is_dir()]
-    left_out = [Path(e) for e in excluded]
-    inside_left_out = lambda p: any(e == p or e in p.parents for e in left_out)
-    flps = [p for p in find_projects(roots, ".flp", include_backups=True) if not inside_left_out(p)]
+    inside_left_out = Folders(excluded).holds
+    both = find_projects(roots, (".flp", ".als"), include_backups=True)   # one walk (issue #74)
+    flps = [p for p in both if p.suffix.lower() == ".flp" and not inside_left_out(p)]
     # recent projects FL knows about, wherever they are (e.g. D:\\Projects), are found too
     flps += [p for p in extra_projects if p not in flps and not inside_left_out(p)]
-    alss = [p for p in find_projects(roots, ".als") if not inside_left_out(p)]
+    alss = [p for p in both if p.suffix.lower() == ".als" and p.parent.name.lower() != "backup"
+            and not inside_left_out(p)]
     refs = {}   # sample -> projects that use it
     for p in flps:
         try:
@@ -702,12 +736,12 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
     bases = all_user_folders(h)
     folders, loose = {}, {}
 
-    def inside_covered(path):
-        return any(c == path or c in path.parents for c in covered)
+    cov = Folders(covered)
+    inside_covered = cov.holds
 
     def take(path, label):
         """Add the folder that should carry this file, or the file alone when it sits loose."""
-        f = folder_to_move(path, h, bases, covered)
+        f = folder_to_move(path, h, bases, cov)
         if f is None:
             loose.setdefault(str(path.parent), set()).add(path.name)
         elif f.is_dir() and f != h:
@@ -717,7 +751,7 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
 
     def add_folder(f, label):
         """Add folder f itself (not its top-level parent), unless it's a base folder or would re-pack a packed item."""
-        if f is None or f == h or f in bases or f.parent == f or any(f in c.parents for c in covered):
+        if f is None or f == h or f in bases or f.parent == f or cov.has_inside(f):
             return False
         if f.is_dir():
             if folders.get(f, label) != label:
@@ -748,8 +782,8 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
             loose.setdefault(str(own), set()).add(p.name)
             continue
         used = usable.get(p, [])
-        top = folder_to_move(p, h, bases, covered)
-        if used and top is not None and all(folder_to_move(r, h, bases, covered) == top for r in used):
+        top = folder_to_move(p, h, bases, cov)
+        if used and top is not None and all(folder_to_move(r, h, bases, cov) == top for r in used):
             anchor = Path(os.path.commonpath([str(own)] + [str(r.parent) for r in used]))
             if add_folder(anchor, "A project and the samples it uses"):
                 handled.add(p)
@@ -770,7 +804,8 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
                 missing.setdefault(str(p), []).append(s)
         elif not inside_covered(Path(s)) and not all(u in handled for u in users):
             take(Path(s), "Samples your projects use")
-    keep = {f: label for f, label in folders.items() if not any(o != f and o in f.parents for o in folders)}
+    chosen = Folders(folders)
+    keep = {f: label for f, label in folders.items() if not chosen.holds(f.parent)}   # drop folders inside others
     missing = {p: sorted(v) for p, v in sorted(missing.items(), key=lambda kv: kv[0].lower())}
     return dict(sorted(keep.items(), key=lambda kv: str(kv[0]).lower())), loose, missing
 
@@ -794,12 +829,53 @@ def say_missing(missing, where=None):
         print(f"  ... and {len(lines) - 8} more" + (f" (all listed in {where})" if where else ""))
 
 
+def _key(p):
+    return os.path.normcase(str(p))   # how the OS compares paths: case-insensitively on Windows
+
+
+def _ancestors(path):
+    """The keys of every folder above path."""
+    out, k = set(), _key(path)
+    parent = os.path.dirname(k)
+    while parent != k:
+        out.add(parent)
+        k, parent = parent, os.path.dirname(parent)
+    return out
+
+
+class Folders:
+    """A set of folders that answers "is this path one of them, or inside one?" and "is one of them inside this
+    folder?" in time that grows with the path's depth, not with how many folders there are: planning a move asks
+    tens of thousands of times (issue #74)."""
+
+    def __init__(self, folders):
+        self.keys = {_key(f) for f in folders}
+        self.above = set()   # every folder that has one of them somewhere inside it
+        for k in self.keys:
+            self.above |= _ancestors(k)
+
+    def holds(self, path):
+        k = _key(path)
+        while True:
+            if k in self.keys:
+                return True
+            parent = os.path.dirname(k)
+            if parent == k:
+                return False
+            k = parent
+
+    def has_inside(self, folder):
+        return _key(folder) in self.above
+
+
 def folder_to_move(path, h, bases, covered):
     """The folder to move so that `path` (a sample or project) comes along, or None to take the file alone.
     Starts at the top folder inside Desktop, Documents or Music (wherever they really are), or uses
     sample_folder_for elsewhere, then steps down while that folder would also re-pack a packed item
     such as the Ableton User Library (issue #9)."""
-    base = next((u for u in bases if u in path.parents), None)
+    covered = covered if isinstance(covered, Folders) else Folders(covered)
+    above = _ancestors(path)
+    base = next((u for u in bases if _key(u) in above), None)
     if base is not None:
         if path.parent == base:
             return None
@@ -810,7 +886,7 @@ def folder_to_move(path, h, bases, covered):
         f = sample_folder_for(str(path), h)
         if f is None:
             return None  # at the top of a drive
-    while any(f in c.parents for c in covered):
+    while covered.has_inside(f):
         rest = path.relative_to(f).parts
         if len(rest) == 1:
             return None
@@ -989,7 +1065,7 @@ def cmd_pack(args):
                     prog.add(size, copied=False)
                     continue
                 try:
-                    digest = copy_and_hash(ap, dst)
+                    digest = copy_and_hash(ap, dst, direct=True)
                 except OSError as e:
                     errors.append(f"{ap}: {e}")
                     prog.add(size, copied=False)
@@ -1465,8 +1541,16 @@ def cmd_unpack(args):
     # The journal: every file and folder this unpack creates, so it can be undone exactly (issue #73), and so a
     # later top-up can tell a file an earlier unpack put there (and nobody changed since) from the user's own.
     journal_path = landing / UNPACK_JOURNAL
-    earlier = {norm(e["path"], THIS_OS == "windows"): e["sha256"] for e in read_journal(journal_path)
-               if e.get("kind") == "file"}
+    fold_here = THIS_OS == "windows"
+    earlier = {norm(e["path"], fold_here): e for e in read_journal(journal_path) if e.get("kind") == "file"}
+
+    def contents(p, st):
+        """The SHA-256 of the file at p. Taken from the journal when an earlier unpack copied it there and its size
+        and time haven't changed since, so starting again doesn't read every file twice (issue #74)."""
+        e = earlier.get(norm(str(p), fold_here))
+        if e and e.get("size") == st.st_size and e.get("mtime_ns") == st.st_mtime_ns:
+            return e["sha256"]
+        return hash_file(p)
     journal = open(journal_path, "a", encoding="utf-8")
     for d in new_landing:       # e.g. Music/Freighter itself, on a computer that never had it
         journal.write(json.dumps({"kind": "dir", "path": str(d)}) + "\n")
@@ -1479,11 +1563,14 @@ def cmd_unpack(args):
             src = data_root / rec["stored"]
             target_rel = rec["rel"] if THIS_OS != "windows" else rec["stored"]
             dst = dest / target_rel
-            if file_size(dst) is not None:
-                if file_size(dst) == rec["size"] and hash_file(dst) == rec["sha256"]:
+            st = file_stat(dst)
+            if st is not None:
+                now = contents(dst, st)
+                if st.st_size == rec["size"] and now == rec["sha256"]:
                     prog.add(rec["size"], copied=False)
                     continue  # already there, identical
-                if earlier.get(norm(str(dst), THIS_OS == "windows")) == hash_file(dst):
+                e = earlier.get(norm(str(dst), fold_here))
+                if e and e["sha256"] == now:
                     replaced += 1   # an earlier unpack put it there and nobody changed it since: the newer one wins
                 else:
                     dst = dst.with_name(f"{dst.stem} (from {src_host}){dst.suffix}")
@@ -1499,7 +1586,9 @@ def cmd_unpack(args):
                 bad.append(f"{src}: {e}")
                 prog.add(rec["size"], copied=False)
                 continue
-            journal.write(json.dumps({"kind": "file", "path": str(dst), "sha256": digest}) + "\n")
+            st = file_stat(dst)
+            journal.write(json.dumps({"kind": "file", "path": str(dst), "sha256": digest, "size": st and st.st_size,
+                                      "mtime_ns": st and st.st_mtime_ns}) + "\n")
             journal.flush()
             if digest != rec["sha256"]:
                 bad.append(f"{dst}: checksum mismatch (the copy on the drive may be damaged)")
@@ -1683,8 +1772,9 @@ def project_search_roots(maps, folders):
 
 
 def find_projects(roots, ext, include_backups=False):
-    """Project files under roots. Autosave copies (in a project's own Backup folder) only with include_backups;
-    a folder that merely has \"backup\" in its name (an archive of old projects) is searched like any other."""
+    """Project files under roots (ext: ".flp", or a tuple of them). Autosave copies (in a project's own Backup folder)
+    only with include_backups; a folder that merely has \"backup\" in its name (an archive of old projects) is
+    searched like any other."""
     found = set()
     for root in roots:
         for cur, dirs, files in os.walk(long_path(root), onerror=lambda e: None):
@@ -1696,6 +1786,12 @@ def find_projects(roots, ext, include_backups=False):
                 if fn.lower().endswith(ext) and not fn.startswith("._"):
                     found.add(Path(short_path(os.path.join(cur, fn))))
     return sorted(found, key=lambda p: str(p).lower())
+
+
+def all_projects(roots):
+    """FL Studio then Ableton projects under roots, from one walk of the folders instead of two (issue #74)."""
+    both = find_projects(roots, (".flp", ".als"))
+    return [p for p in both if p.suffix.lower() == ".flp"] + [p for p in both if p.suffix.lower() == ".als"]
 
 
 # --------------------------------------------------------------------------- Ableton
@@ -1818,7 +1914,8 @@ def repair_projects(dry_run=False):
     fl_open = fl_is_running()
     out = {"projects": 0, "repaired": 0, "samples_fixed": 0, "in_place": 0, "missing": [], "old_format": [],
            "damaged": [], "unreadable": [], "fl_open": fl_open}
-    for p in find_projects(roots, ".als"):
+    found = all_projects(roots)
+    for p in (p for p in found if p.suffix.lower() == ".als"):
         try:
             r = fix_als(p, maps, dry_run)
         except Exception:
@@ -1832,7 +1929,7 @@ def repair_projects(dry_run=False):
         out["samples_fixed"] += r["fixed"]
         out["in_place"] += r["ok"]
         out["missing"] += [f"{p.name}: {m}" for m in r["missing"]]
-    for p in find_projects(roots, ".flp"):
+    for p in (p for p in found if p.suffix.lower() == ".flp"):
         try:
             r = fix_flp(p, maps, dry_run=dry_run or fl_open)
         except (ValueError, OSError, struct.error):
@@ -2308,7 +2405,7 @@ def cmd_plugins(args):
     maps = load_pathmaps(None)
     roots = project_search_roots(maps, args.folder)
     print("Reading your projects...", flush=True)
-    projects = {str(p): project_plugins(p) for p in find_projects(roots, ".flp") + find_projects(roots, ".als")}
+    projects = {str(p): project_plugins(p) for p in all_projects(roots)}
     print("Scanning installed plugins...", flush=True)
     r = plugin_readiness(projects, rs.scan(list(args.extra_dir)))
     lines = [f"Freighter {__version__} plugin readiness, {dt.datetime.now():%Y-%m-%d %H:%M}", ""] + readiness_lines(r)
@@ -2338,14 +2435,15 @@ def cmd_scan(args):
     roots = all_user_folders(h)
     rows = []
     print("Looking for projects...", flush=True)
-    for p in find_projects(roots, ".flp"):
+    found = all_projects(roots)
+    for p in (p for p in found if p.suffix.lower() == ".flp"):
         try:
             _v, samples = flp_samples(p)
             refs = sum(1 for s in set(samples) if not FL_PLACEHOLDER.match(s))
         except (ValueError, OSError, struct.error):
             refs = None
         rows.append(("FL Studio", p, refs))
-    for p in find_projects(roots, ".als"):
+    for p in (p for p in found if p.suffix.lower() == ".als"):
         try:
             text, _ = read_als(p)
             refs = len(als_sample_refs(text)) if als_new_format(text) else None
@@ -2522,7 +2620,7 @@ def cmd_rehearse(args):
         roots = project_search_roots(maps, [])
         totals = {"kept": 0, "lost": 0, "already": 0, "projects": 0, "unchecked": 0}
         lost, unchecked, already = [], [], []
-        for p in find_projects(roots, ".flp") + find_projects(roots, ".als"):
+        for p in all_projects(roots):
             kind, refs = project_refs(p)
             if refs is None:
                 totals["unchecked"] += 1

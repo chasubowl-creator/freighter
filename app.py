@@ -191,7 +191,7 @@ def job_readiness(job):
     maps = rm.load_pathmaps(None)
     roots = rm.project_search_roots(maps, [])
     rm.report_progress("Reading your projects", 0, 0)
-    projects = {str(p): rm.project_plugins(p) for p in rm.find_projects(roots, ".flp") + rm.find_projects(roots, ".als")}
+    projects = {str(p): rm.project_plugins(p) for p in rm.all_projects(roots)}
     rm.report_progress("Scanning installed plugins", 0, 0)
     r = rm.plugin_readiness(projects, rs.scan([]))
     # makers the projects didn't name: take them from the old computer's plugin list, copied over on unpack
