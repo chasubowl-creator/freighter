@@ -3212,9 +3212,8 @@ def project_plugins(p):
 SHELL_MAKERS = {"waves": "waveshell"}   # one installed shell provides all of that maker's plugins
 
 
-def plugin_readiness(projects, installed):
-    """Which projects open with what's installed. projects: {path: project_plugins(...)}; installed: rows from the
-    plugin scan. Returns a dict for the report: missing plugins ordered by how many projects they hold back."""
+def plugin_checker(installed):
+    """A function telling whether a plugin a project uses is installed here (rows from the plugin scan)."""
     have = set()
     for r in installed:
         have |= rs.match_keys(r.get("name", ""), r.get("vendor", ""), r.get("key", ""))
@@ -3224,7 +3223,13 @@ def plugin_readiness(projects, installed):
         if rs.match_keys(pl["name"], pl.get("vendor", "")) & have:
             return True
         return any(m in (pl.get("vendor") or "").lower() for m in shells)
+    return installed_already
 
+
+def plugin_readiness(projects, installed):
+    """Which projects open with what's installed. projects: {path: project_plugins(...)}; installed: rows from the
+    plugin scan. Returns a dict for the report: missing plugins ordered by how many projects they hold back."""
+    installed_already = plugin_checker(installed)
     missing, blocked, ready = {}, {}, []
     versions, warnings = {}, set()
     for path, info in projects.items():
@@ -3263,6 +3268,112 @@ def plugin_readiness(projects, installed):
     return {"total": sum(1 for i in projects.values() if i), "ready": sorted(ready), "blocked": blocked,
             "missing": [dict(e, projects=sorted(e["projects"]), opens=n) for e, n in zip(ranked, steps)],
             "versions": versions, "warnings": sorted(warnings)}
+
+
+def samples_now(p):
+    """(samples checked, [missing ones]) for a project as it is now, by the rules the repair uses: FL's own sounds
+    and installed Packs come with the DAW, %FLStudioUserData% means this computer's FL folder, and Live finds a
+    sample through its path relative to the project. None when it can't be checked (Live 10 or older)."""
+    p = Path(p)
+    if p.suffix.lower() == ".flp":
+        refs = []
+        for s in dict.fromkeys(flp_samples(p)[1]):
+            if FL_USER_DATA.match(s):
+                refs.append(str(fl_user_data(home()).joinpath(*FL_USER_DATA.sub("", s).replace("\\", "/").strip("/").split("/"))))
+            elif not FL_PLACEHOLDER.match(s):
+                refs.append(s)
+        missing = [r for r in refs if not in_program_place(r) and not exists(r)]
+        return len(refs), missing
+    text, _ = read_als(p)
+    if not als_new_format(text):
+        return None
+    checked, missing = 0, []
+    for sm in SAMPLEREF_RE.finditer(text):
+        for fm in FILEREF_RE.finditer(sm.group(1)):
+            block = fm.group(1)
+            pack, pm, rel = PACK_NAME_RE.search(block), PATH_RE.search(block), REL_RE.search(block)
+            if (pack and pack.group(1)) or not (pm and pm.group(2)):
+                continue
+            path = html.unescape(pm.group(2))
+            if in_program_place(path):
+                continue
+            checked += 1
+            if not exists(path) and not (rel and rel.group(1) and exists(p.parent / html.unescape(rel.group(1)))):
+                missing.append(path)
+    return checked, list(dict.fromkeys(missing))
+
+
+def project_health(roots=None, installed=None):
+    """Every project on this computer and whether it's ready: its samples found, its plugins installed
+    (issue #78). Problems first."""
+    roots = roots or project_search_roots(load_pathmaps(None), [])
+    has = plugin_checker(rs.scan([]) if installed is None else installed)
+    out = []
+    for p in all_projects(roots):
+        info = project_plugins(p)
+        try:
+            samples = samples_now(p)
+        except (ValueError, OSError, struct.error):
+            samples = "unreadable"
+        need = list(dict.fromkeys(pl["name"] for pl in (info or {}).get("plugins", []) if not has(pl)))
+        entry = {"path": str(p), "name": p.name, "daw": (info or {}).get("daw", ""), "version": (info or {}).get("version", ""),
+                 "plugins_needed": need, "samples": 0, "missing_samples": []}
+        if samples == "unreadable" or info is None:
+            entry["status"] = "unreadable"
+        elif samples is None:
+            entry["status"] = "unchecked"     # Live 10 or older: open it in Live to check
+        else:
+            entry["samples"], entry["missing_samples"] = samples[0], samples[1]
+            entry["status"] = "ready" if not samples[1] and not need else "attention"
+        out.append(entry)
+    order = {"attention": 0, "unreadable": 1, "ready": 2, "unchecked": 3}
+    out.sort(key=lambda e: (order[e["status"]], -len(e["missing_samples"]) - len(e["plugins_needed"]), e["name"].lower()))
+    unchecked = sum(1 for e in out if e["status"] == "unchecked")
+    # sets saved by Live 10 or older can't be checked (often demo sets that came with sample packs): they're
+    # listed apart and don't count against "ready"
+    return {"projects": out, "total": len(out) - unchecked, "unchecked": unchecked,
+            "ready": sum(1 for e in out if e["status"] == "ready")}
+
+
+def health_lines(h):
+    lines = [(f"All {h['total']} projects are ready" if h["ready"] == h["total"] else
+              f"{h['ready']} of {h['total']} projects are ready") + ": every sample found and every plugin installed."]
+    if h["unchecked"]:
+        lines.append(f"{h['unchecked']} Ableton sets saved by Live 10 or older can't be checked automatically (often "
+                     "demo sets that came with sample packs); they're listed at the end.")
+    for e in h["projects"]:
+        if e["status"] in ("ready", "unchecked"):
+            continue
+        lines.append("")
+        lines.append(f"{e['name']}  ({e['path']})")
+        if e["status"] == "unreadable":
+            lines.append("  Couldn't be read. It may be damaged; open it in your DAW to check.")
+        if e["missing_samples"]:
+            lines.append(f"  {len(e['missing_samples'])} sample(s) missing:")
+            lines += [f"    {m}" for m in e["missing_samples"][:20]]
+        if e["plugins_needed"]:
+            lines.append("  Needs these plugins installed: " + ", ".join(e["plugins_needed"]))
+    old = [e for e in h["projects"] if e["status"] == "unchecked"]
+    if old:
+        lines += ["", "Saved by Live 10 or older (open them in Live to check):"] + [f"  {e['path']}" for e in old]
+    return lines
+
+
+def cmd_health(args):
+    """Check every project: samples found, plugins installed (issue #78)."""
+    print("Checking every project's samples and plugins...", flush=True)
+    h = project_health()
+    lines = health_lines(h)
+    out = home() / "Music" / "Freighter" / "Reports"
+    out.mkdir(parents=True, exist_ok=True)
+    report = out / "project-health.txt"
+    report.write_text(f"Freighter {__version__} project check, {dt.datetime.now():%Y-%m-%d %H:%M}\n\n"
+                      + "\n".join(lines), encoding="utf-8")
+    print("\n" + "\n".join(lines[:40]))
+    if len(lines) > 40:
+        print(f"... the rest is in {report}")
+    print(f"\nSaved in {report}")
+    return 0
 
 
 def readiness_lines(r):
@@ -3594,7 +3705,7 @@ MENU = """
   On the NEW computer
     5  Unpack a bundle from the drive
     6  Repair projects after unpacking
-    7  See which plugins my projects still need
+    7  Check my projects: missing samples, and plugins to install
 
   Tidy up
     8  Sort my sample folders into one library (_Crate)
@@ -3799,6 +3910,7 @@ def interactive_menu():
                 cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
                 cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
             elif choice == "7":
+                cmd_health(None)
                 cmd_plugins(argparse.Namespace(folder=[], extra_dir=[]))
             elif choice == "8":
                 import crate
@@ -3915,6 +4027,9 @@ def main():
     s.add_argument("--clean", action="store_true", help="delete an earlier rehearsal's files (with the same --to)")
     add_range_args(s)
     s.set_defaults(fn=cmd_rehearse)
+
+    s = sub.add_parser("health", help="check every project: samples found, plugins installed")
+    s.set_defaults(fn=cmd_health)
 
     s = sub.add_parser("verify", help="check the drive: read every packed file back and compare it")
     s.add_argument("bundle", metavar="DRIVE_OR_BUNDLE")

@@ -195,7 +195,8 @@ function home() {
         el("button", {class: "primary", onclick: () => moveList("pack")}, "Start packing"),
         el("button", {onclick: () => moveList("rehearse")}, "Rehearse first")),
       card("new computer", "Unpack a bundle from the drive, put everything where it belongs, and repair your projects.",
-        el("button", {class: "primary", onclick: pickBundle}, "Start unpacking")),
+        el("button", {class: "primary", onclick: pickBundle}, "Start unpacking"),
+        el("button", {onclick: projectHealth}, "Check my projects")),
       card("plugins", "See which plugins your projects need, and which to install first on this computer.",
         el("button", {class: "primary", onclick: readiness}, "Check my plugins"),
         el("button", {onclick: pluginReport}, "Full plugin report")),
@@ -705,7 +706,8 @@ function unpacked(r) {
     el("p", {class: "muted small"}, "The full list is in ", el("span", {class: "mono"}, u.report || "unpack-report.txt"), "."),
     el("h2", {}, "Next: plugins"),
     el("p", {class: "muted"}, "Plugins can't be copied; they're installed from each maker. See which ones your projects need, most useful first."),
-    el("div", {class: "row actions"}, el("button", {class: "primary", onclick: readiness}, "Check my plugins"), el("button", {onclick: home}, "Home")),
+    el("div", {class: "row actions"}, el("button", {class: "primary", onclick: projectHealth}, "Check my projects"),
+      el("button", {onclick: readiness}, "Check my plugins"), el("button", {onclick: home}, "Home")),
     el("h2", {}, "Changed your mind?"),
     el("p", {class: "muted"}, "Undo removes everything this unpack created and puts repaired projects back as they were. Files you've changed since are kept."),
     el("div", {class: "row"}, el("button", {onclick: () => undoUnpack(u.source_host)}, "Undo this unpack")));
@@ -729,6 +731,34 @@ function repairAgain() {
   runJob("repair", {}, [backTo(home), el("h1", {}, "Repairing projects")], (rep) =>
     show(backTo(home), el("h1", {}, "Projects repaired"), ...repairSummary(rep),
       el("div", {class: "row actions"}, el("button", {class: "primary", onclick: readiness}, "Check my plugins"))));
+}
+
+/* ---------- project health: did the move work? (issue #78) ---------- */
+function projectHealth() {
+  runJob("health", {}, [backTo(home), el("h1", {}, "Your projects"),
+      el("p", {class: "sub"}, "Checking every project's samples and plugins…")], (h) => {
+    const bad = h.projects.filter(e => e.status === "attention" || e.status === "unreadable");
+    const ready = h.projects.filter(e => e.status === "ready"), old = h.projects.filter(e => e.status === "unchecked");
+    const row = (e) => el("li", {},
+      el("b", {}, e.name), e.daw ? el("span", {class: "muted"}, ` · ${e.daw}${e.version ? " " + e.version : ""}`) : null,
+      el("div", {class: "path mono"}, e.path),
+      e.status === "unreadable" ? el("div", {class: "err small"}, "Couldn't be read. It may be damaged; open it in your DAW to check.") : null,
+      e.missing_count ? el("details", {}, el("summary", {class: "err small"}, `${plural(e.missing_count, "sample")} missing`),
+        el("ul", {class: "small"}, e.missing_samples.map(m => el("li", {class: "mono"}, m)))) : null,
+      e.plugins_needed.length ? el("div", {class: "warnc small"}, "Needs: " + e.plugins_needed.join(", ")) : null);
+    const allGood = !bad.length;
+    show(backTo(home), el("h1", {class: allGood && h.total ? "okc" : ""}, !h.total ? "No projects found yet"
+        : allGood ? `All ${plural(h.total, "project")} are ready` : `${h.ready} of ${plural(h.total, "project")} are ready`),
+      el("p", {class: "sub"}, "Ready means every sample was found and every plugin is installed."),
+      bad.length ? el("h2", {}, "Need attention") : null,
+      bad.length ? el("ul", {class: "plain"}, bad.map(row)) : null,
+      bad.some(e => e.missing_count) ? el("p", {class: "muted"}, "Missing samples: if you unpacked a bundle, try ",
+        el("button", {class: "link", onclick: repairAgain}, "repairing projects again"), " (close FL Studio first). Samples that were already missing on the old computer can't come back this way.") : null,
+      bad.some(e => e.plugins_needed.length) ? el("p", {class: "muted"}, "Plugins: ", el("button", {class: "link", onclick: readiness}, "see which to install first"), ".") : null,
+      ready.length ? el("details", {}, el("summary", {}, `Show the ${plural(ready.length, "ready project")}`), el("ul", {class: "plain"}, ready.map(row))) : null,
+      old.length ? el("p", {class: "muted small"}, `${plural(old.length, "Ableton set")} saved by Live 10 or older can't be checked automatically (often demo sets that came with sample packs). Open your own ones in Live to check them.`) : null,
+      el("div", {class: "row actions"}, el("button", {onclick: projectHealth}, "Check again"), el("button", {onclick: home}, "Home")));
+  });
 }
 
 /* ---------- plugins ---------- */

@@ -432,6 +432,16 @@ def leftover_rehearsals():
     return found
 
 
+def job_health(job):
+    """Every project: samples found, plugins installed (issue #78)."""
+    rm.report_progress("Reading your projects", 0, 0)
+    h = rm.project_health()
+    for e in h["projects"]:
+        e["missing_count"] = len(e["missing_samples"])
+        e["missing_samples"] = e["missing_samples"][:30]
+    return h
+
+
 def job_verify(job):
     """Read every file on the drive back and compare it (issue #77)."""
     return rm.verify_bundle(job.params["bundle"])
@@ -446,6 +456,7 @@ def job_repair(job):
 JOBS = {"move_list": job_move_list, "plugins": job_plugins, "pack": job_pack, "unpack": job_unpack,
         "readiness": job_readiness, "repair": job_repair, "undo": job_undo,
         "rehearse": job_rehearse, "rehearse_cleanup": job_rehearse_cleanup, "verify": job_verify,
+        "health": job_health,
         "crate_preview": job_crate_preview, "crate_build": job_crate_build, "crate_undo": job_crate_undo}
 
 

@@ -2094,3 +2094,38 @@ class DriveCheck(TempDirCase):
         self.assertEqual(again["bad_count"], 0)
         self.assertEqual(copies["kick.wav"].read_bytes(), b"k" * 1000)
         self.assertEqual(rm.bundle_summary(bundle)["problems"], [])
+
+
+class ProjectHealth(TempDirCase):
+    """Issue #78: every project's samples and plugins, problems first."""
+
+    def test_each_projects_status(self):
+        home = self.tmp / "home"
+        kick = write(home / "Desktop" / "Kits" / "kick.wav", b"k")
+        projects = home / "Documents" / "Image-Line" / "FL Studio" / "Projects"
+        make_flp(projects / "Ready.flp", [str(kick), "%FLStudioFactoryData%/Data/Patches/x.wav"])
+        make_flp(projects / "Lost.flp", [str(kick), str(home / "Downloads" / "gone.wav")])
+        make_plugin_flp(projects / "Synth.flp", [("Serum 2", "Xfer Records", "")])
+        song = home / "Music" / "Song Project"
+        write(song / "Samples" / "Imported" / "vox.wav", b"v")
+        als = make_als(song / "Song.als", ["/Users/someone-else/Music/Song Project/Samples/Imported/vox.wav"])
+        text = gzip.decompress(als.read_bytes()).decode().replace(
+            '<RelativePath Value="" />', '<RelativePath Value="Samples/Imported/vox.wav" />')
+        als.write_bytes(gzip.compress(text.encode()))          # Live finds it relative to the project
+        make_als(home / "Music" / "Old Project" / "Old.als", [], creator="Ableton Live 10.1.13")
+        with as_home(home):
+            h = rm.project_health(installed=[])
+        by = {e["name"]: e for e in h["projects"]}
+        self.assertEqual(by["Ready.flp"]["status"], "ready")
+        self.assertEqual(by["Song.als"]["status"], "ready", "found through its relative path")
+        self.assertEqual(by["Lost.flp"]["status"], "attention")
+        self.assertEqual(by["Lost.flp"]["missing_samples"], [str(home / "Downloads" / "gone.wav")])
+        self.assertEqual(by["Synth.flp"]["plugins_needed"], ["Serum 2"])
+        self.assertEqual(by["Old.als"]["status"], "unchecked")
+        self.assertEqual((h["ready"], h["total"], h["unchecked"]), (2, 4, 1))
+        self.assertIn(h["projects"][0]["name"], ("Lost.flp", "Synth.flp"), "problems first")
+        with as_home(home):
+            serum = [{"name": "Serum 2", "vendor": "Xfer Records", "key": "serum2"}]
+            self.assertEqual({e["name"]: e["status"] for e in rm.project_health(installed=serum)["projects"]}["Synth.flp"],
+                             "ready", "once the plugin is installed")
+        self.assertIn("2 of 4 projects are ready", "\n".join(rm.health_lines(h)))
