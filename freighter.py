@@ -1875,9 +1875,9 @@ def verify_bundle(bundle, repair=True):
         p = bundle / "data" / it["id"] / rec["stored"]
         try:
             ok = file_size(p) == rec["size"] and hash_file(p, from_drive=True) == rec["sha256"]
-            problem = None if ok else ("missing" if file_size(p) is None else "damaged (it doesn't match the original)")
+            problem = None if ok else ("missing" if file_size(p) is None else "damaged")
         except OSError as e:
-            problem = f"couldn't be read ({e.strerror or e})"
+            problem = f"unreadable: {e.strerror or e}"
         if problem:
             bad.append({"file": rec["rel"], "item": it["label"], "problem": problem, "path": str(p)})
         prog.add(rec["size"])
@@ -3376,9 +3376,49 @@ def cmd_health(args):
     return 0
 
 
+# The app most makers' plugins install through (issue #79). Names only for apps we're sure of; everything else is
+# "from each maker's website". Matched by the longest maker name in the vendor, like the maker links.
+INSTALLER_APPS = {
+    "native instruments": "Native Access", "izotope": "Native Access (or iZotope Product Portal)",
+    "waves": "Waves Central", "arturia": "Arturia Software Center",
+    "plugin alliance": "Plugin Alliance Installation Manager", "brainworx": "Plugin Alliance Installation Manager",
+    "spitfire audio": "Spitfire Audio app", "uvi": "UVI Portal", "softube": "Softube Central",
+    "slate digital": "Slate Digital Connect", "universal audio": "UA Connect", "output": "Output Hub",
+    "toontrack": "Toontrack Product Manager", "eastwest": "EW Installation Center", "ik multimedia": "IK Product Manager",
+    "kilohearts": "Kilohearts Installer", "steinberg": "Steinberg Download Assistant",
+    "roland": "Roland Cloud Manager", "image-line": "the FL Studio installer",
+}
+INSTALLER_LINKS = {"Native Access": "https://www.native-instruments.com/en/specials/native-access/",
+                   "Waves Central": "https://www.waves.com/downloads/central"}
+WEBSITE = "From each maker's website"
+
+
+def installer_for(vendor):
+    v = (vendor or "").lower()
+    names = [name for name in INSTALLER_APPS if name in v]
+    return INSTALLER_APPS[max(names, key=len)] if names else WEBSITE
+
+
+def group_by_installer(missing):
+    """The missing plugins grouped by the app that installs them, most-used app first; the makers' own websites
+    last. missing: plugin_readiness()["missing"]-style entries ({name, vendor, projects})."""
+    groups = {}
+    for e in missing:
+        g = groups.setdefault(installer_for(e.get("vendor")), {"plugins": [], "projects": set()})
+        g["plugins"].append(e["name"])
+        g["projects"] |= set(e.get("projects") or [])
+    out = [{"app": app, "link": INSTALLER_LINKS.get(app), "plugins": g["plugins"], "projects": len(g["projects"])}
+           for app, g in groups.items()]
+    return sorted(out, key=lambda g: (g["app"] == WEBSITE, -g["projects"], g["app"].lower()))
+
+
 def readiness_lines(r):
     lines = [f"{len(r['ready'])} of {r['total']} projects have every plugin they use."]
     if r["missing"]:
+        lines += ["", "Install by app (most of a maker's plugins come back through one app):"]
+        for g in group_by_installer(r["missing"]):
+            lines.append(f"  {g['app']}: {', '.join(g['plugins'])} (used in {g['projects']} "
+                         f"project{'s' if g['projects'] != 1 else ''})")
         lines += ["", "Plugins to install, most useful first:"]
         opened = len(r["ready"])
         for e in r["missing"]:

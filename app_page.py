@@ -741,7 +741,7 @@ function projectHealth() {
     const ready = h.projects.filter(e => e.status === "ready"), old = h.projects.filter(e => e.status === "unchecked");
     const row = (e) => el("li", {},
       el("b", {}, e.name), e.daw ? el("span", {class: "muted"}, ` · ${e.daw}${e.version ? " " + e.version : ""}`) : null,
-      el("div", {class: "path mono"}, e.path),
+      el("div", {class: "muted mono small"}, e.path),
       e.status === "unreadable" ? el("div", {class: "err small"}, "Couldn't be read. It may be damaged; open it in your DAW to check.") : null,
       e.missing_count ? el("details", {}, el("summary", {class: "err small"}, `${plural(e.missing_count, "sample")} missing`),
         el("ul", {class: "small"}, e.missing_samples.map(m => el("li", {class: "mono"}, m)))) : null,
@@ -781,6 +781,13 @@ function readiness() {
         el("div", {class: "panel"}, el("div", {class: "big"}, `${r.ready} of ${r.total}`),
           el("div", {class: "muted"}, left ? `projects have every plugin they use. Install the ones below, most useful first.` :
             "projects have every plugin they use. Nothing to install.")),
+        (r.groups || []).length ? el("h2", {}, "Install by app") : null,
+        (r.groups || []).length ? el("p", {class: "muted"}, "Most makers' plugins come back through one app each. Install these, then sign in and install the plugins listed:") : null,
+        (r.groups || []).length ? el("ul", {class: "plain"}, r.groups.map(g => el("li", {},
+          el("b", {}, g.app), el("span", {class: "muted"}, ` · used in ${plural(g.projects, "project")}`),
+          el("div", {class: "small"}, g.plugins.join(", ")),
+          g.link ? el("a", {href: g.link, target: "_blank", rel: "noopener noreferrer", class: "small"}, `Get ${g.app.replace(/^the /, "")}`) : null))) : null,
+        r.missing.length ? el("h2", {}, "Plugin by plugin") : null,
         r.missing.length ? el("ul", {class: "plain"}, rows) : null,
         r.versions.length ? el("h2", {}, "DAW versions") : null,
         ...r.versions.map(v => el("p", {}, `${v.daw} ${v.version} or newer `, el("span", {class: "muted"}, `(the newest that saved your projects, e.g. ${v.example})`))),

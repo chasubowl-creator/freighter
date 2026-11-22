@@ -489,3 +489,30 @@ class ReportingAndUpdates(unittest.TestCase):
         r = rm.check_for_update(offline)
         self.assertIn("Couldn't reach GitHub", r["error"])
         self.assertFalse(r["newer"])
+
+
+class InstallerApps(unittest.TestCase):
+    """Issue #79: the plugin checklist grouped by the app that installs them."""
+
+    def test_makers_map_to_their_installer_app(self):
+        self.assertEqual(rm.installer_for("Native Instruments GmbH"), "Native Access")
+        self.assertEqual(rm.installer_for("Waves Audio Ltd."), "Waves Central")
+        self.assertEqual(rm.installer_for("Brainworx"), "Plugin Alliance Installation Manager")
+        self.assertEqual(rm.installer_for("Xfer Records"), rm.WEBSITE)
+        self.assertEqual(rm.installer_for(""), rm.WEBSITE)
+
+    def test_groups_are_ordered_by_use_with_websites_last(self):
+        g = rm.group_by_installer([
+            {"name": "Serum 2", "vendor": "Xfer Records", "projects": ["a", "b", "c", "d"]},
+            {"name": "Massive X", "vendor": "Native Instruments", "projects": ["a", "b"]},
+            {"name": "Kontakt 7", "vendor": "Native Instruments", "projects": ["b", "c"]},
+            {"name": "H-Delay", "vendor": "Waves", "projects": ["d"]}])
+        self.assertEqual([x["app"] for x in g], ["Native Access", "Waves Central", rm.WEBSITE])
+        self.assertEqual(g[0]["plugins"], ["Massive X", "Kontakt 7"])
+        self.assertEqual(g[0]["projects"], 3)
+        self.assertTrue(g[0]["link"].startswith("https://www.native-instruments.com/"))
+        lines = "\n".join(rm.readiness_lines({"ready": [], "total": 4, "versions": {}, "warnings": [],
+                                               "missing": [dict(x, opens=0) for x in [
+                                                   {"name": "Massive X", "vendor": "Native Instruments", "projects": ["a"]}]]}))
+        self.assertIn("Install by app", lines)
+        self.assertIn("Native Access: Massive X", lines)

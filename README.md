@@ -13,6 +13,8 @@ FL Studio and Ableton Live. Windows and Mac, in any direction. Free, and everyth
     python3 freighter.py pack --list --since 2024-03   # only projects saved since March 2024, with their kits
     python3 freighter.py rehearse       # practise a full move on this computer, safely
     python3 freighter.py check-update   # is a newer Freighter out? (asks GitHub only when you run it)
+    python3 freighter.py verify E:\     # after packing: read the drive back and compare every file
+    python3 freighter.py health         # on the new computer: is every project ready?
     python3 crate.py preview ~/Desktop/DrumKits   # _Crate: see how your samples would be sorted
 
 Testing on a Windows PC, step by step: [WINDOWS-TEST.md](WINDOWS-TEST.md). The full walkthrough for a real move is in [MOVING-FROM-WINDOWS.md](MOVING-FROM-WINDOWS.md).

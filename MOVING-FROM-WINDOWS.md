@@ -26,6 +26,10 @@ Double-click **freighter**. In the menu:
 - **4: Pack for the move onto a drive.** Plug in the drive, then drag it into the window when asked.
   If it gets interrupted, choose 4 again. It picks up where it stopped. Freighter keeps the computer awake
   while it copies. When it's done, **eject the drive** before unplugging it.
+- **Check the drive.** When packing finishes, say yes to "Check the drive now?" (or in the app, click **Check the
+  drive**; or run `freighter verify E:\`). Freighter reads every file back and compares it with the original, so
+  a bad drive or cable shows up while the old computer still has your files. For the best check, unplug the
+  drive and plug it back in first. Any damaged copy is removed: pack again and only those are copied again.
 
 Installers and programs found in sample folders are left behind on purpose, and listed in `left-behind.txt`.
 
@@ -82,6 +86,11 @@ Double-click **freighter**:
   - **FL Studio:** sample paths in each project are rewritten to the new locations, the same way, with the
     original kept in a `Freighter backup` folder. Close FL Studio first; Freighter won't change projects while
     it's open.
+
+- **7: Check my projects.** Every project, and whether it's ready: every sample found and every plugin
+  installed. Problems come first, with the missing samples and plugins named. Then the plugins to install,
+  grouped by the app each maker uses (Native Access, Waves Central, Arturia Software Center…), so you install
+  app by app instead of plugin by plugin. In the app: **Check my projects** and **Check my plugins**.
 
 Unpacked into the wrong place, or changed your mind? `freighter undo-unpack` removes everything the unpack
 created and puts repaired projects back. Files you've changed since are kept.

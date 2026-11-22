@@ -96,6 +96,14 @@ The first version with a number. Everything that exists so far:
 - **Check for updates** (issue #40): on the app's home screen, the menu (`u`) or `freighter check-update`. It asks
   GitHub only when clicked.
 
+- **Check the drive** (issue #77): after packing, read every file back and compare it with the original, so a
+  bad drive or cable is caught while the old computer still has your files. Damaged copies are removed and packing
+  again copies just those. In the app, the menu and `freighter verify`.
+- **Check my projects** (issue #78): every project on the new computer and whether it's ready (every sample
+  found, every plugin installed), problems first. In the app, menu option 7 and `freighter health`.
+- **Plugins by app** (issue #79): the plugins to install are grouped by the app each maker uses (Native Access,
+  Waves Central, Arturia Software Center, Plugin Alliance…), most-used first.
+
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account
   (issue #36). The Mac programs now keep their "executable" permission, so they start after unzipping.

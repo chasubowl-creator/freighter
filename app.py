@@ -254,7 +254,12 @@ def job_readiness(job):
         missing.append({"name": e["name"], "vendor": vendor, "link": maker_link(vendor),
                         "search": search_link(e["name"], vendor), "opens": e["opens"],
                         "projects": [Path(x).name for x in e["projects"]]})
+    groups = rm.group_by_installer([dict(m, projects=m["projects"]) for m in missing])
+    for g in groups:   # an app's own page if we know it, else the first maker's site
+        g["link"] = g["link"] or next((m["link"] for m in missing if rm.installer_for(m["vendor"]) == g["app"]
+                                       and m["link"]), None) if g["app"] != rm.WEBSITE else None
     return {"total": r["total"], "ready": len(r["ready"]), "missing": missing, "warnings": r["warnings"],
+            "groups": groups,
             "versions": [{"daw": d, "version": v, "example": n} for d, (v, n) in sorted(r["versions"].items())],
             "on_old_computer": not any((rm.home() / "Music" / "Freighter").glob("*/pathmap.json"))}
 
