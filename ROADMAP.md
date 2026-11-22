@@ -102,8 +102,8 @@ Tick the box here when the issue closes.
 - [ ] Move third-party plugin presets (#31, widened into #71) · M · Claude
 - [ ] Repair Ableton device presets and clips (.adg, .alc) (#32) · S · Claude
 - [ ] FL Studio: point it at the moved sample folders (#33, mostly replaced by #68) · M · Claude
-- [ ] App: Crate screen (#34) · S · Claude
-- [ ] Unpack journal, preview and undo (#73) · M · Claude
+- [x] App: Crate screen (#34) · S · Claude
+- [x] Unpack journal, preview and undo (#73) · M · Claude
 - [ ] Speed for 500 GB moves (#74) · M · Claude
 - [ ] Usability test with a non-technical producer (#35) · S · You
 
