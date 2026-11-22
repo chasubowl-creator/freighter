@@ -62,7 +62,8 @@ version" below): `freighter.exe rehearse --to E:\`
 ## Optional: try the new app window (5 min)
 
 Type **9** and press Enter. Freighter opens in your web browser. Choose **Start packing** to see the same list as
-Step 4 with tick boxes, or **Check my plugins**. You don't need to pack anything; close the tab and the window when
+Step 4 with tick boxes, or **Check my plugins**. **Rehearse first** runs the same rehearsal as Step 5, with a
+results page; you don't need to run it twice. You don't need to pack anything; close the tab and the window when
 you're done. Screenshots of anything confusing are very welcome.
 
 ## Step 6: Send the results back
@@ -76,8 +77,8 @@ Send these back (Google Drive or email both work). The window shows where each o
 
 ## Step 7: Clean up
 
-Delete the **Rehearsal** folder in `Music\Freighter` (or `Freighter Rehearsal` on the other drive). Your real
-files were never changed.
+Delete the **Rehearsal** folder in `Music\Freighter` (or `Freighter Rehearsal` on the other drive), or choose
+**Delete them** under "On this computer" on the app's home screen. Your real files were never changed.
 
 ---
 

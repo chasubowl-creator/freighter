@@ -7,6 +7,7 @@ LOCKED_PAGE = """<!doctype html><meta charset=utf-8><title>Freighter</title>
 PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Freighter</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171a1f'/%3E%3Crect x='6' y='20' width='20' height='5' rx='2.5' fill='%233d8bff'/%3E%3C/svg%3E">
 <style>
 :root{--bg:#0f1114;--panel:#171a1f;--panel2:#1d2127;--line:#272c33;--ink:#eef0f2;--muted:#9aa1ab;--blue:#3d8bff;
 --blue2:#2f6fd6;--warn:#f0b44b;--bad:#ff6b6b;--ok:#4cc38a}
@@ -57,6 +58,7 @@ label.radio{display:block;margin:8px 0}.note details,.plugin details{margin-top:
 ul.plain{list-style:none;padding:0;margin:8px 0}ul.plain>li{padding:10px 0;border-bottom:1px solid var(--line)}
 ul.checks{list-style:none;padding:0}ul.checks li{padding:4px 0}a{color:var(--blue)}
 ul.plain>li>.row{margin-top:6px}.stage{font-weight:600}.stage:empty{display:none}
+.choice,.mono.small{min-width:0;overflow-wrap:anywhere}
 @media (max-width:600px){h1{font-size:24px}.big{font-size:28px}}
 </style></head>
 <body>
@@ -179,7 +181,7 @@ function home() {
     el("h1", {}, "Move your studio to a new computer."),
     el("p", {class: "sub"}, "Projects, presets and every sample your projects use. Freighter never changes your original files, and nothing leaves your computer."),
     el("div", {class: "cards"},
-      card("old computer", "Pack your FL Studio and Ableton folders, projects and the samples they use onto a drive. First time? Rehearse: a practice move on this computer that checks every sample.",
+      card("old computer", "Pack your FL Studio and Ableton folders, projects and the samples they use onto a drive. Or rehearse the whole move here first.",
         el("button", {class: "primary", onclick: () => moveList("pack")}, "Start packing"),
         el("button", {onclick: () => moveList("rehearse")}, "Rehearse first")),
       card("new computer", "Unpack a bundle from the drive, put everything where it belongs, and repair your projects.",
@@ -599,7 +601,8 @@ function readiness() {
           " ", el("b", {}, m.name), m.vendor ? el("span", {class: "muted"}, " by " + m.vendor) : null),
         el("div", {class: "muted small"}, `Used in ${plural(m.projects.length, "project")}` +
           (m.opens ? ` · installing it opens ${plural(m.opens, "more project")}` : "")),
-        m.link ? el("a", {href: m.link, target: "_blank", rel: "noopener noreferrer", class: "small"}, "Get it from " + (m.vendor || "the maker")) : null,
+        m.link ? el("a", {href: m.link, target: "_blank", rel: "noopener noreferrer", class: "small"}, "Get it from " + (m.vendor || "the maker"))
+          : el("a", {href: m.search, target: "_blank", rel: "noopener noreferrer", class: "small"}, "Search the web for it"),
         el("details", {}, el("summary", {class: "small"}, "Which projects"), el("ul", {class: "small"}, m.projects.map(p => el("li", {}, p))))));
       show(backTo(home), el("h1", {}, "Your plugins"),
         el("div", {class: "panel"}, el("div", {class: "big"}, `${r.ready} of ${r.total}`),

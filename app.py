@@ -21,7 +21,7 @@ import time
 import traceback
 import webbrowser
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote_plus, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crate  # noqa: E402
@@ -178,12 +178,39 @@ MAKER_LINKS = {
     "universal audio": "https://www.uaudio.com/", "slate digital": "https://slatedigital.com/", "eastwest": "https://www.soundsonline.com/",
     "nicky romero": "https://kickstart-plugin.com/", "cableguys": "https://www.cableguys.com/", "xln audio": "https://www.xlnaudio.com/",
     "lennardigital": "https://www.lennardigital.com/", "reveal sound": "https://revealsound.com/",
+    "ableton": "https://www.ableton.com/", "eventide": "https://www.eventideaudio.com/",
+    "newfangled audio": "https://www.newfangledaudio.com/", "softube": "https://www.softube.com/",
+    "ik multimedia": "https://www.ikmultimedia.com/", "korg": "https://www.korg.com/", "roland": "https://www.roland.com/",
+    "steinberg": "https://www.steinberg.net/", "celemony": "https://www.celemony.com/", "antares": "https://www.antarestech.com/",
+    "sonnox": "https://www.sonnox.com/", "oeksound": "https://oeksound.com/", "tokyo dawn": "https://www.tokyodawn.net/",
+    "meldaproduction": "https://www.meldaproduction.com/", "d16 group": "https://d16.pl/", "baby audio": "https://babyaud.io/",
+    "goodhertz": "https://goodhertz.com/", "minimal audio": "https://www.minimal.audio/", "polyverse": "https://polyversemusic.com/",
+    "sugar bytes": "https://sugar-bytes.de/", "rob papen": "https://www.robpapen.com/", "refx": "https://refx.com/",
+    "tal software": "https://tal-software.com/", "togu audio line": "https://tal-software.com/",
+    "audiothing": "https://www.audiothing.net/", "air music": "https://www.airmusictech.com/", "ujam": "https://www.ujam.com/",
+    "heavyocity": "https://heavyocity.com/", "dmg audio": "https://dmgaudio.com/", "neural dsp": "https://neuraldsp.com/",
+    "positive grid": "https://www.positivegrid.com/", "gforce": "https://www.gforcesoftware.com/", "lunacy": "https://lunacy.audio/",
+    "tone2": "https://www.tone2.com/", "wave alchemy": "https://www.wavealchemy.co.uk/", "denise": "https://denise.io/",
+    "sonible": "https://www.sonible.com/", "audio damage": "https://www.audiodamage.com/", "tracktion": "https://www.tracktion.com/",
+    "vengeance": "https://www.vengeance-sound.de/", "splice": "https://splice.com/", "glitchmachines": "https://glitchmachines.com/",
+    "brainworx": "https://www.plugin-alliance.com/", "black rooster": "https://www.blackroosteraudio.com/",
+    "cherry audio": "https://cherryaudio.com/", "excite audio": "https://www.excite-audio.com/",
+    "initial audio": "https://initialaudio.com/", "audiomodern": "https://audiomodern.com/", "kv331": "https://www.kv331audio.com/",
+    "acustica": "https://www.acustica-audio.com/", "sonarworks": "https://www.sonarworks.com/",
+    "wavesfactory": "https://www.wavesfactory.com/",
 }
 
 
 def maker_link(vendor):
+    """The maker's own site, by the longest known name in the vendor ("Wavesfactory" isn't Waves)."""
     v = (vendor or "").lower()
-    return next((url for name, url in MAKER_LINKS.items() if name in v), None)
+    names = [name for name in MAKER_LINKS if name in v]
+    return MAKER_LINKS[max(names, key=len)] if names else None
+
+
+def search_link(name, vendor):
+    """For makers without a known site: a web search, so every missing plugin has a next step (issue #30)."""
+    return "https://duckduckgo.com/?q=" + quote_plus(" ".join(x for x in (vendor, name, "plugin download") if x))
 
 
 def job_readiness(job):
@@ -207,7 +234,8 @@ def job_readiness(job):
     missing = []
     for e in r["missing"]:
         vendor = e["vendor"] or next((known[k] for k in rs.match_keys(e["name"], "") if known.get(k)), "")
-        missing.append({"name": e["name"], "vendor": vendor, "link": maker_link(vendor), "opens": e["opens"],
+        missing.append({"name": e["name"], "vendor": vendor, "link": maker_link(vendor),
+                        "search": search_link(e["name"], vendor), "opens": e["opens"],
                         "projects": [Path(x).name for x in e["projects"]]})
     return {"total": r["total"], "ready": len(r["ready"]), "missing": missing, "warnings": r["warnings"],
             "versions": [{"daw": d, "version": v, "example": n} for d, (v, n) in sorted(r["versions"].items())],

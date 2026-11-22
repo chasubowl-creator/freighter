@@ -62,6 +62,14 @@ The first version with a number. Everything that exists so far:
   button on the app's results page): undo removes exactly what the unpack created and puts repaired projects back,
   keeping anything changed since. Unpacking a newer bundle replaces files an earlier unpack put there, unless you
   changed them.
+- The app can **rehearse** too: pick what moves and where, then see PASS or FAIL with every lost, already-missing
+  and unchecked sample, and delete the rehearsal's files in one click (`rehearse --clean` on the command line).
+- The home screen lists what's already on this computer: earlier unpacks (repair again, undo) and leftover
+  rehearsals (delete), even after Freighter was closed.
+- Copies show files done and a time-left guess; long jobs show which step they're on.
+- The plugin checklist links to about 75 makers' sites, and offers a web search for any other maker.
+- Faster (issue #74): on a 30,000-sample test studio, planning takes half the time, packing about 40% less, and
+  unpacking again no longer re-reads files it already copied. Results are byte-for-byte the same.
 
 ### Known problems
 The fixes planned before the public beta are listed in the

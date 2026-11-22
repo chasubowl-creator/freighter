@@ -348,6 +348,18 @@ class Server(unittest.TestCase):
         self.assertFalse(library.exists())
         self.assertTrue((kits / "Kicks" / "kick.wav").is_file(), "originals untouched")
 
+    def test_maker_links(self):
+        """Issue #30: the maker's own site when known (the longest matching name wins), otherwise a web search."""
+        self.assertEqual(app.maker_link("Waves Audio Ltd."), "https://www.waves.com/")
+        self.assertEqual(app.maker_link("Wavesfactory"), "https://www.wavesfactory.com/")
+        self.assertEqual(app.maker_link("Xfer Records"), "https://xferrecords.com/")
+        self.assertIsNone(app.maker_link("Somebody Unknown"))
+        self.assertIsNone(app.maker_link(None))
+        self.assertGreaterEqual(len(app.MAKER_LINKS), 50)
+        self.assertTrue(all(u.startswith("https://") for u in app.MAKER_LINKS.values()))
+        self.assertEqual(app.search_link("Kit Maker", "Drumolution"),
+                         "https://duckduckgo.com/?q=Drumolution+Kit+Maker+plugin+download")
+
     def test_drives_are_listed(self):
         status, d = self.request("GET", "/api/drives")
         self.assertEqual(status, 200)
