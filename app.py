@@ -58,6 +58,7 @@ class Job:
         self.kind, self.fn, self.router, self.params = kind, fn, router, params or {}
         self.state, self.progress, self.result, self.error, self.crash = "running", None, None, None, None
         self.lines, self.partial, self.cancel_requested = [], "", False
+        self.stage = None   # the latest "== 2/4  Unpack…" heading a long command printed
         self.files = {}   # things the page may ask to open, by name -> local path
         self.lock = threading.Lock()
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -87,8 +88,8 @@ class Job:
             rm.PROGRESS.listener = None
             self.router.local.job = None
 
-    def on_progress(self, label, done, total):
-        self.progress = {"label": label, "done": done, "total": total}
+    def on_progress(self, label, done, total, extra=None):
+        self.progress = dict(extra or {}, label=label, done=done, total=total)
         if self.cancel_requested:
             raise rm.Cancelled()
 
@@ -97,11 +98,14 @@ class Job:
             text = self.partial + s
             *done, self.partial = text.split("\n")
             self.lines.extend(line.rstrip() for line in done if line.strip())
+            for line in done:
+                if line.startswith("== "):
+                    self.stage = line[3:].strip()
             del self.lines[:-MAX_LOG_LINES]
 
     def view(self):
         with self.lock:
-            return {"id": self.id, "kind": self.kind, "state": self.state, "progress": self.progress,
+            return {"id": self.id, "kind": self.kind, "state": self.state, "progress": self.progress, "stage": self.stage,
                     "log": self.lines[-12:], "result": self.result, "error": self.error, "crash": self.crash}
 
 
@@ -234,6 +238,18 @@ def clean_params(kind, body):
         if by not in ("genre", "type"):
             return None, "bad request"
         return {"folders": [str(Path(f).expanduser()) for f in folders], "by": by}, None
+    if kind == "rehearse":
+        to, skip = body.get("to"), body.get("skip", [])
+        if to is not None and (not isinstance(to, str) or not Path(to).expanduser().is_dir()):
+            return None, "Choose a drive or folder that exists."
+        if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip):
+            return None, "bad request"
+        return {"to": str(Path(to).expanduser()) if to else None, "skip": skip}, None
+    if kind == "rehearse_cleanup":
+        f = body.get("folder")
+        if not isinstance(f, str) or not rm.is_rehearsal(Path(f).expanduser()):
+            return None, "That isn't a Freighter rehearsal folder."
+        return {"folder": str(Path(f).expanduser().resolve())}, None
     if kind == "undo":
         host = body.get("host")
         if host is not None and (not isinstance(host, str) or "/" in host or "\\" in host or host in (".", "..")):
@@ -293,6 +309,32 @@ def job_undo(job):
     return rm.undo_unpack(job.params.get("host"))
 
 
+def job_rehearse(job):
+    """A whole practice move on this computer (the menu's option 3): pack, unpack into a stand-in new computer,
+    repair, then check every sample. The real files are only read."""
+    p = job.params
+    rm.LAST.pop("rehearse", None)
+    rm.cmd_rehearse(argparse.Namespace(to=p.get("to"), include=[], skip=list(p.get("skip", []))))
+    r = rm.LAST["rehearse"]
+    job.files["report"] = r["report"]
+    return dict(r, lost=r["lost"][:200], already=r["already"][:200], unchecked=r["unchecked"][:100])
+
+
+def job_rehearse_cleanup(job):
+    """Delete a rehearsal's files."""
+    folder = job.params["folder"]
+    return {"freed": rm.remove_rehearsal(folder), "folder": folder}
+
+
+def leftover_rehearsals():
+    """Rehearsals whose files are still on disk: the usual place, and wherever the last one in this session went."""
+    found = []
+    for f in (rm.rehearsal_folder(), rm.LAST.get("rehearse_folder")):
+        if f and str(f) not in found and rm.is_rehearsal(f):
+            found.append(str(f))
+    return found
+
+
 def job_repair(job):
     """Repair projects again (e.g. after closing FL Studio)."""
     r = rm.repair_projects()
@@ -301,6 +343,7 @@ def job_repair(job):
 
 JOBS = {"move_list": job_move_list, "plugins": job_plugins, "pack": job_pack, "unpack": job_unpack,
         "readiness": job_readiness, "repair": job_repair, "undo": job_undo,
+        "rehearse": job_rehearse, "rehearse_cleanup": job_rehearse_cleanup,
         "crate_preview": job_crate_preview, "crate_build": job_crate_build, "crate_undo": job_crate_undo}
 
 
@@ -386,6 +429,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # FL's browser folders are where producers keep their sample libraries
             return self.send(200, {"folders": [f for f in rm.fl_settings()["search_paths"] if Path(f).is_dir()],
                                    "library_exists": crate.default_library().exists()})
+        if url.path == "/api/home":
+            # what's already on this computer: unpacks that can be repaired or undone, rehearsals to delete
+            return self.send(200, {"unpacks": rm.earlier_unpacks(), "rehearsals": leftover_rehearsals()})
+        if url.path == "/api/rehearsal":
+            # where a rehearsal would go by default, the room there, and rehearsals still taking up space
+            default = rm.rehearsal_folder()
+            return self.send(200, {"default": str(default), "free": rm.shutil.disk_usage(rm.existing_parent(default)).free,
+                                   "leftovers": leftover_rehearsals()})
         if url.path == "/api/drives":
             return self.send(200, {"drives": rm.list_drives(), "os": rm.THIS_OS})
         if url.path.startswith("/api/jobs/"):

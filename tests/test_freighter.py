@@ -1571,3 +1571,34 @@ class CrossOSMove(TempDirCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressGuess(unittest.TestCase):
+    def test_time_left_counts_only_files_actually_copied(self):
+        seen, clock = [], [100.0]
+        rm.PROGRESS.listener = lambda *a: seen.append(a)
+        try:
+            with mock.patch.object(rm.time, "time", lambda: clock[0]), quiet():
+                p = rm.Progress(1000, "Copying", 4)
+                p.add(0, files=0)
+                p.add(500, copied=False)     # already in place from an earlier run: takes no time
+                clock[0] += 5
+                p.add(100)                   # really copied: 100 bytes in 5 seconds
+        finally:
+            rm.PROGRESS.listener = None
+        label, done, total, extra = seen[-1]
+        self.assertEqual((label, done, total), ("Copying", 600, 1000))
+        self.assertEqual((extra["files"], extra["files_total"]), (2, 4))
+        self.assertAlmostEqual(extra["eta"], 20.0)   # 400 bytes left at 20 bytes/s, not 400 at 120 bytes/s
+
+    def test_no_guess_until_there_is_something_to_go_on(self):
+        with quiet():
+            p = rm.Progress(1000, "Copying", 2)
+            p.add(10)
+        self.assertIsNone(p.eta())
+
+    def test_time_left_reads_naturally(self):
+        self.assertEqual(rm.human_time(42), "about 40 seconds")
+        self.assertEqual(rm.human_time(720), "about 12 minutes")
+        self.assertEqual(rm.human_time(3600), "about 1 hour")
+        self.assertEqual(rm.human_time(7800), "about 2 hours 10 minutes")

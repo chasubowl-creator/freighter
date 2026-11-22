@@ -429,26 +429,57 @@ class Cancelled(BaseException):
     """Raised to stop a job. A BaseException, so code that catches Exception to carry on can't swallow it."""
 
 
-def report_progress(label, done, total):
+def report_progress(label, done, total, extra=None):
+    """extra: for copies, {"files", "files_total", "eta"} (eta in seconds, None until it can be guessed)."""
     listener = getattr(PROGRESS, "listener", None)
     if listener:
-        listener(label, done, total)
+        listener(label, done, total, extra)
+
+
+def human_time(seconds):
+    """'about 40 seconds', 'about 12 minutes', 'about 2 hours 10 minutes'."""
+    s = int(seconds)
+    if s < 60:
+        return f"about {max(5, round(s / 5) * 5)} seconds"
+    m = round(s / 60)
+    if m < 60:
+        return f"about {m} minute{'s' if m != 1 else ''}"
+    h, m = divmod(m, 60)
+    return f"about {h} hour{'s' if h != 1 else ''}" + (f" {m} minute{'s' if m != 1 else ''}" if m else "")
 
 
 class Progress:
-    def __init__(self, total_bytes, label):
-        self.total, self.done, self.label, self.last, self.start = total_bytes, 0, label, 0.0, time.time()
+    """Bytes and files done, and a guess at the time left. The speed counts only files actually copied: files
+    skipped because they're already in place take no time and would make the guess far too hopeful."""
 
-    def add(self, n):
-        self.done += n
-        report_progress(self.label, self.done, self.total)
+    def __init__(self, total_bytes, label, total_files=None):
+        self.total, self.done, self.label, self.last, self.start = total_bytes, 0, label, 0.0, time.time()
+        self.files, self.total_files = 0, total_files
+        self.copied, self.copy_time, self.prev = 0, 0.0, time.time()
+
+    def eta(self):
+        if self.copy_time < 3 or not self.copied:
+            return None
+        return max(0.0, (self.total - self.done) / (self.copied / self.copy_time))
+
+    def add(self, n, files=1, copied=True):
         now = time.time()
+        if copied and files:
+            self.copied += n
+            self.copy_time += now - self.prev
+        self.prev = now
+        self.done += n
+        self.files += files
+        report_progress(self.label, self.done, self.total,
+                        {"files": self.files, "files_total": self.total_files, "eta": self.eta()})
         if now - self.last > 2 or self.done >= self.total:
             self.last = now
             pct = 100 * self.done / self.total if self.total else 100
-            rate = self.done / max(now - self.start, 0.001)
+            left = self.eta()
             print(f"  {self.label}: {pct:5.1f}%  {rs.human_size(self.done)} of {rs.human_size(self.total)}"
-                  f"  ({rs.human_size(rate)}/s)", flush=True)
+                  + (f", {self.files:,} of {self.total_files:,} files" if self.total_files else "")
+                  + (f", {human_time(left)} left" if left is not None and self.done < self.total else ""),
+                  flush=True)
 
 
 COMPLETE = "complete.json"   # written last by pack; unpack checks for it (issue #59)
@@ -931,8 +962,8 @@ def cmd_pack(args):
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     (bundle / COMPLETE).unlink(missing_ok=True)   # changing it: not finished until the end
-    prog = Progress(total, "Copying")
-    prog.add(0)
+    prog = Progress(total, "Copying", sum(len(it["_files"]) for it in items))
+    prog.add(0, files=0)
     errors = []
     for it in items:
         index_path = bundle / "index" / f"{it['id']}.jsonl"
@@ -955,12 +986,13 @@ def cmd_pack(args):
                 # skip what's already there, unless the original changed since (same size isn't enough: a
                 # re-rendered sample often keeps its length)
                 if rec and rec["size"] == size and file_size(dst) == size and rec.get("mtime") in (None, mtime):
-                    prog.add(size)
+                    prog.add(size, copied=False)
                     continue
                 try:
                     digest = copy_and_hash(ap, dst)
                 except OSError as e:
                     errors.append(f"{ap}: {e}")
+                    prog.add(size, copied=False)
                     continue
                 index.write(json.dumps({"rel": rel, "stored": stored, "size": size, "sha256": digest,
                                         "mtime": mtime}) + "\n")
@@ -1151,6 +1183,18 @@ def journal_repair(project, backup, made_backup):
     with open(j, "a", encoding="utf-8") as f:
         f.write(json.dumps({"project": str(project), "sha256": hash_file(project), "backup": str(backup),
                             "made_backup": made_backup}) + "\n")
+
+
+def earlier_unpacks():
+    """Unpacks on this computer that can still be undone, newest first: [{host, when, files}]."""
+    base = home() / "Music" / "Freighter"
+    out = []
+    for d in (sorted(base.iterdir()) if base.is_dir() else []):
+        j = d / UNPACK_JOURNAL
+        if d.is_dir() and j.is_file():
+            out.append({"host": d.name, "files": sum(1 for e in read_journal(j) if e.get("kind") == "file"),
+                        "when": dt.datetime.fromtimestamp(j.stat().st_mtime).isoformat(timespec="seconds")})
+    return sorted(out, key=lambda u: u["when"], reverse=True)
 
 
 def undo_unpack(host=None):
@@ -1426,8 +1470,8 @@ def cmd_unpack(args):
     journal = open(journal_path, "a", encoding="utf-8")
     for d in new_landing:       # e.g. Music/Freighter itself, on a computer that never had it
         journal.write(json.dumps({"kind": "dir", "path": str(d)}) + "\n")
-    prog = Progress(total, "Copying")
-    prog.add(0)
+    prog = Progress(total, "Copying", sum(len(idx) for _, _, idx in plan))
+    prog.add(0, files=0)
     conflicts, bad, entries, replaced = [], [], [], 0
     for it, dest, idx in plan:
         data_root = bundle / "data" / it["id"]
@@ -1437,14 +1481,14 @@ def cmd_unpack(args):
             dst = dest / target_rel
             if file_size(dst) is not None:
                 if file_size(dst) == rec["size"] and hash_file(dst) == rec["sha256"]:
-                    prog.add(rec["size"])
+                    prog.add(rec["size"], copied=False)
                     continue  # already there, identical
                 if earlier.get(norm(str(dst), THIS_OS == "windows")) == hash_file(dst):
                     replaced += 1   # an earlier unpack put it there and nobody changed it since: the newer one wins
                 else:
                     dst = dst.with_name(f"{dst.stem} (from {src_host}){dst.suffix}")
                     if file_size(dst) == rec["size"]:
-                        prog.add(rec["size"])
+                        prog.add(rec["size"], copied=False)
                         continue
                     conflicts.append(str(dst))
             for d in missing_folders(dst.parent):
@@ -1453,6 +1497,7 @@ def cmd_unpack(args):
                 digest = copy_and_hash(src, dst)
             except OSError as e:
                 bad.append(f"{src}: {e}")
+                prog.add(rec["size"], copied=False)
                 continue
             journal.write(json.dumps({"kind": "file", "path": str(dst), "sha256": digest}) + "\n")
             journal.flush()
@@ -2388,13 +2433,54 @@ def project_refs(p):
     return "Ableton", als_sample_refs(text)
 
 
+REHEARSAL_NAMES = ("Rehearsal", "Freighter Rehearsal")
+
+
+def rehearsal_folder(to=None):
+    """Where a rehearsal goes. Always a folder of its own: --to E:\\ must not turn the whole drive into
+    "a rehearsal" (issue #62)."""
+    return (Path(to).expanduser() / REHEARSAL_NAMES[1] if to else home() / "Music" / "Freighter" / REHEARSAL_NAMES[0]).resolve()
+
+
+def is_rehearsal(folder):
+    """Only a folder Freighter made for a rehearsal: its name, its marker, and never a drive's top folder."""
+    f = Path(folder)
+    return f.name in REHEARSAL_NAMES and f != Path(f.anchor) and (f / REHEARSAL_MARKER).is_file()
+
+
+def remove_rehearsal(folder):
+    """Delete a rehearsal's files (copies only: the real files were never touched). Returns the bytes freed."""
+    f = Path(folder).expanduser().resolve()
+    if not is_rehearsal(f):
+        sys.exit(f"{f} isn't a Freighter rehearsal folder, so Freighter won't delete it.")
+    freed = 0
+    for root, _dirs, files in os.walk(long_path(f)):
+        for n in files:
+            try:
+                freed += os.lstat(os.path.join(root, n)).st_size
+            except OSError:
+                pass
+
+    def retry(fn, path, _exc):   # Windows won't delete read-only files until they're made writable
+        os.chmod(path, 0o666 if os.path.isfile(path) else 0o777)
+        fn(path)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(long_path(f), onexc=retry)
+    else:
+        shutil.rmtree(long_path(f), onerror=retry)
+    return freed
+
+
 def cmd_rehearse(args):
     """A full move on one computer: pack, unpack into a stand-in 'new computer' folder, repair,
     then check every project's samples. Your real folders are only read, never changed."""
     global HIDE
-    # always a folder of its own: --to E:\\ must not turn the whole drive into "a rehearsal" (issue #62)
-    base = (Path(args.to).expanduser() / "Freighter Rehearsal" if args.to
-            else home() / "Music" / "Freighter" / "Rehearsal").resolve()
+    base = rehearsal_folder(args.to)
+    if getattr(args, "clean", False):
+        freed = remove_rehearsal(base)
+        print(f"Deleted the rehearsal in {base} ({rs.human_size(freed)} freed). Your real files weren't touched.")
+        return 0
+    LAST["rehearse_folder"] = str(base)   # known even if the rehearsal stops part-way, so it can be cleaned up
     drive, new_home = base / "drive", base / "new-computer"
     real_home = home()
     items = pack_items(args.include, set(args.skip))
@@ -2494,6 +2580,8 @@ def cmd_rehearse(args):
         if already:
             print(f"Note: {len(already)} samples were already missing before the move (listed in {report}).")
         print(f"Rehearsal files: {base}  (delete this folder when you're done; your real files weren't touched)")
+        LAST["rehearse"] = {"passed": not totals["lost"], "totals": totals, "lost": lost, "already": already,
+                            "unchecked": unchecked, "report": str(report), "folder": str(base)}
         return 0 if not totals["lost"] else 2
     finally:
         HIDE = None
@@ -2712,6 +2800,7 @@ def main():
     s.add_argument("--to", metavar="FOLDER", help="a drive or folder to rehearse on; Freighter makes a 'Freighter Rehearsal' folder there (default: Music/Freighter/Rehearsal)")
     s.add_argument("--include", action="append", default=[], metavar="FOLDER")
     s.add_argument("--skip", action="append", default=[], metavar="ID")
+    s.add_argument("--clean", action="store_true", help="delete an earlier rehearsal's files (with the same --to)")
     s.set_defaults(fn=cmd_rehearse)
 
     s = sub.add_parser("app", help="open Freighter in your web browser (preview)")

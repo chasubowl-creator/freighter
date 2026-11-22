@@ -56,6 +56,7 @@ td.tick{width:28px}.actions{margin-top:18px}button.small{padding:3px 10px;font-s
 label.radio{display:block;margin:8px 0}.note details,.plugin details{margin-top:6px}summary{cursor:pointer;color:var(--muted)}
 ul.plain{list-style:none;padding:0;margin:8px 0}ul.plain>li{padding:10px 0;border-bottom:1px solid var(--line)}
 ul.checks{list-style:none;padding:0}ul.checks li{padding:4px 0}a{color:var(--blue)}
+ul.plain>li>.row{margin-top:6px}.stage{font-weight:600}.stage:empty{display:none}
 @media (max-width:600px){h1{font-size:24px}.big{font-size:28px}}
 </style></head>
 <body>
@@ -86,6 +87,13 @@ function size(n) {
   const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; n = Number(n) || 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return (i ? n.toFixed(1) : n.toFixed(0)) + " " + u[i];
+}
+function timeLeft(s) {   // a rough guess, so rounded: "about 12 minutes"
+  if (s < 60) return `about ${Math.max(5, Math.round(s / 5) * 5)} seconds`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `about ${plural(m, "minute")}`;
+  const h = Math.floor(m / 60), r = m % 60;
+  return `about ${plural(h, "hour")}` + (r ? ` ${plural(r, "minute")}` : "");
 }
 function when(iso) { try { return new Date(iso).toLocaleString([], {dateStyle: "medium", timeStyle: "short"}); } catch (e) { return iso; } }
 async function api(path, body) {
@@ -125,10 +133,11 @@ function copyButton(text) {
 async function runJob(kind, params, head, render, opts) {
   opts = opts || {};
   const bar = el("div", {class: "bar indef"}, el("i"));
+  const stage = el("div", {class: "stage"});   // "Step 2 of 4: …" for commands with stages (the rehearsal)
   const label = el("div", {class: "muted"}, "Starting…");
   const log = el("div", {class: "log mono"});
   const cancel = el("button", {}, "Cancel");
-  const box = el("div", {class: "panel"}, label, bar, log, opts.noCancel ? null : el("div", {class: "row"}, cancel));
+  const box = el("div", {class: "panel"}, stage, label, bar, log, opts.noCancel ? null : el("div", {class: "row"}, cancel));
   show(...head, box);
   let id;
   try { id = (await api("/api/jobs", Object.assign({kind}, params || {}))).id; }
@@ -138,12 +147,15 @@ async function runJob(kind, params, head, render, opts) {
     await new Promise(r => setTimeout(r, 400));
     let j;
     try { j = await api(`/api/jobs/${id}`); } catch (e) { label.textContent = "Lost contact with Freighter. Is its window still open?"; return; }
+    stage.textContent = j.stage ? j.stage.replace(/^(\d+)\/(\d+)\s+/, "Step $1 of $2: ") : "";
     if (j.progress) {
       const p = j.progress, pct = p.total ? Math.min(100, 100 * p.done / p.total) : 0;
       bar.classList.toggle("indef", !p.total);
       bar.firstChild.style.width = pct.toFixed(1) + "%";
       label.textContent = !p.total ? p.label + "…" :
-        (p.label === "Copying" ? `Copying: ${pct.toFixed(0)}% (${size(p.done)} of ${size(p.total)})` : `${p.label}: ${pct.toFixed(0)}%`);
+        (p.label === "Copying" ? `Copying: ${pct.toFixed(0)}% (${size(p.done)} of ${size(p.total)}` +
+          (p.files_total ? `, ${p.files.toLocaleString()} of ${plural(p.files_total, "file")}` : "") + ")" +
+          (p.eta != null && p.done < p.total ? ` · ${timeLeft(p.eta)} left` : "") : `${p.label}: ${pct.toFixed(0)}%`);
     } else if (j.log.length) label.textContent = j.log[j.log.length - 1];
     log.textContent = j.log.join("\n");
     if (j.state === "running") continue;
@@ -161,12 +173,15 @@ async function runJob(kind, params, head, render, opts) {
 function home() {
   const card = (name, text, ...actions) => el("div", {class: "card"},
     el("h3", {}, el("b", {}, "_"), name), el("p", {}, text), el("div", {class: "row"}, ...actions));
+  const here = el("div");
+  api("/api/home").then(r => here.replaceChildren(...onThisComputer(r))).catch(() => {});
   show(
     el("h1", {}, "Move your studio to a new computer."),
     el("p", {class: "sub"}, "Projects, presets and every sample your projects use. Freighter never changes your original files, and nothing leaves your computer."),
     el("div", {class: "cards"},
-      card("old computer", "Pack your FL Studio and Ableton folders, projects and the samples they use onto a drive.",
-        el("button", {class: "primary", onclick: moveList}, "Start packing")),
+      card("old computer", "Pack your FL Studio and Ableton folders, projects and the samples they use onto a drive. First time? Rehearse: a practice move on this computer that checks every sample.",
+        el("button", {class: "primary", onclick: () => moveList("pack")}, "Start packing"),
+        el("button", {onclick: () => moveList("rehearse")}, "Rehearse first")),
       card("new computer", "Unpack a bundle from the drive, put everything where it belongs, and repair your projects.",
         el("button", {class: "primary", onclick: pickBundle}, "Start unpacking")),
       card("plugins", "See which plugins your projects need, and which to install first on this computer.",
@@ -174,18 +189,35 @@ function home() {
         el("button", {onclick: pluginReport}, "Full plugin report")),
       card("crate", "Sort drum kits and sample packs into one library by genre, pack and sound type. Takes no extra space.",
         el("button", {class: "primary", onclick: crateStart}, "Sort my samples"))
-    )
+    ),
+    here
   );
+}
+
+/* Unpacks that can still be repaired or undone, and rehearsals still taking up space: they outlast the app. */
+function onThisComputer(r) {
+  if (!r.unpacks.length && !r.rehearsals.length) return [];
+  return [el("h2", {}, "On this computer"), el("ul", {class: "plain"},
+    r.unpacks.map(u => el("li", {},
+      el("b", {}, `Unpacked from ${u.host}`), el("span", {class: "muted"}, ` · ${when(u.when)} · ${plural(u.files, "file")}`),
+      el("div", {class: "row"}, el("button", {class: "small", onclick: repairAgain}, "Repair projects again"),
+        el("button", {class: "small", onclick: () => undoUnpack(u.host)}, "Undo this unpack")))),
+    r.rehearsals.map(f => el("li", {},
+      el("b", {}, "Rehearsal files"), el("span", {class: "muted"}, " · copies from a practice move"),
+      el("div", {class: "muted mono small"}, f),
+      el("div", {class: "row"}, el("button", {class: "small", onclick: () => deleteRehearsal(f)}, "Delete them")))))];
 }
 
 /* ---------- old computer: 1 what moves, 2 pick a drive, 3 pack ---------- */
 const OLD_STEPS = ["What moves", "Pick a drive", "Pack"];
-let move = null;   // {items, total, skip:Set, ...}
+const REH_STEPS = ["What moves", "Where", "Rehearse"];
+let move = null;   // {items, total, skip:Set, mode:"pack"|"rehearse", ...}
 
-function moveList() {
-  runJob("move_list", {}, [backTo(home), steps(OLD_STEPS, 0), el("h1", {}, "What a move would take"),
+function moveList(mode) {
+  const reh = mode === "rehearse";
+  runJob("move_list", {}, [backTo(home), steps(reh ? REH_STEPS : OLD_STEPS, 0), el("h1", {}, reh ? "Rehearse a move" : "What a move would take"),
     el("p", {class: "sub"}, "Looking through your music folders and every project for the files they use…")], (r) => {
-    move = Object.assign(r, {skip: new Set()});
+    move = Object.assign(r, {skip: new Set(), mode: reh ? "rehearse" : "pack"});
     chooseItems();
   });
 }
@@ -194,11 +226,13 @@ function chooseItems() {
   const r = move;
   const totalEl = el("div", {class: "big"});
   const countEl = el("div", {class: "muted"});
-  const next = el("button", {class: "primary", onclick: pickDrive}, "Next: pick a drive");
+  const reh = r.mode === "rehearse";
+  const next = el("button", {class: "primary", onclick: reh ? rehearseWhere : pickDrive}, reh ? "Next: where to rehearse" : "Next: pick a drive");
   const refresh = () => {
     const chosen = r.items.filter(it => !r.skip.has(it.id));
     totalEl.textContent = size(chosen.reduce((a, it) => a + it.bytes, 0));
-    countEl.textContent = `${plural(chosen.length, "folder")} of ${r.items.length} chosen. Your drive needs at least this much free space.`;
+    countEl.textContent = `${plural(chosen.length, "folder")} of ${r.items.length} chosen. ` +
+      (reh ? "A rehearsal needs about twice this much free space." : "Your drive needs at least this much free space.");
     next.disabled = !chosen.length;
   };
   const rows = r.items.map(it => {
@@ -219,8 +253,11 @@ function chooseItems() {
     el("div", {class: "muted"}, "For example FL Studio's or Ableton's own sounds. Installing those programs on the new computer brings them back.")));
   if (r.left_behind) notes.push(note("", `${plural(r.left_behind, "program or installer", "programs or installers")} will be left behind`,
     el("div", {class: "muted"}, "Reinstall software from its maker. Installers tucked into sample folders are a common way malware spreads.")));
-  show(backTo(home), steps(OLD_STEPS, 0), el("h1", {}, "What a move would take"),
+  show(backTo(home), steps(reh ? REH_STEPS : OLD_STEPS, 0), el("h1", {}, reh ? "What the rehearsal moves" : "What a move would take"),
     el("div", {class: "panel"}, totalEl, countEl),
+    reh ? null : el("p", {class: "muted small"}, "First time? ",
+      el("button", {class: "link", onclick: () => { r.mode = "rehearse"; chooseItems(); }}, "Rehearse first"),
+      ": a practice move on this computer that checks every sample, without changing your files."),
     ...notes,
     el("h2", {}, "What moves"),
     el("p", {class: "muted"}, "Untick anything you don't want to take. Your originals stay on this computer either way."),
@@ -314,6 +351,100 @@ function licenseList() {
   const done = store.get("licenses", {});
   return el("ul", {class: "checks"}, items.map(t => el("li", {}, el("label", {},
     el("input", {type: "checkbox", checked: !!done[t], onchange: (e) => { done[t] = e.target.checked; store.set("licenses", done); }}), " ", t))));
+}
+
+/* ---------- rehearsal: a whole practice move on this computer (the menu's option 3) ---------- */
+async function rehearseWhere() {
+  const need = 2 * move.items.filter(it => !move.skip.has(it.id)).reduce((a, it) => a + it.bytes, 0);
+  const list = el("div", {class: "choices"}, el("p", {class: "muted"}, "Checking free space…"));
+  const other = el("input", {type: "text", class: "mono", placeholder: "Or type a drive or folder, e.g. E:\\ or /Volumes/My Drive"});
+  const otherMsg = el("div", {class: "muted small"});
+  show(backTo(chooseItems), steps(REH_STEPS, 1), el("h1", {}, "Where to rehearse"),
+    el("p", {class: "sub"}, `A rehearsal needs about ${size(need)} free: a bundle plus an unpacked copy. You can delete it in one click afterwards.`),
+    list,
+    el("h2", {}, "Somewhere else"),
+    el("div", {class: "row"}, other, el("button", {onclick: async () => {
+      otherMsg.textContent = "";
+      try {
+        const f = await api("/api/folder", {path: other.value});
+        if (!f.exists) { otherMsg.textContent = "That folder doesn't exist."; return; }
+        confirmRehearse({name: f.path, to: f.path, path: f.path, free: f.free}, need);
+      } catch (e) { otherMsg.textContent = e.message; }
+    }}, "Use this folder")), otherMsg);
+  let r;
+  try { r = await api("/api/rehearsal"); } catch (e) { list.replaceChildren(el("p", {class: "err"}, e.message)); return; }
+  const short = r.free < need;
+  list.replaceChildren(el("button", {class: "choice" + (short ? " dim" : ""),
+      onclick: () => confirmRehearse({name: "your Music folder", to: null, path: r.default, free: r.free}, need)},
+    el("div", {class: "choice-title"}, "In your Music folder"),
+    el("div", {class: "muted"}, `${size(r.free)} free`),
+    short ? el("div", {class: "err small"}, `Not enough room: needs ${size(need)}. Use a bigger drive, or untick big folders.`) : null,
+    el("div", {class: "muted mono small"}, r.default)));
+}
+
+function confirmRehearse(w, need) {
+  const short = w.free < need;
+  show(backTo(rehearseWhere), steps(REH_STEPS, 1), el("h1", {}, "Ready to rehearse"),
+    el("div", {class: "panel"},
+      el("div", {}, "A practice move of ", el("b", {}, size(need / 2)), " into ", el("b", {}, w.name)),
+      el("div", {class: "muted mono small"}, w.path),
+      w.to ? el("div", {class: "muted small"}, "Freighter makes a folder called “Freighter Rehearsal” there.") : null,
+      short ? el("div", {class: "err"}, `Not enough room: needs about ${size(need)}, and ${size(w.free)} is free.`) : null),
+    el("h2", {}, "What happens"),
+    el("ol", {},
+      el("li", {}, el("b", {}, "Pack: "), "copies everything into a bundle, as if onto your drive."),
+      el("li", {}, el("b", {}, "Unpack: "), "into a pretend new computer next to it. Your real folders count as gone, so only the copies can pass."),
+      el("li", {}, el("b", {}, "Repair: "), "points the copied projects at the copied samples."),
+      el("li", {}, el("b", {}, "Check: "), "reads every copied project and compares each sample with the original, byte for byte.")),
+    el("p", {class: "muted"}, "Your real files are only read, never changed. It takes about as long as packing twice, and you can stop at any time."),
+    el("div", {class: "row actions"}, el("button", {class: "primary", disabled: short, onclick: () => rehearse(w)}, "Rehearse")));
+}
+
+function rehearse(w) {
+  runJob("rehearse", {to: w.to, skip: [...move.skip]},
+    [steps(REH_STEPS, 2), el("h1", {}, "Rehearsing"),
+      el("p", {class: "sub"}, "Packing, unpacking into a pretend new computer, repairing, then checking every sample. Your real files are only read.")],
+    rehearsed, {cancelled: "Stopped. Your real files weren't touched. You can delete the rehearsal's files from the home screen."});
+}
+
+function rehearsed(r, id) {
+  const t = r.totals, checked = t.kept + t.lost;
+  const list = (items, total) => el("details", {}, el("summary", {}, "Show them"),
+    el("ul", {}, items.map(x => el("li", {class: "mono"}, x))),
+    total > items.length ? el("div", {class: "muted small"}, `…and ${(total - items.length).toLocaleString()} more in the report.`) : null);
+  const parts = [steps(REH_STEPS, 3),
+    el("h1", {class: r.passed ? "okc" : "err"}, r.passed ? "Passed: every sample survived the move" : `Failed: ${plural(t.lost, "sample")} lost in the move`),
+    el("div", {class: "panel"}, el("div", {class: "big"}, `${t.kept.toLocaleString()} of ${checked.toLocaleString()}`),
+      el("div", {class: "muted"}, `samples that worked before the move still work after it, checked byte for byte, across ${plural(t.projects, "project")}.`))];
+  if (t.lost) parts.push(note("bad", `${plural(t.lost, "sample")} lost`,
+    el("div", {class: "muted"}, "Please don't do your real move yet. ",
+      el("a", {href: "https://github.com/chasubowl-creator/freighter/issues/new", target: "_blank", rel: "noopener"}, "Report a problem"),
+      " and attach the report, so it can be fixed first."), list(r.lost, t.lost)));
+  if (t.already) parts.push(note("", `${plural(t.already, "sample")} ${t.already === 1 ? "was" : "were"} already missing before the move`,
+    el("div", {class: "muted"}, "Not something the move did. Fix them on this computer first, for example by plugging in the drive they were on."),
+    list(r.already, t.already)));
+  if (t.unchecked) parts.push(note("", `${plural(t.unchecked, "project")} couldn't be checked automatically`,
+    el("div", {class: "muted"}, "For example Ableton projects from Live 10 or older. Open them after the real move to check."),
+    list(r.unchecked, t.unchecked)));
+  parts.push(el("div", {class: "row"}, el("button", {onclick: () => api(`/api/jobs/${id}/open`, {file: "report"}).catch(() => {})}, "Open the full report"),
+      el("span", {class: "muted mono small"}, r.report)),
+    el("h2", {}, "Clean up"),
+    el("p", {class: "muted"}, "The rehearsal's files are copies, so deleting them is safe."),
+    el("div", {class: "row"}, el("button", {onclick: () => deleteRehearsal(r.folder)}, "Delete the rehearsal files"),
+      el("span", {class: "muted mono small"}, r.folder)),
+    el("div", {class: "row actions"},
+      r.passed ? el("button", {class: "primary", onclick: () => { move.mode = "pack"; chooseItems(); }}, "Pack for real") : null,
+      el("button", {onclick: home}, "Home")));
+  show(...parts);
+}
+
+function deleteRehearsal(folder) {
+  if (!confirm(`Delete the rehearsal files in ${folder}? They're copies: your real files aren't touched.`)) return;
+  runJob("rehearse_cleanup", {folder}, [el("h1", {}, "Deleting the rehearsal files")], (r) =>
+    show(backTo(home), el("h1", {}, "Rehearsal files deleted"),
+      el("div", {class: "panel"}, el("div", {class: "big"}, size(r.freed)), el("div", {class: "muted"}, "freed. Your real files weren't touched.")),
+      el("div", {class: "row actions"}, el("button", {onclick: home}, "Home"))),
+    {noCancel: true});
 }
 
 /* ---------- new computer: 1 pick bundle, 2 unpack and repair, 3 results ---------- */

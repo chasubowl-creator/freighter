@@ -1,6 +1,7 @@
 """Tests for the browser app's local server. Run: python3 -m unittest discover -s tests -v"""
 import contextlib
 import http.client
+import io
 import json
 import os
 import shutil
@@ -248,14 +249,81 @@ class Server(unittest.TestCase):
         beat = new / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat" / "Beat.flp"
         self.assertEqual(Path(rm.flp_samples(beat)[1][0]).read_bytes(), b"kick" * 100)
         # and the whole unpack can be undone from the app (issue #73)
-        status, p = self.request("POST", "/api/unpack-preview", {"bundle": packed["result"]["bundle"]})
-        self.assertEqual(status, 200)
         with as_home(new):
+            status, p = self.request("POST", "/api/unpack-preview", {"bundle": packed["result"]["bundle"]})
+            self.assertEqual(status, 200)
+            status, h = self.request("GET", "/api/home")    # the home screen offers repair and undo, even later
+            self.assertEqual([x["host"] for x in h["unpacks"]], [u["source_host"]])
+            self.assertGreaterEqual(h["unpacks"][0]["files"], 2)
             status, started = self.request("POST", "/api/jobs", {"kind": "undo", "host": u["source_host"]})
             undone = self.wait(started["id"])
+            self.assertEqual(self.request("GET", "/api/home")[1]["unpacks"], [], "nothing left to undo")
         self.assertEqual(undone["state"], "done", undone.get("error"))
         self.assertFalse(beat.exists())
         self.assertFalse((new / "Desktop" / "Kits").exists())
+
+    def test_rehearse_then_delete_the_rehearsal_through_the_app(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_freighter import make_flp
+        home = self.tmp / "home"
+        kick = home / "Desktop" / "Kits" / "kick.wav"
+        kick.parent.mkdir(parents=True)
+        kick.write_bytes(b"kick" * 100)
+        beat = home / "Documents" / "Image-Line" / "FL Studio" / "Projects" / "Beat.flp"
+        make_flp(beat, [str(kick)])
+        before = beat.read_bytes()
+        with as_home(home), mock.patch.object(rm, "fl_is_running", lambda: False):
+            status, where = self.request("GET", "/api/rehearsal")
+            self.assertEqual(Path(where["default"]), (home / "Music" / "Freighter" / "Rehearsal").resolve())
+            self.assertGreater(where["free"], 0)
+            status, started = self.request("POST", "/api/jobs", {"kind": "rehearse", "to": None, "skip": []})
+            self.assertEqual(status, 200, started)
+            done = self.wait(started["id"])
+            self.assertEqual(done["state"], "done", done.get("error"))
+            r = done["result"]
+            self.assertTrue(r["passed"])
+            self.assertEqual(r["totals"]["kept"], 1)
+            self.assertEqual(r["totals"]["lost"], 0)
+            self.assertTrue(done["stage"].startswith("4/4"), "the page shows which step it's on")
+            self.assertEqual(os.environ["FREIGHTER_HOME"], str(home), "the real home is back afterwards")
+            status, h = self.request("GET", "/api/home")
+            self.assertEqual(h["rehearsals"], [r["folder"]], "the home screen offers to delete it")
+            status, started = self.request("POST", "/api/jobs", {"kind": "rehearse_cleanup", "folder": r["folder"]})
+            self.assertEqual(status, 200, started)
+            cleaned = self.wait(started["id"])
+            self.assertEqual(cleaned["state"], "done", cleaned.get("error"))
+            self.assertGreater(cleaned["result"]["freed"], 400)
+            self.assertFalse(Path(r["folder"]).exists())
+            self.assertEqual(self.request("GET", "/api/home")[1]["rehearsals"], [])
+        self.assertEqual(kick.read_bytes(), b"kick" * 100, "real files are only read")
+        self.assertEqual(beat.read_bytes(), before)
+
+    def test_only_rehearsal_folders_can_be_deleted(self):
+        plain = self.tmp / "Rehearsal"          # the right name, but Freighter didn't make it
+        plain.mkdir()
+        (plain / "song.wav").write_bytes(b"x")
+        for folder in (str(self.tmp), str(plain), str(self.tmp / "nope")):
+            status, r = self.request("POST", "/api/jobs", {"kind": "rehearse_cleanup", "folder": folder})
+            self.assertEqual(status, 400, folder)
+        marked = self.tmp / "Samples"           # the marker, but not a rehearsal's name
+        marked.mkdir()
+        (marked / rm.REHEARSAL_MARKER).write_text("x")
+        with self.assertRaises(SystemExit):
+            rm.remove_rehearsal(marked)
+        self.assertTrue((plain / "song.wav").exists())
+        self.assertTrue(marked.exists())
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "rehearse", "to": str(self.tmp / "nope")})[0], 400)
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "rehearse", "skip": "x"})[0], 400)
+
+    def test_rehearse_clean_from_the_command_line(self):
+        base = rm.rehearsal_folder(self.tmp)
+        (base / "drive").mkdir(parents=True)
+        (base / rm.REHEARSAL_MARKER).write_text("x")
+        (base / "drive" / "copy.wav").write_bytes(b"c" * 10)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(rm.cmd_rehearse(rm.argparse.Namespace(to=str(self.tmp), include=[], skip=[], clean=True)), 0)
+        self.assertFalse(base.exists())
+        self.assertTrue(self.tmp.exists())
 
     def test_crate_preview_build_and_remove(self):
         """Issue #34: Crate in the app. The library is links; the originals stay."""
