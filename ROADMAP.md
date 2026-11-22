@@ -84,7 +84,7 @@ Tick the box here when the issue closes.
 - [x] Same-places restore for same-OS moves (#67) · L · Claude
 - [x] Repair FL Studio projects: rewrite sample paths in the .flp (#68) · L · Claude
 - [x] Read what FL Studio and Ableton already know about your folders (#69) · M · Claude
-- [ ] Plugin readiness for each project (#70) · L · Claude
+- [x] Plugin readiness for each project (#70) · L · Claude
 - [ ] Sample libraries and plugin content (Kontakt and friends) (#71) · L · Claude
 - [ ] Ableton: real Live 11/12 sets, Live 10 sets and racks (#72) · M · Claude
 
@@ -95,9 +95,9 @@ Tick the box here when the issue closes.
 *about 2–3 weeks.* Double-click Freighter and a clean app opens in the browser: old computer, new computer, plugins, Crate.
 
 - [ ] Browser app: local server, security and shutdown (#26) · L · Claude
-- [ ] App: old-computer screens (scan, choose, pack) (#27) · L · Claude
-- [ ] App: new-computer screens (unpack, repair, results) (#28) · L · Claude
-- [ ] App: plugins screen with the reinstall checklist (#29) · M · Claude
+- [x] App: old-computer screens (scan, choose, pack) (#27) · L · Claude
+- [x] App: new-computer screens (unpack, repair, results) (#28) · L · Claude
+- [x] App: plugins screen with the reinstall checklist (#29) · M · Claude
 - [ ] Plugin maker download links and a license-deactivation checklist (#30) · M · Claude
 - [ ] Move third-party plugin presets (#31, widened into #71) · M · Claude
 - [ ] Repair Ableton device presets and clips (.adg, .alc) (#32) · S · Claude
