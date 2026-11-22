@@ -109,6 +109,7 @@ Tick the box here when the issue closes.
 - [x] Check the drive before leaving the old computer (#77) · S · Claude
 - [x] Project health on the new computer (#78) · M · Claude
 - [x] Plugins grouped by the app that installs them (#79) · S · Claude
+- [x] Copy plugins that are only files, so the new computer needs no download (#80) · M · Claude
 - [ ] Usability test with a non-technical producer (#35) · S · You
 
 **Done when:** A non-technical producer completes a move without help.

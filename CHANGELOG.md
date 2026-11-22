@@ -103,6 +103,11 @@ The first version with a number. Everything that exists so far:
   found, every plugin installed), problems first. In the app, menu option 7 and `freighter health`.
 - **Plugins by app** (issue #79): the plugins to install are grouped by the app each maker uses (Native Access,
   Waves Central, Arturia Software Center, Plugin Alliance…), most-used first.
+- **Plugins that are only files come along** (issue #80): on a Windows-to-Windows or Mac-to-Mac move, plugins from
+  makers without an installer app (most free and indie plugins) are packed and go back in the same plugin folder,
+  so the new computer needs no download for them. Plugins that install through an app, use iLok, or look cracked
+  stay on the install list. Program Files needs Windows' permission once; a plugin already installed is never
+  replaced, and undo removes them.
 
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account

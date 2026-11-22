@@ -567,8 +567,9 @@ def apply_safety(plugins, virus=False):
 
 # --------------------------------------------------------------------------- scan
 
-def scan(extra_dirs):
-    roots = mac_roots() if IS_MAC else win_roots() if IS_WIN else []
+def scan(extra_dirs, system=True):
+    """Every plugin in this computer's plugin folders (system=False: only in extra_dirs)."""
+    roots = (mac_roots() if IS_MAC else win_roots() if IS_WIN else []) if system else []
     for d in extra_dirs:
         roots.append((Path(d), MAC_EXTS if IS_MAC else WIN_VST2_EXTS))
 

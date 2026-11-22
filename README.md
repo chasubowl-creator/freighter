@@ -1,8 +1,9 @@
 # _Freighter
 
 Moves a music producer's whole studio to a new computer: projects, presets, and every sample the
-projects use, wherever it lives. It then repairs projects so nothing opens silent. Plugins can't be
-copied, so **_Manifest**, the free plugin scan, gives you a reinstall checklist grouped by maker.
+projects use, wherever it lives. It then repairs projects so nothing opens silent. Plugins that are only
+files (most free and indie ones) come along too, back in their plugin folders. For the rest, which install
+through their maker's app, **_Manifest**, the free plugin scan, gives you a reinstall checklist grouped by maker.
 
 FL Studio and Ableton Live. Windows and Mac, in any direction. Free, and everything runs locally.
 

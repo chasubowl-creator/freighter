@@ -2129,3 +2129,249 @@ class ProjectHealth(TempDirCase):
             self.assertEqual({e["name"]: e["status"] for e in rm.project_health(installed=serum)["projects"]}["Synth.flp"],
                              "ready", "once the plugin is installed")
         self.assertIn("2 of 4 projects are ready", "\n".join(rm.health_lines(h)))
+
+
+class CopiedPlugins(TempDirCase):
+    """Issue #80: plugins that are only files come along, so the new computer needs no download for them."""
+
+    def row(self, path, name, vendor, fmt="VST2", flags=()):
+        return {"name": name, "vendor": vendor, "format": fmt, "path": str(path), "flags": list(flags),
+                "_check": None}
+
+    def old_computer(self):
+        old = self.tmp / "old"
+        vst, vst3 = old / "Plugins" / "VST", old / "Plugins" / "VST3"
+        serum = write(vst / "Xfer" / "Serum_x64.dll", b"serum" * 50)
+        ott = write(vst / "Xfer" / "OTT_x64.dll", b"ott" * 50)
+        write(vst / "Xfer" / "Serum.ini", b"support file")
+        massive = write(vst / "Native Instruments" / "Massive.dll", b"m" * 100)
+        loose = write(vst / "Loose Synth.dll", b"l" * 70)
+        pro = vst3 / "Pro-Q 4.vst3"
+        prog = write(pro / "Contents" / "MacOS" / "Pro-Q 4", b"program" * 30)
+        if os.name != "nt":
+            os.chmod(prog, 0o755)
+        write(pro / "Contents" / "Info.plist", b"<plist/>")
+        write(old / "Documents" / "notes.txt", b"n")
+        self.rows = [self.row(serum, "Serum", "Xfer Records"), self.row(ott, "OTT", "Xfer Records"),
+                     self.row(massive, "Massive", "Native Instruments"),
+                     self.row(loose, "Loose Synth", "Unknown maker"),
+                     self.row(pro, "Pro-Q 4", "FabFilter", "VST3")]
+        self.roots = [vst, vst3]
+        return old
+
+    def env(self, roots):
+        return mock.patch.dict(os.environ, {"FREIGHTER_PLUGIN_ROOTS": os.pathsep.join(str(r) for r in roots)})
+
+    def pack(self, old, drive):
+        drive.mkdir(exist_ok=True)
+        with as_home(old), self.env(self.roots), quiet(), \
+                mock.patch.object(rm, "installed_plugins", lambda fresh=False: [dict(r) for r in self.rows]):
+            plan = rm.plan_move()
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
+        return plan, next(drive.glob("Freighter-*"))
+
+    def unpack(self, new, bundle, roots=()):
+        new.mkdir(exist_ok=True)
+        with as_home(new), self.env(roots), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        return rm.LAST["unpack"]["plugins"]
+
+    def test_which_plugins_copy(self):
+        r = self.row("/x/Serum.dll", "Serum", "Xfer Records")
+        self.assertIsNone(rm.plugin_copy_reason(r))
+        self.assertIsNone(rm.plugin_copy_reason(dict(r, vendor="Unknown maker")))
+        self.assertEqual(rm.plugin_copy_reason(dict(r, vendor="Native Instruments")), "installs through Native Access")
+        self.assertEqual(rm.plugin_copy_reason(dict(r, vendor="Native-instruments")), "installs through Native Access",
+                         "a maker named from a Mac bundle ID")
+        self.assertIn("copy protection", rm.plugin_copy_reason(dict(r, vendor="Sound-toys")))
+        self.assertIn("Waves Central", rm.plugin_copy_reason(dict(r, vendor="Waves")))
+        self.assertIn("copy protection", rm.plugin_copy_reason(dict(r, vendor="Soundtoys")))
+        self.assertIn("Pro Tools", rm.plugin_copy_reason(dict(r, format="AAX")))
+        self.assertIn("Signature broken", rm.plugin_copy_reason(dict(r, flags=[rs.FLAG_BROKEN])),
+                      "a cracked copy is never carried over")
+        self.assertIsNotNone(rm.plugin_copy_reason(dict(r, vendor="Image-Line")), "FL's own come with FL Studio")
+
+    def test_a_makers_folder_comes_whole_unless_it_holds_a_plugin_that_doesnt_copy(self):
+        old = self.old_computer()
+        mixed = write(old / "Plugins" / "VST" / "Mixed" / "Good.dll", b"g")
+        write(old / "Plugins" / "VST" / "Mixed" / "Kontakt.dll", b"k")
+        helper = write(old / "Plugins" / "VST" / "Xfer" / "XferHelper.dll", b"h")
+        rows = self.rows + [self.row(mixed, "Good", "Some Dev"),
+                            self.row(mixed.parent / "Kontakt.dll", "Kontakt", "Native Instruments"),
+                            self.row(helper, "XferHelper", "Xfer Records",
+                                     flags=["Doesn't look like a plugin (probably a support file)"])]
+        units, no = rm.plugin_units(rows, self.roots)
+        got = {Path(u).name: sorted(r["name"] for r in rows_) for u, rows_ in units}
+        self.assertEqual(got, {"Xfer": ["OTT", "Serum"], "Loose Synth.dll": ["Loose Synth"],
+                               "Pro-Q 4.vst3": ["Pro-Q 4"], "Good.dll": ["Good"]})
+        self.assertEqual(sorted(r["name"] for r, _why in no), ["Kontakt", "Massive"],
+                         "a support file is no plugin, and doesn't stop its folder coming whole")
+
+    def test_format_folders_are_never_taken_as_a_makers_folder(self):
+        root = self.tmp / "Library" / "Audio" / "Plug-Ins"
+        a = write(root / "Components" / "A.component" / "Contents" / "Info.plist", b"a").parents[1]
+        b = write(root / "VST3" / "B.vst3" / "Contents" / "Info.plist", b"b").parents[1]
+        c = write(root / "VST3" / "Maker" / "C.vst3" / "Contents" / "Info.plist", b"c").parents[1]
+        units, _no = rm.plugin_units([self.row(a, "A", "Dev", "AU"), self.row(b, "B", "Dev", "VST3"),
+                                      self.row(c, "C", "Maker", "VST3")], [root])
+        self.assertEqual(sorted(Path(u).name for u, _r in units), ["A.component", "B.vst3", "Maker"])
+
+    @unittest.skipIf(os.name == "nt", "making links needs extra rights on Windows")
+    def test_a_plugin_with_links_inside_installs_from_its_maker(self):
+        old = self.old_computer()
+        fw = old / "Plugins" / "VST3" / "Pro-Q 4.vst3" / "Contents" / "Frameworks"
+        fw.mkdir(parents=True)
+        os.symlink("Versions/A", fw / "Current")
+        units, no = rm.plugin_units(self.rows, self.roots)
+        self.assertNotIn("Pro-Q 4.vst3", {Path(u).name for u, _r in units})
+        self.assertIn(("Pro-Q 4", "has links inside, so it installs from its maker"), [(r["name"], w) for r, w in no])
+
+    def test_plugins_go_back_in_their_folders_and_undo_removes_them(self):
+        old = self.old_computer()
+        plan, bundle = self.pack(old, self.tmp / "drive")
+        items = {it["label"]: it for it in plan["items"] if it.get("plugin_files")}
+        self.assertEqual(set(items), {"Plugins from Xfer: OTT, Serum", "Plugins: Loose Synth", "Plugin: Pro-Q 4 (VST3)"})
+        self.assertEqual(items["Plugins: Loose Synth"]["only"], ["Loose Synth.dll"])
+        self.assertEqual(items["Plugins from Xfer: OTT, Serum"]["files"], 3, "support files next to them come too")
+        self.assertEqual([p["name"] for p in plan["plugin_files"]["install"]], ["Massive"])
+        new = self.tmp / "new"
+        p = self.unpack(new, bundle)
+        vst, vst3 = new / "Plugins" / "VST", new / "Plugins" / "VST3"
+        self.assertEqual((vst / "Xfer" / "Serum_x64.dll").read_bytes(), b"serum" * 50)
+        self.assertTrue((vst / "Xfer" / "Serum.ini").is_file())
+        self.assertTrue((vst / "Loose Synth.dll").is_file())
+        self.assertFalse((vst / "Native Instruments").exists(), "plugins with an installer app aren't copied")
+        prog = vst3 / "Pro-Q 4.vst3" / "Contents" / "MacOS" / "Pro-Q 4"
+        if os.name != "nt":
+            self.assertTrue(prog.stat().st_mode & 0o111, "a Mac plugin's program file stays runnable")
+        self.assertEqual(len(p["placed"]), 3)
+        self.assertEqual(p["waiting"], [])
+        landing = new / "Music" / "Freighter" / rm.rs.host_name()
+        self.assertIn("Find installed plugins", (landing / "plugins-copied.txt").read_text())
+        with as_home(new), quiet():
+            r = rm.undo_unpack()
+        self.assertFalse(prog.exists())
+        self.assertFalse((vst / "Loose Synth.dll").exists())
+        self.assertEqual(r["need_admin"], [])
+
+    def test_a_plugin_installed_here_already_is_never_replaced(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        new = self.tmp / "new"
+        mine = write(new / "Plugins" / "VST3" / "Pro-Q 4.vst3" / "Contents" / "MacOS" / "Pro-Q 4", b"newer version")
+        theirs = write(new / "Plugins" / "VST" / "Loose Synth.dll", b"my own copy")
+        p = self.unpack(new, bundle)
+        self.assertEqual(mine.read_bytes(), b"newer version")
+        self.assertEqual(theirs.read_bytes(), b"my own copy")
+        self.assertFalse(list(mine.parents[2].glob("*from*")), "no renamed copy inside a plugin")
+        self.assertEqual(sorted(n for r in p["already"] for n in r["names"]), ["Loose Synth (VST2)", "Pro-Q 4 (VST3)"])
+        self.assertEqual([r["label"] for r in p["placed"]], ["Plugins from Xfer: OTT, Serum"])
+        again = self.unpack(new, bundle)   # unpacking again: what the first unpack put there counts as placed
+        self.assertEqual(sorted(r["label"] for r in again["placed"]), ["Plugins from Xfer: OTT, Serum"])
+
+    def test_a_plugin_for_the_other_kind_of_computer_isnt_copied(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        mf = bundle / "manifest.json"
+        m = json.loads(mf.read_text())
+        m["source_os"] = "windows" if rm.THIS_OS == "mac" else "mac"
+        mf.write_text(json.dumps(m))
+        p = self.unpack(self.tmp / "new", bundle)
+        self.assertEqual(p["placed"], [])
+        self.assertIn("Serum (VST2)", p["other_os"])
+        self.assertFalse(list((self.tmp / "new").rglob("Serum_x64.dll")))
+
+    def admin_unpack(self, new, bundle, allow=True):
+        """Unpack as if the plugin folders were in Program Files: staged first, then copied 'as administrator'."""
+        real = rm.plugin_destination
+
+        def in_program_files(manifest, it, rr, staging):
+            dest, final, how, check = real(manifest, it, rr, staging)
+            return (staging, final, "admin", check) if how == "in place" else (dest, final, how, check)
+
+        def run_as_admin(job, folder):
+            if not allow:
+                return False
+            plan = Path(folder) / "job.json"
+            plan.write_text(json.dumps(job))
+            rm.plugin_folders_job(plan)
+            return True
+        with mock.patch.object(rm, "plugin_destination", in_program_files), mock.patch.object(rm, "as_admin", run_as_admin):
+            return self.unpack(new, bundle, [new / "Plugins" / "VST", new / "Plugins" / "VST3"])
+
+    def test_program_files_needs_one_yes_from_windows(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        new = self.tmp / "new"
+        p = self.admin_unpack(new, bundle)
+        self.assertTrue(p["asked"])
+        self.assertEqual(len(p["placed"]), 3, p)
+        self.assertTrue((new / "Plugins" / "VST" / "Xfer" / "OTT_x64.dll").is_file())
+        landing = new / "Music" / "Freighter" / rm.rs.host_name()
+        self.assertFalse((landing / "Plugins").exists(), "the waiting copies are cleared away once placed")
+        journal = [e["path"] for e in rm.read_journal(landing / rm.UNPACK_JOURNAL) if e.get("kind") == "file"]
+        self.assertIn(str(new / "Plugins" / "VST" / "Xfer" / "OTT_x64.dll"), journal, "so undo can remove it")
+
+    def test_saying_no_to_windows_leaves_them_waiting(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        new = self.tmp / "new"
+        p = self.admin_unpack(new, bundle, allow=False)
+        self.assertTrue(p["declined"])
+        self.assertEqual(p["placed"], [])
+        self.assertEqual(len(p["waiting"]), 3)
+        self.assertFalse((new / "Plugins" / "VST" / "Xfer").exists())
+        for w in p["waiting"]:
+            self.assertTrue(Path(w["where"]).exists(), w)
+        landing = new / "Music" / "Freighter" / rm.rs.host_name()
+        self.assertIn("choose Yes", (landing / "plugins-copied.txt").read_text())
+        p = self.admin_unpack(new, bundle)   # unpack again, and say yes this time
+        self.assertEqual(len(p["placed"]), 3, p)
+
+    def test_the_administrator_job_only_touches_plugin_folders(self):
+        root = self.tmp / "VST3"
+        src = write(self.tmp / "staged" / "a.vst3", b"a")
+        there = write(root / "b.vst3", b"installed")
+        job = self.tmp / "job.json"
+        job.write_text(json.dumps({"files": [[str(src), str(root / "a.vst3")], [str(src), str(there)],
+                                             [str(src), str(self.tmp / "elsewhere" / "a.vst3")],
+                                             [str(src), str(self.tmp / "VSTPlugins" / "a.vst3")]],
+                                   "remove": [[str(there), "not its checksum"]]}))
+        with self.env([root]):
+            copied, removed = rm.plugin_folders_job(job)
+        self.assertEqual((copied, removed), (2, 0), "a folder named like a plugin folder counts too")
+        self.assertEqual(there.read_bytes(), b"installed")
+        self.assertFalse((self.tmp / "elsewhere").exists())
+
+    def test_undo_keeps_track_of_plugins_it_couldnt_remove(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        new = self.tmp / "new"
+        self.unpack(new, bundle)
+        stuck = new / "Plugins" / "VST" / "Loose Synth.dll"
+        real_remove = os.remove
+
+        def remove(p, *a, **k):
+            if Path(str(p).replace("\\\\?\\", "")) == stuck:
+                raise PermissionError(13, "Access is denied")
+            return real_remove(p, *a, **k)
+        with as_home(new), quiet(), mock.patch.object(rm.os, "remove", remove), \
+                mock.patch.object(rm, "as_admin", lambda job, folder: False):
+            r = rm.undo_unpack()
+        self.assertEqual(r["need_admin"], [str(stuck)])
+        landing = new / "Music" / "Freighter" / rm.rs.host_name()
+        left = [e["path"] for e in rm.read_journal(landing / rm.UNPACK_JOURNAL)]
+        self.assertEqual(left, [str(stuck)], "undoing again still knows it")
+        with as_home(new), quiet():
+            r = rm.undo_unpack()
+        self.assertFalse(stuck.exists())
+
+    def test_a_test_never_scans_the_real_plugin_folders(self):
+        root = self.tmp / "VST3"
+        write(root / "Fake.vst3" / "Contents" / "Info.plist", b"<plist/>")
+        with as_home(self.tmp), self.env([root]), quiet():
+            self.assertEqual(rm.plugin_roots(), [root])
+            rows = rm.installed_plugins(fresh=True)
+        self.assertEqual([Path(r["path"]).name for r in rows], ["Fake.vst3"])
+        with as_home(self.tmp), mock.patch.dict(os.environ, {"FREIGHTER_PLUGIN_ROOTS": ""}):
+            self.assertEqual(rm.plugin_roots(), [])

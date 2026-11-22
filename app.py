@@ -127,7 +127,9 @@ def job_move_list(job):
     gone = rm.missing_lines(missing)
     return {
         "items": [{"id": it["id"], "label": it["label"], "path": it["source_path"], "bytes": it["bytes"],
-                   "files": it["files"], "kind": it["kind"]} for it in items],
+                   "files": it["files"], "kind": it["kind"], "plugin_files": bool(it.get("plugin_files"))}
+                  for it in items],
+        "plugin_install": [p["name"] for p in plan["plugin_files"]["install"]],   # install from their maker (#80)
         "total": total,
         "missing": gone[:200], "missing_count": len(gone), "missing_projects": len(missing),
         "left_behind": len(left_behind or []),

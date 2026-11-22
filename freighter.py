@@ -669,12 +669,13 @@ def item_id(prefix, path):
 
 
 def pack_items(includes, skips, missing=None, installed=None, needed=None, big=None, rng=None, offered=None,
-               stats=None, libraries=None):
+               stats=None, libraries=None, plugins=None):
     """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
     already missing on this computer]}; if `installed` is a set, with samples that come with installed programs;
     if `big` is a list, with plugin-data folders too big to pack unless asked for (probably sound libraries).
     With a time range (rng, issue #76), FL's browser folders (sample libraries) aren't packed whole: only the kits
-    in-range projects use come, and the libraries go into `offered` (a list) so they can be ticked."""
+    in-range projects use come, and the libraries go into `offered` (a list) so they can be ticked.
+    Plugins that are only files come too (issue #80); `plugins`, if a dict, gets what comes and what doesn't."""
     items = []
     for rid, (label, path) in known_roots(THIS_OS, home()).items():
         if path.is_dir() and rid not in skips:
@@ -726,6 +727,8 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None, big=N
                           "kind": "extra", "plugin_data": True})
     if big is not None:
         big.extend({"path": str(f), "label": f.name, "bytes": n} for f, n in too_big)
+    # plugins that are only files: they go back in their plugin folders, no download needed (issue #80)
+    items += plugin_items(skips, [it["source_path"] for it in items], plugins)
     left_out = [str(path) for rid, (_l, path) in known_roots(THIS_OS, home()).items() if rid in skips and path.is_dir()]
     recent = [Path(r) for r in fl["recent"] if r.lower().endswith(".flp") and Path(r).is_file()
               and not in_program_place(r)]
@@ -1184,10 +1187,7 @@ def plugin_makers():
     stands in for the home folder (tests), like fl_settings()."""
     if os.environ.get("FREIGHTER_HOME"):
         return set()
-    try:
-        rows = rs.scan([])
-    except Exception:
-        return set()
+    rows = installed_plugins()
     names = set()
     for r in rows:
         vendor = (r.get("vendor") or "").strip()
@@ -1574,8 +1574,10 @@ def measure_item(it, left_behind, keep=None):
     else:
         # DAW user-data folders move whole; sample folders leave programs and installers behind
         # a kit comes complete, demo projects and all: the time range is about your projects (issue #76)
-        files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None,
-                                None if it.get("kit") else keep))
+        # copied plugins (issue #80) are programs on purpose, and move whole too
+        whole = it["kind"] == "known" or it.get("plugin_files")
+        files = list(walk_files(it["source_path"], None if whole else left_behind,
+                                None if it.get("kit") or it.get("plugin_files") else keep))
     it["_files"] = files
     it["files"] = len(files)
     it["bytes"] = sum(f[2] for f in files)
@@ -1618,8 +1620,9 @@ def cover_stragglers(items, needed):
 def plan_move(includes=(), skips=(), include_programs=False, rng=None):
     """Everything a pack (or the app's move list) needs to know, decided once. Returns a dict with items (measured),
     total, left_behind, missing, installed, cloud_only and stragglers (files the safety net added)."""
-    missing, installed, needed, big, offered, stats, libs = {}, set(), set(), [], [], {}, []
-    items = pack_items(list(includes), set(skips), missing, installed, needed, big, rng, offered, stats, libs)
+    missing, installed, needed, big, offered, stats, libs, plugins = {}, set(), set(), [], [], {}, [], {}
+    items = pack_items(list(includes), set(skips), missing, installed, needed, big, rng, offered, stats, libs,
+                       plugins)
     # a sound library never comes inside another folder that's packed (issue #71): it's offered, and when it's
     # ticked it comes as its own item (whose walk starts at the library itself, so this doesn't stop it)
     left_libs = {_key(os.path.realpath(lib["path"])) for lib in libs}
@@ -1642,6 +1645,8 @@ def plan_move(includes=(), skips=(), include_programs=False, rng=None):
             "missing": missing, "installed": installed, "cloud_only": list(CLOUD_ONLY), "stragglers": added,
             "big_plugin_data": big, "offered_libraries": offered, "projects": stats,
             "libraries": [dict(lib, moved="item" in lib) for lib in libs],
+            "plugin_files": {"copied": [p for it in items if it.get("plugin_files") for p in it["plugins"]],
+                             "install": plugins.get("install", [])},
             "range": rng.as_dict() if rng is not None else None}
 
 
@@ -1675,6 +1680,17 @@ def say_big_plugin_data(big):
         for b in big:
             print(f"  {rs.human_size(b['bytes'])}+  {b['path']}")
         print("Take one anyway with --include FOLDER.")
+
+
+def say_plugin_files(pf):
+    if pf["copied"]:
+        names = sorted({f"{p['name']} ({p['format']})" for p in pf["copied"]}, key=str.lower)
+        print(f"\nPlugins that come along, so the new computer needs no download for them ({len(names)}): "
+              + ", ".join(names))
+    if pf["install"]:
+        print(f"{len(pf['install'])} other plugin{'s' if len(pf['install']) != 1 else ''} install from their maker on "
+              "the new computer (their app sets up licenses and sounds): " +
+              ", ".join(sorted({p["name"] for p in pf["install"]}, key=str.lower)))
 
 
 def say_installed(installed):
@@ -1719,6 +1735,7 @@ def cmd_pack(args):
             print(f"{len(left_behind)} programs or installers will be left behind (reinstall software from its "
                   "maker). Keep them with --include-programs.")
         say_big_plugin_data(plan["big_plugin_data"])
+        say_plugin_files(plan["plugin_files"])
         say_sound_libraries(plan["libraries"])
         say_offered_libraries(plan["offered_libraries"])
         say_missing(missing)
@@ -1789,9 +1806,12 @@ def cmd_pack(args):
                 dst = data_root / stored
                 rec = done.get(rel)
                 try:
-                    mtime = int(os.stat(long_path(ap)).st_mtime)
+                    st = os.stat(long_path(ap))
+                    mtime = int(st.st_mtime)
                 except OSError:
-                    mtime = None
+                    st, mtime = None, None
+                # a Mac plugin's program file must stay runnable (issue #80)
+                runnable = bool(it.get("plugin_files") and THIS_OS != "windows" and st and st.st_mode & 0o111)
                 # skip what's already there, unless the original changed since (same size isn't enough: a
                 # re-rendered sample often keeps its length)
                 if rec and rec["size"] == size and file_size(dst) == size and rec.get("mtime") in (None, mtime):
@@ -1804,7 +1824,7 @@ def cmd_pack(args):
                     prog.add(size, copied=False)
                     continue
                 index.write(json.dumps({"rel": rel, "stored": stored, "size": size, "sha256": digest,
-                                        "mtime": mtime}) + "\n")
+                                        "mtime": mtime, **({"x": True} if runnable else {})}) + "\n")
                 index.flush()
                 prog.add(size)
 
@@ -1841,6 +1861,7 @@ def cmd_pack(args):
                   for it in items},
     }, indent=1), encoding="utf-8")
     LAST["pack"] = {"bundle": str(bundle), "items": len(items), "files": sum(it["files"] for it in items),
+                    "plugins_copied": len(plan["plugin_files"]["copied"]),
                     "bytes": total, "errors": len(errors), "left_behind": len(left_behind or []),
                     "missing": len(missing_lines(missing)),
                     "range": plan["range"]["label"] if rng is not None else None,
@@ -2096,8 +2117,8 @@ def undo_unpack(host=None):
         landings = [d for d in landings if d.name == host]
     fold = THIS_OS == "windows"
     repairs = {norm(e["project"], fold): e for e in read_journal(base / REPAIR_JOURNAL)}
-    done_repairs, made_dirs = set(), []
-    out = {"hosts": [d.name for d in landings], "removed": 0, "restored": 0, "kept": []}
+    done_repairs, made_dirs, need_admin = set(), [], []
+    out = {"hosts": [d.name for d in landings], "removed": 0, "restored": 0, "kept": [], "need_admin": []}
 
     def current(p):
         try:
@@ -2113,14 +2134,18 @@ def undo_unpack(host=None):
                 continue
             now, rep = current(p), repairs.get(key)
             if now == e["sha256"] or (rep and now == rep["sha256"]):
-                os.remove(long_path(p))
+                try:
+                    os.remove(long_path(p))
+                except PermissionError:   # a plugin put in Program Files (issue #80)
+                    need_admin.append((landing, e))
+                    continue
                 out["removed"] += 1
                 if rep:
                     done_repairs.add(key)
             else:
                 out["kept"].append(str(p))   # changed since the unpack: it's someone's work now
         for name in (UNPACK_JOURNAL, "pathmap.json", "unpack-report.txt", "pack-errors.txt", "already-missing.txt",
-                     "left-behind.txt", "projects-left-out.txt"):
+                     "left-behind.txt", "projects-left-out.txt", "plugins-copied.txt"):
             (landing / name).unlink(missing_ok=True)
         for f in landing.glob("plugins-*.csv"):
             f.unlink()
@@ -2153,6 +2178,20 @@ def undo_unpack(host=None):
         (base / REPAIR_JOURNAL).write_text("".join(json.dumps(e) + "\n" for e in left), encoding="utf-8")
     else:
         (base / REPAIR_JOURNAL).unlink(missing_ok=True)
+    if need_admin and THIS_OS == "windows":   # plugins in Program Files: Windows asks for permission once
+        print(f"Removing {len(need_admin)} plugin files from Program Files. Windows asks for permission: choose Yes.",
+              flush=True)
+        as_admin({"remove": [[e["path"], e["sha256"]] for _l, e in need_admin],
+                  "folders": [d for d in set(made_dirs) if os.path.isdir(long_path(d))]}, base)
+    left = {}
+    for landing, e in need_admin:
+        if os.path.exists(long_path(e["path"])):
+            out["need_admin"].append(e["path"])
+            left.setdefault(landing, []).append(e)
+        else:
+            out["removed"] += 1
+    for landing, kept in left.items():   # so undoing again still knows them
+        (landing / UNPACK_JOURNAL).write_text("".join(json.dumps(e) + "\n" for e in kept), encoding="utf-8")
     # last, the folders the unpacks created, deepest first, each only if it's empty now
     for d in sorted(set(made_dirs), key=len, reverse=True):
         try:
@@ -2172,6 +2211,11 @@ def cmd_undo_unpack(args):
     if r["kept"]:
         print(f"Kept {len(r['kept'])} files that changed since (they're your work now):")
         for k in r["kept"][:20]:
+            print(f"  {k}")
+    if r["need_admin"]:
+        print(f"{len(r['need_admin'])} plugin files are still in Program Files (Windows didn't get permission to "
+              "remove them). Run undo again and choose Yes, or delete them yourself:")
+        for k in r["need_admin"][:20]:
             print(f"  {k}")
     return 0
 
@@ -2319,6 +2363,114 @@ def list_drives():
 
 
 @staying_awake
+def put_plugins_in_place(plan, moves, landing, journal, entries, rehearsal_root=None):
+    """After unpacking: copied plugins that wait in the landing folder because their plugin folder is in
+    Program Files go there now, with Windows' permission (one prompt for all of them, issue #80). Every file is
+    checked against the bundle and journaled, so undo can remove it. Returns what happened, for the report:
+    {placed, already, waiting, asked, declined}, each plugin item as {label, names, where}."""
+    out = {"placed": [], "already": [], "waiting": [], "asked": False, "declined": False}
+    admin = [(it, dest, idx) for it, dest, idx in plan if moves.get(it["id"], {}).get("how") == "admin"]
+    pairs, sums, new_dirs, wants = [], {}, set(), {}
+    for it, dest, idx in admin:
+        final = moves[it["id"]]["final"]
+        for rec in idx.values():
+            tr = rec["rel"] if THIS_OS != "windows" else rec["stored"]
+            src, dst = dest / tr, final / tr
+            if file_stat(src) is not None and file_stat(dst) is None:
+                pairs.append([str(src), str(dst)])
+                sums[str(dst)] = (rec["sha256"], str(src))
+                wants.setdefault(it["id"], []).append(str(dst))
+                new_dirs.update(str(d) for d in missing_folders(dst.parent))
+    done = set()
+    if pairs and rehearsal_root is None:
+        out["asked"] = True
+        print(f"\nPutting {len(pairs)} plugin files in Program Files. Windows asks for permission once: choose Yes.",
+              flush=True)
+        out["declined"] = not as_admin({"files": pairs}, landing)
+        for dst, (sha, src) in sums.items():
+            st = file_stat(dst)
+            if st is not None and hash_file(dst) == sha:
+                journal.write(json.dumps({"kind": "file", "path": dst, "sha256": sha, "size": st.st_size,
+                                          "mtime_ns": st.st_mtime_ns}) + "\n")
+                done.add(dst)
+                try:
+                    os.remove(long_path(src))   # the waiting copy isn't needed any more
+                except OSError:
+                    pass
+        for d in sorted(new_dirs, key=len):
+            if os.path.isdir(long_path(d)):
+                journal.write(json.dumps({"kind": "dir", "path": d}) + "\n")
+        journal.flush()
+        for d in [dest for _it, dest, _idx in admin] + [landing / "Plugins"]:   # tidy the emptied waiting folders
+            for cur, _dirs, _files in sorted(os.walk(long_path(d)), key=lambda w: -len(w[0])):
+                try:
+                    os.rmdir(cur)
+                except OSError:
+                    pass
+    for it, dest, idx in plan:
+        m = moves.get(it["id"])
+        if m is None:
+            continue
+        row = {"label": m["label"], "names": m["names"], "where": str(m["final"] or dest)}
+        if m["how"] == "admin":
+            wanted = wants.get(it["id"], [])
+            if all(dst in done for dst in wanted) and (wanted or m["before"]):
+                out["placed"].append(row)
+                for e in entries:
+                    if e.get("id") == it["id"]:
+                        e["new"] = str(m["final"])
+                continue
+            if not wanted and not idx:
+                (out["already"] if m["already"] else out["placed"]).append(row)
+                continue
+            out["waiting"].append(dict(row, where=str(dest), final=str(m["final"])))
+        elif m["how"] == "waiting":
+            if idx or m["before"]:
+                out["waiting"].append(dict(row, where=str(dest), final=None))
+        elif idx or m["before"]:
+            out["placed"].append(row)
+        else:
+            out["already"].append(row)
+    return out
+
+
+def copied_plugin_lines(p, source_os):
+    rescan = ("In FL Studio: Options > Manage plugins > Find installed plugins. In Ableton Live: Settings > "
+              "Plug-Ins > Rescan.")
+    lines = []
+    if p["placed"]:
+        lines += ["Plugins copied from the old computer, back in their plugin folders (no download needed):"]
+        lines += [f"  {', '.join(r['names'])} -> {r['where']}" for r in p["placed"]]
+        lines += [f"Let your DAW find them. {rescan}",
+                  "If one won't load, or asks for its serial or to sign in, enter it again (deactivate it on the old "
+                  "computer first if its maker counts activations), or install it from its maker.", ""]
+    if p["waiting"]:
+        lines += ["Plugins waiting in the landing folder, not in a plugin folder yet:"]
+        lines += [f"  {', '.join(r['names'])}: {r['where']}" + (f" (goes in {r['final']})" if r.get("final") else "")
+                  for r in p["waiting"]]
+        if p.get("declined"):
+            lines += ["Windows didn't get permission to put them in Program Files. Unpack again and choose Yes when "
+                      "Windows asks, or copy each one into the folder named after it."]
+        else:
+            lines += ["This computer has no such plugin folder. Add the waiting folder to your DAW's plugin folders "
+                      "(FL Studio: Options > Manage plugins > Plugin search paths), or install them from each maker."]
+        lines += [""]
+    if p["already"]:
+        lines += ["Already installed here, so they weren't copied (yours were kept): "
+                  + ", ".join(n for r in p["already"] for n in r["names"]), ""]
+    if p["other_os"]:
+        other = "Windows" if source_os == "windows" else "Mac"
+        lines += [f"Plugins from the old computer that only run on {other}, so they weren't copied (install their "
+                  "versions for this computer from each maker): " + ", ".join(p["other_os"]), ""]
+    return lines
+
+
+def say_copied_plugins(p, source_os):
+    lines = copied_plugin_lines(p, source_os)
+    if lines:
+        print("\n" + "\n".join(lines).rstrip())
+
+
 def cmd_unpack(args):
     bundle = Path(args.bundle).expanduser()
     try:
@@ -2343,8 +2495,40 @@ def cmd_unpack(args):
     together = getattr(args, "keep_together", False)
     rehearsal_root = getattr(args, "rehearsal_root", None)
     plan, back_in_place = [], 0
+    cross_os = manifest["source_os"] != THIS_OS
+    fold_here = THIS_OS == "windows"
+    earlier = {norm(e["path"], fold_here): e for e in read_journal(landing / UNPACK_JOURNAL) if e.get("kind") == "file"}
+    plugin_moves, plugins_other_os = {}, []   # copied plugins (issue #80)
     for it in manifest["items"]:
-        if it["kind"] == "known" and it["id"] in dest_known:
+        index = read_jsonl(bundle / "index" / f"{it['id']}.jsonl")
+        pm = None
+        if it.get("plugin_files"):
+            names = [f"{x['name']} ({x['format']})" for x in it.get("plugins", [])]
+            if cross_os:   # a Windows plugin can't run on a Mac, or the other way round
+                plugins_other_os += names
+                continue
+            dest, final, how, check = plugin_destination(manifest, it, rehearsal_root,
+                                                         landing / "Plugins" / places[it["id"]].name)
+            pm = plugin_moves[it["id"]] = {"label": it["label"], "names": names, "final": final, "how": how,
+                                          "dest": dest, "already": 0, "before": 0}
+            ours = lambda x: any(k == norm(str(x), fold_here) or k.startswith(norm(str(x), fold_here) + "/")
+                                 for k in earlier)
+            if "only" in it:   # never over a plugin that's installed here already, even an older one
+                keep = {}
+                for rel, rec in index.items():
+                    tr = rec["rel"] if THIS_OS != "windows" else rec["stored"]
+                    there = [x / tr for x in check if file_stat(x / tr) is not None]
+                    if there:
+                        pm["before" if ours(there[0]) else "already"] += 1
+                    else:
+                        keep[rel] = rec
+                index = keep
+            else:
+                there = [x for x in check if os.path.exists(long_path(x))]
+                if there:
+                    pm["before" if ours(there[0]) else "already"] = len(index)
+                    index = {}
+        elif it["kind"] == "known" and it["id"] in dest_known:
             dest = dest_known[it["id"]][1]
         else:
             again = None if together else same_place(manifest, it["source_path"], rehearsal_root)
@@ -2355,7 +2539,8 @@ def cmd_unpack(args):
                 iid, _, folder = spec.partition("=")
                 if iid == it["id"] and folder:
                     dest = Path(folder).expanduser()
-        index = read_jsonl(bundle / "index" / f"{it['id']}.jsonl")
+                    if pm:
+                        pm.update(dest=dest, final=None, how="waiting")
         plan.append((it, dest, index))
 
     total = sum(r["size"] for _, _, idx in plan for r in idx.values())
@@ -2372,8 +2557,18 @@ def cmd_unpack(args):
             + "\nFree up space, or send big items elsewhere with --dest-for ID=FOLDER.")
 
     if getattr(args, "preview", False):
+        def plugin_note(it, idx):
+            m = plugin_moves.get(it["id"])
+            if m is None:
+                return None
+            if not idx:
+                return "Already installed here: yours is kept" if m["already"] else "Already in place"
+            return {"admin": f"Into {m['final']}: Windows asks for permission",
+                    "user": "Into your own Plug-Ins folder (the shared one needs an administrator)",
+                    "waiting": "Waits here: this computer has no such plugin folder"}.get(m["how"])
         LAST["unpack_preview"] = [{"label": it["label"], "files": len(idx), "bytes": sum(r["size"] for r in idx.values()),
-                                   "dest": str(dest), "known": it["kind"] == "known" and it["id"] in dest_known}
+                                   "dest": str(dest), "known": it["kind"] == "known" and it["id"] in dest_known,
+                                   "note": plugin_note(it, idx)}
                                   for it, dest, idx in plan]
         return 0
     new_landing = missing_folders(landing)
@@ -2381,8 +2576,6 @@ def cmd_unpack(args):
     # The journal: every file and folder this unpack creates, so it can be undone exactly (issue #73), and so a
     # later top-up can tell a file an earlier unpack put there (and nobody changed since) from the user's own.
     journal_path = landing / UNPACK_JOURNAL
-    fold_here = THIS_OS == "windows"
-    earlier = {norm(e["path"], fold_here): e for e in read_journal(journal_path) if e.get("kind") == "file"}
 
     def contents(p, st):
         """The SHA-256 of the file at p. Taken from the journal when an earlier unpack copied it there and its size
@@ -2410,8 +2603,10 @@ def cmd_unpack(args):
                     prog.add(rec["size"], copied=False)
                     continue  # already there, identical
                 e = earlier.get(norm(str(dst), fold_here))
-                if e and e["sha256"] == now:
-                    replaced += 1   # an earlier unpack put it there and nobody changed it since: the newer one wins
+                if e and e["sha256"] == now or it.get("plugin_files"):
+                    # an earlier unpack put it there and nobody changed it since: the newer one wins. (A copied
+                    # plugin only lands where no plugin was, or in its waiting folder: a renamed file would break it.)
+                    replaced += 1
                 else:
                     dst = dst.with_name(f"{dst.stem} (from {src_host}){dst.suffix}")
                     if file_size(dst) == rec["size"]:
@@ -2427,6 +2622,8 @@ def cmd_unpack(args):
                 blocked = blocked or isinstance(e, PermissionError)
                 prog.add(rec["size"], copied=False)
                 continue
+            if rec.get("x") and THIS_OS != "windows":   # a Mac plugin's program file (issue #80)
+                os.chmod(long_path(dst), os.stat(long_path(dst)).st_mode | 0o111)
             st = file_stat(dst)
             journal.write(json.dumps({"kind": "file", "path": str(dst), "sha256": digest, "size": st and st.st_size,
                                       "mtime_ns": st and st.st_mtime_ns}) + "\n")
@@ -2442,6 +2639,9 @@ def cmd_unpack(args):
             if renamed:
                 entry["renamed"] = renamed
         entries.append(entry)
+
+    plugins = put_plugins_in_place(plan, plugin_moves, landing, journal, entries, rehearsal_root)
+    plugins["other_os"] = plugins_other_os
 
     # keep what earlier unpacks from this computer mapped, unless this one maps the same folder again
     fold = manifest["source_os"] == "windows"
@@ -2497,6 +2697,10 @@ def cmd_unpack(args):
             print(f"  {lib['name']} ({lib['maker']}): " + ("moved to " + lib["new"] if lib["moved"] else "not moved"))
             for step in lib["steps"]:
                 print(f"    - {step}")
+    say_copied_plugins(plugins, manifest["source_os"])
+    if plugins["placed"] or plugins["waiting"] or plugins["other_os"]:
+        (landing / "plugins-copied.txt").write_text("\n".join(copied_plugin_lines(plugins, manifest["source_os"])),
+                                                     encoding="utf-8")
     plugin_ids = {it["id"] for it in manifest["items"] if it.get("plugin_data")}
     presets = [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries if e.get("id") in plugin_ids]
     cross_os = manifest["source_os"] != THIS_OS
@@ -2521,6 +2725,7 @@ def cmd_unpack(args):
         "report": str(landing / "unpack-report.txt"), "problems": problems, "notes": notes,
         "conflicts": len(conflicts), "bad": bad[:50], "back_in_place": back_in_place, "replaced": replaced,
         "plugin_data": presets, "cross_os": cross_os, "blocked_hint": hint, "libraries": libraries,
+        "plugins": plugins,
         "range": (manifest.get("projects_range") or {}).get("label"),
         "entries": [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries
                     if e.get("id") in {it["id"] for it in manifest["items"]}],
@@ -3394,8 +3599,9 @@ WEBSITE = "From each maker's website"
 
 
 def installer_for(vendor):
-    v = (vendor or "").lower()
-    names = [name for name in INSTALLER_APPS if name in v]
+    # "Native-instruments" (from a Mac bundle ID) is Native Instruments too: compare letters and digits only
+    v = _plain(vendor or "")
+    names = [name for name in INSTALLER_APPS if _plain(name) in v]
     return INSTALLER_APPS[max(names, key=len)] if names else WEBSITE
 
 
@@ -3410,6 +3616,298 @@ def group_by_installer(missing):
     out = [{"app": app, "link": INSTALLER_LINKS.get(app), "plugins": g["plugins"], "projects": len(g["projects"])}
            for app, g in groups.items()]
     return sorted(out, key=lambda g: (g["app"] == WEBSITE, -g["projects"], g["app"].lower()))
+
+
+# --------------------------------------------------------------------------- plugins that copy (issue #80)
+
+# Makers whose plugins need their own installer even though they have no installer app of their own: copy
+# protection (iLok) or parts the installer puts elsewhere. Copying the plugin isn't enough, so they stay on the
+# install list. Guessing wrong here only costs a download.
+NEEDS_ITS_INSTALLER = ("spectrasonics", "refx", "soundtoys", "antares", "eventide", "mcdsp", "sonnox", "avid",
+                       "celemony", "synchro arts", "pace anti-piracy")
+COPY_FORMATS = {"VST2", "VST3", "CLAP", "AU"}   # AAX is Pro Tools only, and installs with iLok
+PLUGIN_COPY_MAX = 2 * 1024 ** 3   # a "plugin" bigger than this holds its sounds: it installs from its maker
+FORMAT_FOLDERS = {"components", "vst", "vst2", "vst3", "clap", "aax", "plug-ins", "plugins", "vstplugins", "64bit",
+                  "64-bit", "x64"}   # a plugin folder's own sorting, never a maker's folder
+NOT_COPIED_FLAGS = ("Signature broken", "Virus scanner", "No program file", "32-bit only")
+SUPPORT_FILE_FLAG = "Doesn't look like a plugin"   # a support file next to plugins: it comes with its folder
+_PLUGIN_SCAN = {}
+
+
+def plugin_roots():
+    """The folders this computer's plugins are installed in. With a stand-in home (tests, and a rehearsal's new
+    computer), only the ones FREIGHTER_PLUGIN_ROOTS lists, so a test never sees or packs the real plugins."""
+    if os.environ.get("FREIGHTER_HOME"):
+        return [Path(p) for p in os.environ.get("FREIGHTER_PLUGIN_ROOTS", "").split(os.pathsep) if p]
+    return [root for root, _exts in (rs.mac_roots() if rs.IS_MAC else rs.win_roots() if rs.IS_WIN else [])]
+
+
+def installed_plugins(fresh=False):
+    """This computer's plugins (rows like _Manifest's), kept for a minute so one move plan scans only once."""
+    key = (os.environ.get("FREIGHTER_HOME"), os.environ.get("FREIGHTER_PLUGIN_ROOTS"))
+    hit = _PLUGIN_SCAN.get(key)
+    if hit and not fresh and time.time() - hit[0] < 60:
+        return hit[1]
+    try:
+        rows = rs.scan(plugin_roots(), system=False) if os.environ.get("FREIGHTER_HOME") else rs.scan([])
+    except Exception:   # never let the plugin scan stop a move
+        rows = []
+    _PLUGIN_SCAN.clear()
+    _PLUGIN_SCAN[key] = (time.time(), rows)
+    return rows
+
+
+def plugin_copy_reason(row):
+    """Why a plugin can't simply be copied to the new computer, or None when it can: it's only files, from a
+    maker with no installer app, and nothing about it looks wrong (a broken signature means a cracked copy)."""
+    if row.get("format") not in COPY_FORMATS:
+        return "Pro Tools plugins install with their maker's installer"
+    vendor = (row.get("vendor") or "").lower()
+    app = installer_for(vendor)
+    if app != WEBSITE:
+        return f"installs through {app}"
+    if any(_plain(m) in _plain(vendor) for m in NEEDS_ITS_INSTALLER):
+        return "needs its maker's installer (copy protection, or parts it installs elsewhere)"
+    flags = row.get("flags") or []
+    for f in ([flags] if isinstance(flags, str) else flags):
+        if f.startswith(NOT_COPIED_FLAGS):
+            return f
+    return None
+
+
+def has_links(p):
+    """Whether p is, or holds, a symbolic link. Freighter copies files, not links, so a plugin with links inside
+    (frameworks in Mac plugins) would arrive broken: it installs from its maker instead."""
+    if os.path.islink(p):
+        return True
+    for cur, dirs, files in os.walk(long_path(p)):
+        if any(os.path.islink(os.path.join(cur, n)) for n in dirs + files):
+            return True
+    return False
+
+
+def plugin_units(rows, roots=None, taken=()):
+    """What to copy so the plugins that copy cleanly need no download on the new computer (issue #80).
+    Returns ([(unit, [rows])], [(row, why it doesn't copy)]). A unit is the plugin itself (a file, or a bundle
+    folder), or its maker's folder inside a plugin folder (VSTPlugins\\Xfer) when every plugin in that folder
+    copies, so the support files next to them come too. A plugin inside a folder in `taken` is left to it."""
+    fold = THIS_OS == "windows"
+    nroots = sorted(((norm(str(r), fold), Path(r)) for r in (plugin_roots() if roots is None else roots)),
+                    key=lambda x: -len(x[0]))
+    taken = [norm(str(t), fold) for t in taken]
+
+    def maker_folder(p):
+        n = norm(str(p), fold)
+        for nr, r in nroots:
+            if n.startswith(nr + "/"):
+                parts = Path(p).parts[len(r.parts):]
+                i = 0
+                while i < len(parts) - 1 and parts[i].lower() in FORMAT_FOLDERS:   # Plug-Ins/VST3/<maker>
+                    i += 1
+                return Path(r, *parts[:i + 1]) if i < len(parts) - 1 else None
+        return None
+
+    ok, no = [], []
+    for row in rows:
+        if any(str(f).startswith(SUPPORT_FILE_FLAG) for f in row.get("flags") or []):
+            continue   # not a plugin: a file plugins next to it need, which comes when their folder does
+        why = plugin_copy_reason(row)
+        (no if why else ok).append((row, why))
+    blocked = {norm(str(f), fold) for row, _ in no for f in [maker_folder(row["path"])] if f is not None}
+    checked = {}
+
+    def problem(unit):
+        k = norm(str(unit), fold)
+        if k not in checked:
+            if has_links(unit):
+                checked[k] = "has links inside, so it installs from its maker"
+            else:
+                size = file_size(unit) if os.path.isfile(long_path(unit)) else folder_bytes(unit, PLUGIN_COPY_MAX)
+                checked[k] = ("it holds its sounds too, so it installs from its maker"
+                              if (size or 0) > PLUGIN_COPY_MAX else None)
+        return checked[k]
+
+    units = {}
+    for row, _ in ok:
+        p = Path(row["path"])
+        n = norm(str(p), fold)
+        if any(n == t or n.startswith(t + "/") for t in taken):
+            continue
+        folder = maker_folder(p)
+        unit = folder if folder is not None and norm(str(folder), fold) not in blocked and problem(folder) is None else p
+        why = problem(unit)
+        if why:
+            no.append((row, why))
+            continue
+        units.setdefault(norm(str(unit), fold), (unit, []))[1].append(row)
+    return list(units.values()), no
+
+
+def plugin_items(skips=(), taken=(), report=None):
+    """Pack items for the plugins that copy cleanly (issue #80): each bundle or maker folder is an item, and
+    single-file plugins (a Windows .dll or .vst3) are one item per folder. report, if a dict, gets {copied,
+    install}: what comes, and what installs from its maker on the new computer and why."""
+    rows = [dict(r, flags=list(r.get("flags") or [])) for r in installed_plugins()]
+    candidates = [r for r in rows if plugin_copy_reason(r) is None]
+    if candidates:
+        try:
+            rs.apply_safety(candidates)   # signatures: a cracked plugin (broken signature) is never carried over
+        except Exception:
+            pass
+    units, no = plugin_units(rows, taken=taken)
+    brief = lambda r: {"name": r["name"], "vendor": r.get("vendor", ""), "format": r.get("format", "")}
+    items, loose = [], {}
+    for unit, urows in units:
+        if os.path.isfile(long_path(unit)):
+            loose.setdefault(str(unit.parent), []).append((unit, urows))
+            continue
+        names = sorted({r["name"] for r in urows}, key=str.lower)
+        label = (f"Plugin: {urows[0]['name']} ({urows[0]['format']})"
+                 if len(urows) == 1 and norm(urows[0]["path"], True) == norm(str(unit), True)
+                 else f"Plugins from {unit.name}: {', '.join(names)}")
+        items.append({"id": item_id("vst", unit), "label": label, "source_path": str(unit), "kind": "extra",
+                      "plugin_files": True, "plugins": [brief(r) for r in urows]})
+    for folder, files in sorted(loose.items()):
+        names = sorted({r["name"] for _u, urows in files for r in urows}, key=str.lower)
+        items.append({"id": item_id("vst", folder), "label": f"Plugins: {', '.join(names)}",
+                      "source_path": folder, "kind": "extra", "only": sorted(u.name for u, _r in files),
+                      "plugin_files": True, "plugins": [brief(r) for _u, urows in files for r in urows]})
+    items = [it for it in items if it["id"] not in skips]
+    if report is not None:
+        report["copied"] = [p for it in items for p in it["plugins"]]
+        # one line per plugin, and none for a plugin that comes in another format (its Pro Tools copy, say)
+        seen = {rs.match_key(p["name"]) for p in report["copied"]}
+        report["install"] = []
+        for row, why in no:
+            k = rs.match_key(row["name"])
+            if k not in seen:
+                seen.add(k)
+                report["install"].append(dict(brief(row), why=why))
+    return items
+
+
+def can_write(folder):
+    """Whether Freighter can create files in folder (or, if it doesn't exist yet, the nearest folder above it)."""
+    p = Path(folder)
+    while not os.path.exists(long_path(p)):
+        if p.parent == p:
+            return False
+        p = p.parent
+    import tempfile
+    try:
+        fd, tmp = tempfile.mkstemp(dir=long_path(p), prefix=".freighter-check-")
+        os.close(fd)
+        os.remove(tmp)
+        return True
+    except OSError:
+        return False
+
+
+def plugin_destination(manifest, it, rehearsal_root, staging):
+    """Where a copied plugin item goes on this computer (issue #80): (folder to unpack into, its plugin folder or
+    None, how, the places where a copy already installed here counts). how is "in place" (the plugin folder it was in on the old computer), "user" (a Mac's own
+    Plug-Ins folder, when the shared one needs an administrator), "admin" (a Windows plugin folder in Program
+    Files: unpacked to `staging` first, then put in place with Windows' permission) or "waiting" (this
+    computer has no such folder: it waits in `staging`)."""
+    final = same_place(manifest, it["source_path"], rehearsal_root)
+    if final is None:
+        return staging, None, "waiting", []
+    user = home() / str(final).lstrip("/") if THIS_OS == "mac" and str(final).startswith("/Library/") else None
+    places = [final] + ([user] if user else [])   # a copy installed in either one counts as installed here
+    if can_write(final) or ("only" not in it and any(os.path.exists(long_path(x)) for x in places)):
+        return final, final, "in place", places
+    if user is not None and can_write(user):
+        return user, user, "user", places
+    return staging, final, "admin" if THIS_OS == "windows" else "waiting", places
+
+
+def run_as_admin(argv):
+    """Windows: run argv as an administrator once the person says yes to Windows' prompt (User Account
+    Control), and wait for it. Returns its exit code, or None when it didn't run (they said no)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ShellExecuteInfo(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong), ("hwnd", wintypes.HWND),
+                    ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+                    ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int), ("hInstApp", wintypes.HINSTANCE),
+                    ("lpIDList", ctypes.c_void_p), ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+                    ("dwHotKey", wintypes.DWORD), ("hIconOrMonitor", wintypes.HANDLE), ("hProcess", wintypes.HANDLE)]
+    info = ShellExecuteInfo(cbSize=ctypes.sizeof(ShellExecuteInfo), fMask=0x40,   # SEE_MASK_NOCLOSEPROCESS
+                            lpVerb="runas", lpFile=argv[0], lpParameters=subprocess.list2cmdline(argv[1:]), nShow=0)
+    if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(info)) or not info.hProcess:
+        return None
+    k32 = ctypes.windll.kernel32
+    k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    k32.WaitForSingleObject(info.hProcess, 0xFFFFFFFF)
+    code = wintypes.DWORD()
+    k32.GetExitCodeProcess(info.hProcess, ctypes.byref(code))
+    k32.CloseHandle(info.hProcess)
+    return code.value
+
+
+def self_command(*args):
+    """The command line that runs this Freighter again with args (the built program, or this script)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *args]
+    return [sys.executable, str(Path(__file__).resolve()), *args]
+
+
+def as_admin(job, folder):
+    """Do a plugin-folder job as an administrator (Windows asks first): job is {"files": [[src, dst], ...]}
+    to copy and/or {"remove": [[path, sha256], ...], "folders": [...]} to undo. Returns True if it ran."""
+    plan = Path(folder) / "plugin-folders-job.json"
+    plan.write_text(json.dumps(job), encoding="utf-8")
+    try:
+        return run_as_admin(self_command("plugin-folders", str(plan))) is not None
+    except Exception:   # no Windows prompt available: the files simply stay where they are
+        return False
+    finally:
+        plan.unlink(missing_ok=True)
+
+
+def plugin_folders_job(plan_path):
+    """What `freighter plugin-folders` does, as an administrator (issue #80): copy plugins into plugin folders,
+    never over a file that's already there, or remove the ones an unpack put there (only if unchanged since).
+    It only touches plugin folders (by place or by name, like C:\\VSTPlugins) and Program Files.
+    Returns (copied, removed)."""
+    job = json.loads(Path(plan_path).read_text(encoding="utf-8"))
+    fold = THIS_OS == "windows"
+    allowed = [norm(str(r), fold) for r in plugin_roots()] + \
+        [norm(os.environ[v], fold) for v in ("ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles")
+         if os.environ.get(v)]
+    ok = lambda p: any(norm(p, fold).startswith(a + "/") for a in allowed if a) or \
+        any(part.lower() in FORMAT_FOLDERS for part in Path(p).parts[:-1])   # e.g. C:\VSTPlugins
+    copied = removed = 0
+    for src, dst in job.get("files", []):
+        if ok(dst) and not os.path.exists(long_path(dst)):
+            try:
+                copy_and_hash(src, dst)
+                copied += 1
+            except OSError:
+                pass
+    for path, sha in job.get("remove", []):
+        try:
+            if ok(path) and hash_file(path) == sha:
+                os.remove(long_path(path))
+                removed += 1
+        except OSError:
+            pass
+    for d in sorted(job.get("folders", []), key=len, reverse=True):
+        if ok(d):
+            try:
+                os.rmdir(long_path(d))
+            except OSError:
+                pass
+    return copied, removed
+
+
+def cmd_plugin_folders(args):
+    copied, removed = plugin_folders_job(args.plan)
+    print(f"Copied {copied} plugin files, removed {removed}.")
+    return 0
 
 
 def readiness_lines(r):
@@ -3620,7 +4118,8 @@ def cmd_rehearse(args):
     items = pack_items(args.include, set(args.skip), rng=rng)
     need = sum(size for it in items
                for _r, _a, size in ([(n, None, (Path(it["source_path"]) / n).stat().st_size)
-                                     for n in it["only"]] if "only" in it else walk_files(it["source_path"], [])))
+                                     for n in it["only"]] if "only" in it else
+                                    walk_files(it["source_path"], None if it.get("plugin_files") else [])))
     base.mkdir(parents=True, exist_ok=True)
     (base / REHEARSAL_MARKER).write_text("A Freighter rehearsal. Freighter never packs this folder.\n", encoding="utf-8")
     free = shutil.disk_usage(base).free
@@ -3704,6 +4203,10 @@ def cmd_rehearse(args):
             f"  LOST in the move: {totals['lost']}",
             f"Samples already missing before the move (not Freighter's fault): {totals['already']}",
         ]
+        plugs = (LAST.get("unpack") or {}).get("plugins") or {}
+        copied = sum(len(r["names"]) for r in plugs.get("placed", []))
+        if copied:   # issue #80
+            lines.append(f"Plugins copied into their plugin folders (here, inside the rehearsal): {copied}")
         if lost:
             lines += ["", "Lost samples (please report these):"] + lost
         if already:
@@ -3721,6 +4224,7 @@ def cmd_rehearse(args):
             print(f"Note: {len(already)} samples were already missing before the move (listed in {report}).")
         print(f"Rehearsal files: {base}  (delete this folder when you're done; your real files weren't touched)")
         LAST["rehearse"] = {"passed": not totals["lost"], "totals": totals, "lost": lost, "already": already,
+                            "plugins": copied,
                             "unchecked": unchecked, "old_live": old_live, "report": str(report), "folder": str(base)}
         return 0 if not totals["lost"] else 2
     finally:
@@ -4077,6 +4581,10 @@ def main():
 
     s = sub.add_parser("check-update", help="ask GitHub whether a newer Freighter is out")
     s.set_defaults(fn=cmd_check_update)
+
+    s = sub.add_parser("plugin-folders", help="used by unpack, as an administrator, to put plugins in Program Files")
+    s.add_argument("plan")
+    s.set_defaults(fn=cmd_plugin_folders)
 
     s = sub.add_parser("app", help="open Freighter in your web browser (preview)")
     s.set_defaults(fn=cmd_app)

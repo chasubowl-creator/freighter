@@ -1,6 +1,8 @@
 # Moving your studio with Freighter
 
-**Plugins move as a list** (you reinstall them from each maker).
+**Plugins that are only files come along** (most free and indie plugins): they go back in their plugin
+folders, nothing to download. **The rest move as a list**: plugins from Native Access, Waves Central and other
+installer apps are installed from those apps, and their sound libraries can come on the drive.
 **Your own files move as files**: projects, presets, recordings, and every sample your projects use.
 You need an external drive with enough free space (step 2 shows how much).
 Format it as **exFAT**, which both Windows and Mac can read and write. NTFS drives are read-only on a
@@ -22,7 +24,8 @@ Double-click **freighter**. In the menu:
 - **2: See what a move would take.** It finds your FL Studio and Ableton folders, every folder your
   projects pull samples from (such as a drum kit folder on the Desktop), and your plugin presets (such as
   `Documents\Xfer` for Serum). Very big plugin folders, usually sound libraries, are listed but left out
-  unless you add them. Note the total size.
+  unless you add them. Plugins that are only files are listed under "Plugins that come along"; the others
+  are named as installing from their maker. Note the total size.
 - **4: Pack for the move onto a drive.** Plug in the drive, then drag it into the window when asked.
   If it gets interrupted, choose 4 again. It picks up where it stopped. Freighter keeps the computer awake
   while it copies. When it's done, **eject the drive** before unplugging it.
@@ -97,7 +100,13 @@ created and puts repaired projects back. Files you've changed since are kept.
 
 ## 5. Reinstall plugins
 
-Unpack prints the exact command at the end. In a command window opened in Freighter's folder it looks like:
+Plugins that came along are already back in their plugin folders. Putting them in Program Files needs
+permission, so **Windows asks once while unpacking: choose Yes**. (If you choose No, they wait in
+`Music\Freighter\<old computer>\Plugins`; unpack again and choose Yes.) Then let FL Studio find them:
+**Options → Manage plugins → Find installed plugins**. If one asks for its serial or to sign in, enter it
+again; if one won't load, install it from its maker.
+
+For the rest, unpack prints the exact command at the end. In a command window opened in Freighter's folder it looks like:
 
     manifest.exe --compare "C:\Users\<you>\Music\Freighter\<old computer>\plugins-<old computer>.csv"
 

@@ -312,13 +312,16 @@ function chooseItems() {
       (reh ? "A rehearsal needs about twice this much free space." : "Your drive needs at least this much free space.");
     next.disabled = !chosen;
   };
-  const rows = r.items.map(it => {
+  const itemRow = (it) => {
     const box = el("input", {type: "checkbox", checked: !r.skip.has(it.id),
       onchange: (e) => { e.target.checked ? r.skip.delete(it.id) : r.skip.add(it.id); refresh(); }});
     return el("tr", {}, el("td", {class: "tick"}, box),
       el("td", {}, el("label", {}, it.label), el("div", {class: "path mono"}, it.path)),
       el("td", {class: "num"}, it.files.toLocaleString()), el("td", {class: "num"}, size(it.bytes)));
-  });
+  };
+  const rows = r.items.filter(it => !it.plugin_files).map(itemRow);
+  const pluginRows = r.items.filter(it => it.plugin_files).map(itemRow);   // plugins that are only files (#80)
+  const others = r.plugin_install || [];
   const optRow = (b, what) => el("tr", {},
     el("td", {class: "tick"}, el("input", {type: "checkbox", checked: r.include.has(b.path),
       onchange: (e) => { e.target.checked ? r.include.add(b.path) : r.include.delete(b.path); refresh(); }})),
@@ -349,6 +352,10 @@ function chooseItems() {
     el("p", {class: "muted"}, "Untick anything you don't want to take. Your originals stay on this computer either way."),
     el("table", {}, el("thead", {}, el("tr", {}, el("th", {}), el("th", {}, "What"), el("th", {class: "num"}, "Files"), el("th", {class: "num"}, "Size"))),
       el("tbody", {}, rows)),
+    pluginRows.length ? el("h2", {}, "Plugins that come along") : null,
+    pluginRows.length ? el("p", {class: "muted"}, "These plugins are just files, so they go back in their plugin folders on the new computer: nothing to download. Some ask for their serial again the first time.") : null,
+    pluginRows.length ? el("table", {}, el("tbody", {}, pluginRows)) : null,
+    others.length ? el("p", {class: "muted small"}, `${plural(others.length, "other plugin")} install${others.length === 1 ? "s" : ""} from ${others.length === 1 ? "its" : "their"} maker on the new computer, because ${others.length === 1 ? "its" : "their"} app sets up licenses and sounds: ${others.join(", ")}.`) : null,
     bigRows.length ? el("h2", {}, "Big plugin content, left out unless you tick it") : null,
     bigRows.length ? el("p", {class: "muted"}, "These are probably sound libraries. They usually come back faster by installing them again from the maker's app (Native Access, Spitfire, Arturia…). Tick one to take it anyway.") : null,
     bigRows.length ? el("table", {}, el("tbody", {}, bigRows)) : null,
@@ -429,7 +436,8 @@ function packed(r, d) {
     el("div", {class: "muted"}, "Listed in already-missing.txt on the drive.")));
   show(steps(OLD_STEPS, 3), el("h1", {}, r.errors ? "Packed, with problems" : "Packed"),
     el("div", {class: "panel"}, el("div", {class: "big"}, size(r.bytes)),
-      el("div", {class: "muted"}, `${plural(r.files, "file")} in ${plural(r.items, "folder")}, each checked, on ${d.name}.`),
+      el("div", {class: "muted"}, `${plural(r.files, "file")} in ${plural(r.items, "folder")}, each checked, on ${d.name}.` +
+        (r.plugins_copied ? ` That includes ${plural(r.plugins_copied, "plugin")}, so the new computer needs no download for ${r.plugins_copied === 1 ? "it" : "them"}.` : "")),
       r.range ? el("div", {class: "muted"}, `Projects saved ${rangeText(r.range)}: ${r.projects.in_range} of ${r.projects.total}. The others stay on this computer (listed in projects-left-out.txt on the drive).`) : null,
       el("div", {class: "muted mono small"}, r.bundle)),
     ...notes,
@@ -537,7 +545,8 @@ function rehearsed(r, id) {
   const parts = [steps(REH_STEPS, 3),
     el("h1", {class: r.passed ? "okc" : "err"}, r.passed ? "Passed: every sample survived the move" : `Failed: ${plural(t.lost, "sample")} lost in the move`),
     el("div", {class: "panel"}, el("div", {class: "big"}, `${t.kept.toLocaleString()} of ${checked.toLocaleString()}`),
-      el("div", {class: "muted"}, `samples that worked before the move still work after it, checked byte for byte, across ${plural(t.projects, "project")}.`))];
+      el("div", {class: "muted"}, `samples that worked before the move still work after it, checked byte for byte, across ${plural(t.projects, "project")}.` +
+        (r.plugins ? ` ${plural(r.plugins, "plugin")} went into ${r.plugins === 1 ? "its plugin folder" : "their plugin folders"} too (inside the rehearsal).` : "")))];
   if (t.lost) parts.push(note("bad", `${plural(t.lost, "sample")} lost`,
     el("div", {class: "muted"}, "Please don't do your real move yet. ",
       el("a", {href: "https://github.com/chasubowl-creator/freighter/issues/new", target: "_blank", rel: "noopener"}, "Report a problem"),
@@ -615,8 +624,8 @@ function confirmUnpack(b) {
     try {
       const r = await api("/api/unpack-preview", {bundle: b.path, keep_together: together});
       where.replaceChildren(el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "What"), el("th", {class: "num"}, "Size"), el("th", {}, "Goes to"))),
-        el("tbody", {}, r.plan.map(x => el("tr", {}, el("td", {}, x.label), el("td", {class: "num"}, size(x.bytes)),
-          el("td", {class: "mono path"}, x.dest))))));
+        el("tbody", {}, r.plan.map(x => el("tr", {}, el("td", {}, x.label), el("td", {class: "num"}, x.files || !x.note ? size(x.bytes) : ""),
+          el("td", {}, el("div", {class: "mono path"}, x.dest), x.note ? el("div", {class: "muted small"}, x.note) : null))))));
     } catch (e) { where.replaceChildren(el("p", {class: "err"}, e.message)); }
   };
   const go = el("button", {class: "primary", disabled: !!b.problems.length, onclick: () => unpack(b, together, anyway)}, "Unpack and repair");
@@ -689,6 +698,18 @@ function unpacked(r) {
     el("ul", {class: "plain"}, u.plugin_data.map(p => el("li", {class: "row"},
       el("span", {}, p.label.replace(/^Plugin presets and data: /, "")), el("span", {class: "mono small muted"}, p.new),
       u.cross_os ? copyButton(p.new) : null))));
+  const pl = u.plugins || {placed: [], waiting: [], already: [], other_os: []};
+  const plugNames = (list) => list.flatMap(x => x.names);
+  if (pl.placed.length) parts.push(el("h2", {}, "Plugins copied over"),
+    el("p", {class: "muted"}, `${plural(plugNames(pl.placed).length, "plugin")} went back in ${pl.placed.length === 1 ? "its plugin folder" : "their plugin folders"}, with nothing to download. Let your DAW find them: in FL Studio, Options → Manage plugins → Find installed plugins; in Ableton Live, Settings → Plug-Ins → Rescan. If one asks for its serial or to sign in, enter it again; if one won't load, install it from its maker.`),
+    el("ul", {class: "plain"}, pl.placed.map(x => el("li", {class: "row"}, el("span", {}, x.names.join(", ")), el("span", {class: "mono small muted"}, x.where)))));
+  if (pl.waiting.length) parts.push(note("warn", `${plural(plugNames(pl.waiting).length, "plugin")} waiting to go in a plugin folder`,
+    el("div", {class: "muted"}, pl.declined
+      ? "Windows didn't get permission to put them in Program Files. Unpack again and choose Yes when Windows asks."
+      : "This computer has no such plugin folder. Add the folder below to your DAW's plugin folders (FL Studio: Options → Manage plugins → Plugin search paths), or install them from each maker."),
+    el("ul", {class: "plain"}, pl.waiting.map(x => el("li", {class: "row"}, el("span", {}, x.names.join(", ")), el("span", {class: "mono small muted"}, x.where), copyButton(x.where))))));
+  if (pl.already.length) parts.push(el("p", {class: "muted small"}, `Already installed here, so they weren't copied (yours were kept): ${plugNames(pl.already).join(", ")}.`));
+  if ((pl.other_os || []).length) parts.push(el("p", {class: "muted small"}, `Plugins from the old computer that only run on ${u.source_os === "windows" ? "Windows" : "a Mac"}, so they weren't copied: ${pl.other_os.join(", ")}. Install their versions for this computer from each maker.`));
   const moved = (u.libraries || []).filter(l => l.moved), notMoved = (u.libraries || []).filter(l => !l.moved);
   if (moved.length) parts.push(el("h2", {}, "Reconnect your sound libraries"),
     el("p", {class: "muted"}, "Each maker's app needs to be told where a library is now. Install the maker's app first, then:"),
@@ -705,7 +726,7 @@ function unpacked(r) {
     el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "What"), el("th", {}, "Now here"))), el("tbody", {}, rows)),
     el("p", {class: "muted small"}, "The full list is in ", el("span", {class: "mono"}, u.report || "unpack-report.txt"), "."),
     el("h2", {}, "Next: plugins"),
-    el("p", {class: "muted"}, "Plugins can't be copied; they're installed from each maker. See which ones your projects need, most useful first."),
+    el("p", {class: "muted"}, pl.placed.length ? "The rest install from each maker. See which ones your projects still need, most useful first." : "Plugins are installed from each maker. See which ones your projects need, most useful first."),
     el("div", {class: "row actions"}, el("button", {class: "primary", onclick: projectHealth}, "Check my projects"),
       el("button", {onclick: readiness}, "Check my plugins"), el("button", {onclick: home}, "Home")),
     el("h2", {}, "Changed your mind?"),
@@ -723,6 +744,9 @@ function undoUnpack(host) {
       r.kept.length ? note("", `Kept ${plural(r.kept.length, "file")} that changed since the unpack`,
         el("div", {class: "muted"}, "They're your work now, so Freighter left them alone."),
         el("details", {}, el("summary", {}, "Show them"), el("ul", {}, r.kept.map(k => el("li", {class: "mono"}, k))))) : null,
+      (r.need_admin || []).length ? note("warn", `${plural(r.need_admin.length, "plugin file")} still in Program Files`,
+        el("div", {class: "muted"}, "Windows didn't get permission to remove them. Undo again and choose Yes, or delete them yourself."),
+        el("ul", {}, r.need_admin.map(k => el("li", {class: "mono"}, k)))) : null,
       el("div", {class: "row actions"}, el("button", {onclick: home}, "Home"))),
     {noCancel: true});
 }

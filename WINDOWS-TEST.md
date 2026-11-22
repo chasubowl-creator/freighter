@@ -44,6 +44,10 @@ Freighter would move, with a **total** at the bottom.
 - Are your FL Studio projects and sample folders there?
 - Are your plugin presets there? They show up as **Plugin presets and data**, for example `Xfer` for Serum.
   Very big plugin folders (sound libraries) are listed separately as "Not packed, because they're big".
+- Look at **Plugins that come along**: plugins that are only files, which the new PC gets without a download.
+  The line under it names the plugins that install from their maker instead. Does each one sit in the right
+  list? Anything that looks wrong (say, a plugin you know needs a sign-in listed as coming along) is great
+  feedback.
 - Anything missing, like samples on another drive? Note it down. That's useful feedback.
 - Read any notes under the list:
   - **"already missing"**: samples your projects use that aren't on the PC any more (maybe an unplugged drive).
@@ -60,6 +64,9 @@ The rehearsal needs **free space of about twice the total** from Step 4. To chec
 Type **3** and press Enter, then press Enter again at **Which projects?** At the end it prints either:
 - **PASS:** every sample your projects use survived the move, or
 - **FAIL:** lists the samples it lost. That's a Freighter bug, and exactly what we're looking for.
+
+The report also counts the plugins it copied into their plugin folders. In a rehearsal those folders are inside
+the rehearsal, so Windows doesn't ask for permission and your real plugin folders aren't touched.
 
 **If C: is too small,** rehearse onto an external drive instead: type **9** to open the app, choose
 **Rehearse first**, and under "Somewhere else" type the drive, for example `E:`. (Or use the command version
