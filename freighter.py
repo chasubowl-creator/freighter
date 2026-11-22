@@ -798,6 +798,7 @@ def cmd_pack(args):
     manifest = {
         "bundle_version": BUNDLE_VERSION, "freighter_version": __version__, "created": dt.datetime.now().isoformat(timespec="seconds"),
         "source_host": host, "source_os": THIS_OS, "source_home": str(home()),
+        "user_folders": {name: str(path) for name, path in user_folders(home()).items()},
         "items": [{k: v for k, v in it.items() if not k.startswith("_")} for it in items],
     }
     (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -986,6 +987,47 @@ def landing_folders(items, landing, previous, fold_case):
     return out
 
 
+def same_place(manifest, src, rehearsal_root=None):
+    """Where an item goes back to on a same-OS move: the same place it came from (issue #67). Folders inside the
+    old home folder go to the same spot in this one, following Desktop, Documents and Music to wherever they are
+    here (OneDrive or not). Folders elsewhere (D:\\Samples, /Volumes/SSD) go to the same path if that drive exists
+    here. Returns None when there's no such place (cross-OS moves, or a drive this computer doesn't have).
+    In a rehearsal, other drives are recreated under rehearsal_root, so it never writes to real drives."""
+    if manifest.get("source_os") != THIS_OS:
+        return None
+    fold = THIS_OS == "windows"
+    key = norm(src, fold)
+
+    def under(root):
+        r = norm(root, fold)
+        return key == r or key.startswith(r + "/")
+
+    def rel_to(root):
+        return src.replace("\\", "/")[len(norm(root, False)):].lstrip("/")
+
+    here = user_folders(home())
+    for name, old in (manifest.get("user_folders") or {}).items():
+        if name in here and under(old):
+            return here[name].joinpath(*[x for x in rel_to(old).split("/") if x])
+    old_home = manifest.get("source_home", "")
+    if old_home and under(old_home):
+        return home().joinpath(*[x for x in rel_to(old_home).split("/") if x])
+    p = Path(src)
+    if fold:
+        drive, rest = p.drive, [x for x in p.parts[1:]]
+        anchor = Path(drive + "\\") if drive else None
+        label = drive.rstrip(":") + " drive" if drive else "Other"
+    else:
+        parts = p.parts
+        if len(parts) > 2 and parts[1] == "Volumes":
+            anchor, label, rest = Path(*parts[:3]), parts[2], list(parts[3:])
+        else:
+            anchor, label, rest = (Path(*parts[:2]) if len(parts) > 1 else None), "Computer", list(parts[1:])
+    if rehearsal_root is not None:
+        return Path(rehearsal_root, "Other drives", safe_rel(label), *rest)
+    return p if anchor is not None and anchor.exists() else None
+
+
 def cmd_unpack(args):
     bundle = Path(args.bundle).expanduser()
     try:
@@ -1008,12 +1050,16 @@ def cmd_unpack(args):
     previous = previous_entries(landing)
     moved = [it for it in manifest["items"] if not (it["kind"] == "known" and it["id"] in dest_known)]
     places = landing_folders(moved, landing, previous, manifest["source_os"] == "windows")
-    plan = []
+    together = getattr(args, "keep_together", False)
+    rehearsal_root = getattr(args, "rehearsal_root", None)
+    plan, back_in_place = [], 0
     for it in manifest["items"]:
         if it["kind"] == "known" and it["id"] in dest_known:
             dest = dest_known[it["id"]][1]
         else:
-            dest = places[it["id"]]
+            again = None if together else same_place(manifest, it["source_path"], rehearsal_root)
+            dest = again or places[it["id"]]
+            back_in_place += again is not None
         if args.dest_for:
             for spec in args.dest_for:
                 iid, _, folder = spec.partition("=")
@@ -1023,6 +1069,9 @@ def cmd_unpack(args):
         plan.append((it, dest, index))
 
     total = sum(r["size"] for _, _, idx in plan for r in idx.values())
+    if back_in_place:
+        print(f"Same kind of computer, so {back_in_place} folder{'s go' if back_in_place != 1 else ' goes'} back to the "
+              "same place as before (use --keep-together to put them all in Music/Freighter instead).")
     print("Unpacking:")
     for it, dest, idx in plan:
         print(f"  {it['label']}: {len(idx)} files -> {dest}")
@@ -1794,7 +1843,7 @@ def cmd_rehearse(args):
         # so a sample on D:\\ or an external drive passes only if its moved copy works (issue #65)
         HIDE = (None, _norm_abs(base))
         print("\n== 2/4  Unpack, as the new computer (the old computer's files now count as gone)")
-        cmd_unpack(argparse.Namespace(bundle=str(bundles[-1]), dest_for=[]))
+        cmd_unpack(argparse.Namespace(bundle=str(bundles[-1]), dest_for=[], rehearsal_root=str(new_home)))
         print("\n== 3/4  Repair projects")
         cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
         cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
@@ -2034,6 +2083,8 @@ def main():
     s.add_argument("bundle")
     s.add_argument("--anyway", action="store_true",
                    help="unpack what's there even if packing the bundle wasn't finished")
+    s.add_argument("--keep-together", action="store_true",
+                   help="put moved folders in Music/Freighter/<old computer> even on a same-OS move")
     s.add_argument("--dest-for", action="append", default=[], metavar="ID=FOLDER",
                    help="put one item somewhere else, e.g. used-3fa2b1c9=/Volumes/Samples (IDs are shown by pack --list)")
     s.set_defaults(fn=cmd_unpack)

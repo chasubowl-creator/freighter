@@ -41,8 +41,13 @@ Installers and programs found in sample folders are left behind on purpose, and 
 Double-click **freighter**:
 
 - **5: Unpack a bundle from the drive.** Drag the `Freighter-...` folder from the drive into the window.
-  FL Studio and Ableton folders go where the new computer expects them, and sample folders go to
-  `Music/Freighter/<old computer's name>/`. Every file is checked against the original as it's copied.
+  FL Studio and Ableton folders go where the new computer expects them. Every file is checked against the
+  original as it's copied. Sample folders:
+  - **Same kind of computer** (Windows → Windows, Mac → Mac): back to the same places as before, e.g. your
+    Desktop kits onto the new Desktop and `D:\Samples` onto D:, if the new computer has that drive. Projects then
+    find everything without any repair. (`--keep-together` puts them all in `Music/Freighter` instead.)
+  - **Windows ↔ Mac**, or a drive the new computer doesn't have: `Music/Freighter/<old computer's name>/`, and
+    step 6 repairs the projects.
 - **6: Repair projects after unpacking.**
   - **Ableton Live 11 and 12:** sample paths are rewritten to the new locations. The original of each
     changed project is kept in a `Freighter backup` folder next to it.

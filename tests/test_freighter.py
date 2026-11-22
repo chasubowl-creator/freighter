@@ -751,7 +751,7 @@ class LongPaths(TempDirCase):
                                            include_programs=False))
         bundle = next(drive.glob("Freighter-*"))
         with as_home(new), quiet():
-            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[], keep_together=True))
         found = [os.path.join(c, f) for c, _, fs in os.walk(rm.long_path(new)) for f in fs if f == "kick.wav"]
         self.assertEqual(len(found), 1)
         with open(found[0], "rb") as f:
@@ -955,8 +955,7 @@ class FullMove(TempDirCase):
         new.mkdir()
         with as_home(new), quiet():
             rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
-        landing = new / "Music" / "Freighter" / json.loads((bundle / "manifest.json").read_text())["source_host"]
-        found = {p.parent.name: p.read_bytes()[:1] for p in landing.rglob("kick.wav")}
+        found = {p.parent.name: p.read_bytes()[:1] for p in new.rglob("kick.wav")}
         self.assertEqual(found, {"Album": b"A", "Beats": b"B", "Kits": b"K"})
 
     def test_an_index_from_another_folder_is_set_aside(self):
@@ -1040,7 +1039,7 @@ class FullMove(TempDirCase):
         landing = new / "Music" / "Freighter" / json.loads((bundle / "manifest.json").read_text())["source_host"]
         existing = write(landing / "DrumKits" / "Snares" / "snare.wav", b"mine")
         with as_home(new), quiet():
-            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[], keep_together=True))
         report = (landing / "unpack-report.txt").read_text()
         self.assertIn("checksum mismatch", report)
         self.assertEqual(existing.read_bytes(), b"mine")
@@ -1309,6 +1308,53 @@ class CrossOSMove(TempDirCase):
         self.assertEqual(got["kick_.wav"][0], "moved")
         self.assertEqual(got["kick_.wav"][1].read_bytes(), b"underscore kick")
         self.assertEqual(got["kick?.wav"][1].read_bytes(), b"question kick")
+
+    # ---- issue #67: same-places restore
+
+    def test_same_os_moves_put_folders_back_where_they_were(self):
+        """Desktop folders go back to the Desktop (following OneDrive or not), not to Music/Freighter."""
+        old_home = str(self.tmp / "oldhome")
+        kits = os.path.join(old_home, "OneDrive", "Desktop", "Kits")
+        b = self.bundle(rm.THIS_OS, [{"id": "used-k", "kind": "extra", "label": "Kits", "home": old_home,
+                                      "source_path": kits, "files": {"kick.wav": b"kick"}}])
+        m = json.loads((b / "manifest.json").read_text())
+        m["user_folders"] = {"Desktop": os.path.join(old_home, "OneDrive", "Desktop"),
+                             "Documents": os.path.join(old_home, "Documents"), "Music": os.path.join(old_home, "Music")}
+        (b / "manifest.json").write_text(json.dumps(m))
+        new = self.tmp / "new"
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=[]))
+            maps = rm.load_pathmaps(None)
+            status, where = rm.locate(os.path.join(kits, "kick.wav"), maps)
+        self.assertEqual((new / "Desktop" / "Kits" / "kick.wav").read_bytes(), b"kick", "back on this Desktop")
+        self.assertFalse((new / "Music" / "Freighter" / b.name.split("-")[1] / "Kits").exists())
+        self.assertEqual(where, new / "Desktop" / "Kits" / "kick.wav")
+
+    def test_other_drives_come_back_only_if_this_computer_has_them(self):
+        m = {"source_os": rm.THIS_OS, "source_home": str(self.tmp / "oldhome"), "user_folders": {}}
+        here = str(self.tmp / "SSD" / "Samples")                     # a place that exists on "this" computer
+        (self.tmp / "SSD").mkdir()
+        self.assertEqual(rm.same_place(m, here), Path(here))
+        gone = "Q:\\Samples" if rm.THIS_OS == "windows" else "/Volumes/NoSuchDrive/Samples"
+        self.assertIsNone(rm.same_place(m, gone), "a drive this computer doesn't have: use the Freighter folder")
+        self.assertEqual(rm.same_place(m, gone, rehearsal_root=self.tmp / "r").parts[-1], "Samples",
+                         "a rehearsal recreates other drives inside its own folder")
+        self.assertTrue(str(rm.same_place(m, gone, rehearsal_root=self.tmp / "r")).startswith(str(self.tmp / "r")))
+        other_os = dict(m, source_os="mac" if rm.THIS_OS == "windows" else "windows")
+        self.assertIsNone(rm.same_place(other_os, here), "cross-OS moves still use the Freighter folder")
+
+    def test_keep_together_uses_the_freighter_folder(self):
+        old_home = str(self.tmp / "oldhome")
+        b = self.bundle(rm.THIS_OS, [{"id": "used-k", "kind": "extra", "label": "Kits", "home": old_home,
+                                      "source_path": os.path.join(old_home, "Desktop", "Kits"),
+                                      "files": {"kick.wav": b"kick"}}])
+        new = self.tmp / "new"
+        new.mkdir()
+        with as_home(new), quiet():
+            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=[], keep_together=True))
+        self.assertTrue(list((new / "Music" / "Freighter").rglob("kick.wav")))
+        self.assertFalse((new / "Desktop" / "Kits").exists())
 
     def test_dest_for_sends_an_item_elsewhere(self):
         h = "C:\\Users\\Producer"
