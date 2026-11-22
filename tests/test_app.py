@@ -351,6 +351,13 @@ class Server(unittest.TestCase):
         self.assertFalse(library.exists())
         self.assertTrue((kits / "Kicks" / "kick.wav").is_file(), "originals untouched")
 
+    def test_typed_folders(self):
+        """Explorer's "Copy as path" adds quotes; a bare drive letter means the top of that drive."""
+        self.assertEqual(str(app.typed_folder("E:", windows=True)), "E:\\")
+        self.assertEqual(str(app.typed_folder(' "E:" ', windows=True)), "E:\\")
+        self.assertEqual(app.typed_folder('"/Volumes/My Drive" ', windows=False), Path("/Volumes/My Drive"))
+        self.assertEqual(app.typed_folder("~/Music", windows=False), Path.home() / "Music")
+
     def test_maker_links(self):
         """Issue #30: the maker's own site when known (the longest matching name wins), otherwise a web search."""
         self.assertEqual(app.maker_link("Waves Audio Ltd."), "https://www.waves.com/")

@@ -90,6 +90,7 @@ function size(n) {
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return (i ? n.toFixed(1) : n.toFixed(0)) + " " + u[i];
 }
+function baseName(p) { return String(p).split(/[\\/]/).filter(Boolean).pop() || p; }   // "E:\\" stays "E:"
 function timeLeft(s) {   // a rough guess, so rounded: "about 12 minutes"
   if (s < 60) return `about ${Math.max(5, Math.round(s / 5) * 5)} seconds`;
   const m = Math.round(s / 60);
@@ -296,7 +297,7 @@ async function pickDrive() {
       try {
         const f = await api("/api/folder", {path: other.value});
         if (!f.exists) { otherMsg.textContent = "That folder doesn't exist."; return; }
-        confirmPack({name: f.path, path: f.path, free: f.free, fs: f.fs}, need);
+        confirmPack({name: baseName(f.path), path: f.path, free: f.free, fs: f.fs}, need);
       } catch (e) { otherMsg.textContent = e.message; }
     }}, "Use this folder")), otherMsg,
     el("div", {class: "row actions"}, el("button", {onclick: pickDrive}, "Look again")));
@@ -310,6 +311,8 @@ async function pickDrive() {
       warn ? el("div", {class: warn.block ? "err small" : "warnc small"}, warn.text) : null);
   }));
   if (!drives.length) list.replaceChildren(el("p", {class: "muted"}, "No drives found. Plug one in and choose Look again."));
+  else if (!drives.some(d => d.removable !== false)) list.prepend(el("p", {class: "muted", style: "grid-column:1/-1;margin:0"},
+    "No external drive found yet. Plug in the drive you'll carry to the new computer, then choose Look again."));
 }
 
 function driveWarning(d, need) {
@@ -353,10 +356,16 @@ function packed(r, d) {
     el("h2", {}, "Before you wipe or sell this computer"),
     el("p", {class: "muted"}, "Free up your plugin licenses so they can move with you:"),
     licenseList(),
+    el("h2", {}, "Before you unplug the drive"),
+    el("p", {class: "muted"}, navigator.platform.startsWith("Win")
+      ? "Eject it first (the USB icon by the clock, then Eject), so every file is fully written."
+      : "Eject it first (the eject button next to it in Finder), so every file is fully written."),
     el("h2", {}, "Next, on the new computer"),
     el("ol", {}, el("li", {}, "Install FL Studio or Ableton, and Freighter."),
       el("li", {}, "Plug in this drive, open Freighter and choose ", el("b", {}, "Start unpacking"), "."),
       el("li", {}, "Freighter repairs your projects and shows which plugins to install first.")),
+    note("", "Keep this computer as it is for now",
+      el("div", {class: "muted"}, "Don't wipe or sell it until your projects open and play on the new one. Your files here weren't changed.")),
     el("div", {class: "row actions"}, el("button", {onclick: home}, "Home")));
 }
 
@@ -383,7 +392,7 @@ async function rehearseWhere() {
       try {
         const f = await api("/api/folder", {path: other.value});
         if (!f.exists) { otherMsg.textContent = "That folder doesn't exist."; return; }
-        confirmRehearse({name: f.path, to: f.path, path: f.path, free: f.free}, need);
+        confirmRehearse({name: baseName(f.path), to: f.path, path: f.path, free: f.free}, need);
       } catch (e) { otherMsg.textContent = e.message; }
     }}, "Use this folder")), otherMsg);
   let r;
@@ -520,7 +529,7 @@ function confirmUnpack(b) {
   if (b.same_os) parts.push(el("div", {class: "panel"},
     el("b", {}, "Where should the folders go?"),
     el("label", {class: "radio"}, el("input", {type: "radio", name: "where", checked: true, onchange: () => { together = false; preview(); }}),
-      " Back where they were on the old computer ", el("span", {class: "muted"}, "(recommended: projects open without repair)")),
+      " Back where they were on the old computer ", el("span", {class: "muted"}, "(recommended: your DAW and plugins find everything where they expect it)")),
     el("label", {class: "radio"}, el("input", {type: "radio", name: "where", onchange: () => { together = true; preview(); }}),
       " All together in Music/Freighter")));
   else parts.push(el("p", {class: "muted"}, "This bundle comes from a different kind of computer, so your FL Studio and Ableton folders go where this computer expects them and everything else into Music/Freighter, then your projects are repaired to match."));
@@ -577,7 +586,7 @@ function unpacked(r) {
       u.cross_os ? copyButton(p.new) : null))));
   (u.notes || []).forEach(n => parts.push(note("", "From the old computer", el("div", {class: "muted"}, n))));
   parts.push(el("h2", {}, "Where everything went"),
-    u.back_in_place ? el("p", {class: "muted"}, `${plural(u.back_in_place, "folder")} went back where ${u.back_in_place === 1 ? "it was" : "they were"} on the old computer.`) : null,
+    u.back_in_place ? el("p", {class: "muted"}, "Same kind of computer, so your folders went back to the same places as on the old one.") : null,
     el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "What"), el("th", {}, "Now here"))), el("tbody", {}, rows)),
     el("p", {class: "muted small"}, "The full list is in ", el("span", {class: "mono"}, u.report || "unpack-report.txt"), "."),
     el("h2", {}, "Next: plugins"),

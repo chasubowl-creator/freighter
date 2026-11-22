@@ -739,6 +739,16 @@ class WhatGetsPacked(TempDirCase):
                 self.assertFalse(a != b and a in b.parents, f"{b} would be packed twice (inside {a})")
 
 
+class WindowsDrives(unittest.TestCase):
+    def test_usb_drives_that_call_themselves_fixed_get_no_warning(self):
+        self.assertEqual(rm.windows_drive(2, "E", "C"), (True, True))     # a USB stick
+        self.assertEqual(rm.windows_drive(3, "C", "C"), (True, False))    # the drive Windows runs from
+        self.assertEqual(rm.windows_drive(3, "E", "C"), (True, None))     # a USB SSD, or a second inside disk
+        self.assertEqual(rm.windows_drive(4, "Z", "C"), (False, None))    # network: may hang, so typed in instead
+        self.assertEqual(rm.windows_drive(5, "D", "C"), (False, None))    # CD drive
+        self.assertEqual(rm.windows_drive(1, "Q", "C"), (False, None))    # unused letter
+
+
 class Drives(TempDirCase):
     """Issue #11: what different drives can and can't hold."""
 
@@ -1760,3 +1770,26 @@ class AbletonRacks(TempDirCase):
             plan = rm.plan_move()
         self.assertFalse([it for it in plan["items"] if "Factory Packs" in it["source_path"]], plan["items"])
         self.assertTrue(rm.in_program_place(packs / "Samples" / "Kick.wav"))
+
+
+class KeepAwake(unittest.TestCase):
+    def test_the_computer_stays_awake_while_copying_and_is_let_go_after(self):
+        calls = []
+
+        class Proc:
+            def terminate(self):
+                calls.append("let go")
+        with mock.patch.object(rm.rs, "IS_WIN", False), mock.patch.object(rm.rs, "IS_MAC", True), \
+                mock.patch.object(rm.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd[:2]) or Proc()):
+            with rm.keep_awake():
+                calls.append("copying")
+        self.assertEqual(calls, [["caffeinate", "-i"], "copying", "let go"])
+
+    def test_it_never_stops_a_move(self):
+        def broken(*a, **kw):
+            raise OSError("no caffeinate here")
+        with mock.patch.object(rm.rs, "IS_WIN", False), mock.patch.object(rm.rs, "IS_MAC", True), \
+                mock.patch.object(rm.subprocess, "Popen", broken):
+            with rm.keep_awake():
+                done = True
+        self.assertTrue(done)

@@ -14,6 +14,7 @@ import hmac
 import http.server
 import io
 import json
+import re
 import secrets
 import sys
 import threading
@@ -243,14 +244,24 @@ def job_readiness(job):
             "on_old_computer": not any((rm.home() / "Music" / "Freighter").glob("*/pathmap.json"))}
 
 
+def typed_folder(s, windows=None):
+    """A folder someone typed or pasted: without the quotes File Explorer's "Copy as path" adds, and on Windows a
+    bare drive letter (E:) means that drive's top folder, not whatever folder Windows last used on it."""
+    windows = rm.THIS_OS == "windows" if windows is None else windows
+    s = s.strip().strip('"').strip()
+    if windows and re.fullmatch(r"[A-Za-z]:", s):
+        s += "\\"
+    return Path(s).expanduser()
+
+
 def folders_param(value):
     """Extra folders to take (big plugin content the person ticked): a short list of folders that exist."""
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > 50 or \
-            not all(isinstance(f, str) and Path(f).expanduser().is_dir() for f in value):
+            not all(isinstance(f, str) and typed_folder(f).is_dir() for f in value):
         return None
-    return [str(Path(f).expanduser()) for f in value]
+    return [str(typed_folder(f)) for f in value]
 
 
 def clean_params(kind, body):
@@ -258,37 +269,37 @@ def clean_params(kind, body):
     if kind == "pack":
         to = body.get("to")
         skip, include = body.get("skip", []), folders_param(body.get("include"))
-        if not isinstance(to, str) or not Path(to).expanduser().is_dir():
+        if not isinstance(to, str) or not typed_folder(to).is_dir():
             return None, "Choose a drive or folder that exists."
         if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip) or include is None:
             return None, "bad request"
-        return {"to": str(Path(to).expanduser()), "skip": skip, "include": include}, None
+        return {"to": str(typed_folder(to)), "skip": skip, "include": include}, None
     if kind == "unpack":
         b = body.get("bundle")
-        if not isinstance(b, str) or not (Path(b).expanduser() / "manifest.json").is_file():
+        if not isinstance(b, str) or not (typed_folder(b) / "manifest.json").is_file():
             return None, "That isn't a Freighter bundle (it has no manifest.json)."
-        return {"bundle": str(Path(b).expanduser()), "keep_together": bool(body.get("keep_together")),
+        return {"bundle": str(typed_folder(b)), "keep_together": bool(body.get("keep_together")),
                 "anyway": bool(body.get("anyway"))}, None
     if kind in ("crate_preview", "crate_build"):
         folders, by = body.get("folders"), body.get("by", "genre")
         if not isinstance(folders, list) or not folders or len(folders) > 20 or \
-                not all(isinstance(f, str) and Path(f).expanduser().is_dir() for f in folders):
+                not all(isinstance(f, str) and typed_folder(f).is_dir() for f in folders):
             return None, "Choose one or more sample folders that exist."
         if by not in ("genre", "type"):
             return None, "bad request"
-        return {"folders": [str(Path(f).expanduser()) for f in folders], "by": by}, None
+        return {"folders": [str(typed_folder(f)) for f in folders], "by": by}, None
     if kind == "rehearse":
         to, skip, include = body.get("to"), body.get("skip", []), folders_param(body.get("include"))
-        if to is not None and (not isinstance(to, str) or not Path(to).expanduser().is_dir()):
+        if to is not None and (not isinstance(to, str) or not typed_folder(to).is_dir()):
             return None, "Choose a drive or folder that exists."
         if not isinstance(skip, list) or not all(isinstance(x, str) for x in skip) or include is None:
             return None, "bad request"
-        return {"to": str(Path(to).expanduser()) if to else None, "skip": skip, "include": include}, None
+        return {"to": str(typed_folder(to)) if to else None, "skip": skip, "include": include}, None
     if kind == "rehearse_cleanup":
         f = body.get("folder")
-        if not isinstance(f, str) or not rm.is_rehearsal(Path(f).expanduser()):
+        if not isinstance(f, str) or not rm.is_rehearsal(typed_folder(f)):
             return None, "That isn't a Freighter rehearsal folder."
-        return {"folder": str(Path(f).expanduser().resolve())}, None
+        return {"folder": str(typed_folder(f).resolve())}, None
     if kind == "undo":
         host = body.get("host")
         if host is not None and (not isinstance(host, str) or "/" in host or "\\" in host or host in (".", "..")):
@@ -526,7 +537,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             f = body.get("path")
             if not isinstance(f, str) or not f.strip():
                 return self.send(400, {"error": "bad request"})
-            folder = Path(f.strip().strip('"')).expanduser()
+            folder = typed_folder(f)
             if not folder.is_dir():
                 return self.send(200, {"exists": False, "path": str(folder)})
             here = rm.bundle_summary(folder)

@@ -21,7 +21,9 @@ Needs only Python 3.8+. Nothing leaves your computer. Use "py" instead of "pytho
 """
 
 import argparse
+import contextlib
 import datetime as dt
+import functools
 import gzip
 import hashlib
 import html
@@ -479,6 +481,41 @@ def human_time(seconds):
         return f"about {m} minute{'s' if m != 1 else ''}"
     h, m = divmod(m, 60)
     return f"about {h} hour{'s' if h != 1 else ''}" + (f" {m} minute{'s' if m != 1 else ''}" if m else "")
+
+
+@contextlib.contextmanager
+def keep_awake():
+    """Keep the computer from going to sleep while files copy: a sleeping laptop can drop its USB drive halfway
+    through a long pack. The screen may still turn off. Does nothing where that isn't possible."""
+    undo = None
+    try:
+        if rs.IS_WIN:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            if k32.SetThreadExecutionState(0x80000000 | 0x00000001):   # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+                undo = lambda: k32.SetThreadExecutionState(0x80000000)
+        elif rs.IS_MAC:
+            proc = subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            undo = proc.terminate
+    except Exception:
+        undo = None
+    try:
+        yield
+    finally:
+        if undo:
+            try:
+                undo()
+            except Exception:
+                pass
+
+
+def staying_awake(fn):
+    @functools.wraps(fn)
+    def run(*args, **kwargs):
+        with keep_awake():
+            return fn(*args, **kwargs)
+    return run
 
 
 class Progress:
@@ -1111,6 +1148,7 @@ def say_installed(installed):
               "those programs on the new computer brings them back.")
 
 
+@staying_awake
 def cmd_pack(args):
     print("Looking through your music folders and projects...", flush=True)
     plan = plan_move(args.include, args.skip, getattr(args, "include_programs", False))
@@ -1590,6 +1628,18 @@ def find_bundles(folder, depth=1):
     return out
 
 
+def windows_drive(kind, letter, system):
+    """(list it?, removable?) for a Windows drive letter, from GetDriveTypeW's answer. USB hard drives and SSDs
+    call themselves "fixed", so only the drive Windows runs from counts as the computer's own disk; other fixed
+    drives are unknown (None), so they get no warning. Network drives aren't listed: a disconnected one can take
+    half a minute to answer (they can still be typed in). CD drives and unused letters aren't listed either."""
+    if kind == 2:
+        return True, True
+    if kind == 3:
+        return True, False if letter.upper() == system.upper() else None
+    return False, None
+
+
 def list_drives():
     """Drives and volumes to pack onto or unpack from: [{name, path, free, total, fs, removable, bundles}]."""
     found = []
@@ -1597,14 +1647,16 @@ def list_drives():
         import ctypes
         import string
         k32 = ctypes.windll.kernel32
+        k32.SetErrorMode(1)   # an empty card-reader slot answers quietly instead of popping up "no disk"
+        system = (os.environ.get("SystemDrive") or "C:")[:1].upper()
         for letter in string.ascii_uppercase:
             root = f"{letter}:\\"
-            kind = k32.GetDriveTypeW(root)
-            if kind not in (2, 3, 4):          # removable, fixed, network (not CD drives or empty letters)
+            listed, removable = windows_drive(k32.GetDriveTypeW(root), letter, system)
+            if not listed:
                 continue
             label = ctypes.create_unicode_buffer(256)
             k32.GetVolumeInformationW(root, label, 256, None, None, None, None, 0)
-            found.append((f"{label.value or 'Local Disk'} ({letter}:)", Path(root), kind == 2))
+            found.append((f"{label.value or 'Local Disk'} ({letter}:)", Path(root), removable))
     else:
         vols = Path("/Volumes")
         for v in sorted(vols.iterdir()) if vols.is_dir() else []:
@@ -1628,6 +1680,7 @@ def list_drives():
     return out
 
 
+@staying_awake
 def cmd_unpack(args):
     bundle = Path(args.bundle).expanduser()
     try:
