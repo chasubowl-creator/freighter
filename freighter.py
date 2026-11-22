@@ -43,6 +43,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crate  # noqa: E402  (its sound-type words tell kit parts from kits, issue #76)
 import manifest as rs  # noqa: E402
 from freighter_version import __version__  # noqa: E402
+try:
+    from freighter_build import BUILD  # noqa: E402  written by the release build: v0.9.0-test.2, or main@6e6a9bd
+except ImportError:
+    BUILD = None   # running from the source code
 
 THIS_OS = "mac" if rs.IS_MAC else "windows" if rs.IS_WIN else "other"
 BUNDLE_VERSION = 1
@@ -3276,6 +3280,8 @@ MENU = """
     8  Sort my sample folders into one library (_Crate)
 
     9  Open the Freighter app in your web browser (new)
+
+    u  Check for a newer Freighter     r  Report a problem
     q  Quit
 """
 
@@ -3290,6 +3296,107 @@ def ask_path(prompt):
     return raw
 
 
+REPO = "chasubowl-creator/freighter"
+
+
+def version_label():
+    """'0.9.0-test.2' for a release build, '0.9.0 (build 6e6a9bd)' for another build, '0.9.0 (from source)'."""
+    if BUILD and BUILD.startswith("v"):
+        return BUILD[1:]
+    if BUILD:
+        return f"{__version__} (build {BUILD.split('@')[-1]})"
+    return f"{__version__} (from source)"
+
+
+def system_label():
+    """'Windows 11', 'macOS 15.6.1': enough to reproduce a problem, nothing personal."""
+    import platform
+    if rs.IS_MAC:
+        v = platform.mac_ver()[0]
+        return f"macOS {v}" if v else "macOS"
+    if rs.IS_WIN:
+        try:
+            build = int(platform.version().split(".")[-1])
+        except ValueError:
+            build = 0
+        return ("Windows 11" if build >= 22000 else f"Windows {platform.release()}") + (f" (build {build})" if build else "")
+    return f"{platform.system()} {platform.release()}"
+
+
+def report_url():
+    """GitHub's "Report a problem" form, with the version and kind of computer filled in (issue #41). Nothing else
+    goes in the link: no names, folders or files."""
+    from urllib.parse import urlencode
+    return f"https://github.com/{REPO}/issues/new?" + urlencode(
+        {"template": "problem.yml", "version": version_label(), "system": system_label()})
+
+
+def parse_version(v):
+    """'v0.9.0-test.2' -> (0, 9, 0, 0, 2). A final release sorts after its test builds: '0.9.0' -> (0, 9, 0, 1, 0)."""
+    m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+\.?(\d+))?", (v or "").strip())
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3)), 0 if m.group(4) else 1, int(m.group(4) or 0)
+
+
+def fetch_releases():
+    """Freighter's releases from GitHub. Sends nothing about the person or their files; a plain program name as
+    the User-Agent. Falls back to curl where Python can't check GitHub's certificate (some Mac builds)."""
+    import ssl
+    import urllib.error
+    import urllib.request
+    url = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "Freighter-update-check"}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=8) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.URLError as e:
+        if not isinstance(getattr(e, "reason", None), ssl.SSLError):
+            raise
+    out = subprocess.run(["curl", "-fsSL", "--max-time", "8", "-H", "User-Agent: Freighter-update-check", url],
+                         capture_output=True, timeout=15)
+    if out.returncode:
+        raise OSError("curl couldn't reach GitHub")
+    return json.loads(out.stdout.decode("utf-8"))
+
+
+def check_for_update(fetch=None):
+    """Whether a newer Freighter is out (issue #40). Only ever runs when someone asks. People on a final release
+    are offered final releases; test builds and the source code see test builds too."""
+    current = BUILD[1:] if BUILD and BUILD.startswith("v") else __version__
+    out = {"current": version_label(), "latest": None, "url": f"https://github.com/{REPO}/releases",
+           "newer": False, "release_build": bool(BUILD and BUILD.startswith("v"))}
+    try:
+        releases = (fetch or fetch_releases)()
+    except Exception:
+        out["error"] = "Couldn't reach GitHub. Check the internet connection and try again."
+        return out
+    mine = parse_version(current)
+    found = [(parse_version(r.get("tag_name")), r) for r in releases if isinstance(r, dict) and not r.get("draft")]
+    found = [(k, r) for k, r in found if k]
+    if mine and mine[3] == 1 and out["release_build"]:
+        found = [(k, r) for k, r in found if not r.get("prerelease")]
+    if found:
+        key, newest = max(found, key=lambda kr: kr[0])
+        out.update(latest=newest["tag_name"].lstrip("v"), url=newest.get("html_url") or out["url"],
+                   newer=mine is None or key > mine)
+    return out
+
+
+def cmd_check_update(args):
+    r = check_for_update()
+    if r.get("error"):
+        print(r["error"])
+        return 1
+    if r["newer"]:
+        print(f"Freighter {r['latest']} is out (you have {r['current']}). Download it from:\n  {r['url']}")
+    elif r["latest"]:
+        print(f"You have Freighter {r['current']}; the newest release is {r['latest']}.")
+    else:
+        print("No releases found yet.")
+    return 0
+
+
 def write_crash_report(choice):
     """Save what went wrong, so a tester can send it in. Returns the file's path."""
     import platform
@@ -3297,6 +3404,7 @@ def write_crash_report(choice):
     import traceback
     text = "\n".join([
         f"Freighter {__version__} crash report, {dt.datetime.now():%Y-%m-%d %H:%M:%S}",
+        f"Build: {version_label()}",
         f"System: {platform.platform()}, Python {platform.python_version()}"
         + (", built program" if getattr(sys, "frozen", False) else ""),
         f"Menu choice: {choice}",
@@ -3316,13 +3424,20 @@ def write_crash_report(choice):
 
 def interactive_menu():
     while True:
-        print(MENU.format(version=__version__))
+        print(MENU.format(version=version_label()))
         try:
-            choice = input("  Choose 1-9 (or q): ").strip().lower()
+            choice = input("  Choose 1-9, u, r or q: ").strip().lower()
         except EOFError:   # nothing more to read (input closed): same as quitting
             return 0
         try:
-            if choice == "1":
+            if choice == "u":
+                cmd_check_update(None)
+            elif choice == "r":
+                import webbrowser
+                print("  Opening the problem report form in your web browser...")
+                print(f"  {report_url()}")
+                webbrowser.open(report_url())
+            elif choice == "1":
                 html_path, _ = rs.run_scan()
                 import webbrowser
                 webbrowser.open(html_path.as_uri())
@@ -3391,7 +3506,8 @@ def interactive_menu():
             print(f"\n  Something went wrong: {type(e).__name__}: {e}")
             if report:
                 print(f"  The details are saved in {report}")
-                print("  Please send that file with a bug report: https://github.com/chasubowl-creator/freighter/issues/new")
+                print("  Please report it, and drag that file into the form:")
+                print(f"  {report_url()}")
         try:
             input("\n  Press Enter to go back to the menu...")
         except EOFError:
@@ -3474,6 +3590,9 @@ def main():
     s.add_argument("--clean", action="store_true", help="delete an earlier rehearsal's files (with the same --to)")
     add_range_args(s)
     s.set_defaults(fn=cmd_rehearse)
+
+    s = sub.add_parser("check-update", help="ask GitHub whether a newer Freighter is out")
+    s.set_defaults(fn=cmd_check_update)
 
     s = sub.add_parser("app", help="open Freighter in your web browser (preview)")
     s.set_defaults(fn=cmd_app)

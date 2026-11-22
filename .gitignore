@@ -21,3 +21,6 @@ Thumbs.db
 *.rigmover-part
 crate-preview/
 crate-output/
+
+# written by the release build (the build's name)
+freighter_build.py

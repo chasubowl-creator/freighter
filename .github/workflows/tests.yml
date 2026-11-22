@@ -55,6 +55,12 @@ jobs:
           python-version: "3.12"
       - name: Install PyInstaller
         run: python -m pip install pyinstaller==6.11.1
+      - name: Name this build (shown in the app, and used by "Check for updates")
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then b="$GITHUB_REF_NAME"; else b="$GITHUB_REF_NAME@${GITHUB_SHA::7}"; fi
+          printf 'BUILD = "%s"\n' "$b" > freighter_build.py
+          cat freighter_build.py
       - name: Build freighter and manifest
         run: |
           pyinstaller --onefile --name freighter freighter.py

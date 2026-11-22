@@ -1,0 +1,38 @@
+name: Report a problem
+description: Something went wrong in Freighter, or something didn't make sense.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping make Freighter better. Nothing from your computer is sent with this form; only what you
+        type or attach here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What were you doing, and what did Freighter do? A photo of the window helps a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+  - type: input
+    id: version
+    attributes:
+      label: Freighter version
+      description: Filled in for you when you use "Report a problem" in Freighter.
+  - type: input
+    id: system
+    attributes:
+      label: Computer
+      description: For example Windows 11 or macOS 15. Filled in for you from Freighter.
+  - type: textarea
+    id: files
+    attributes:
+      label: Report files
+      description: |
+        If Freighter made any of these, drag them in: freighter-crash.txt (in Music/Freighter, or the place the
+        error named), rehearsal-report.txt, unpack-report.txt, pack-errors.txt. They list folder and file names from
+        your computer, so look them over first.

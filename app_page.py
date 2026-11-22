@@ -17,6 +17,9 @@ body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,
 header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line)}
 .logo{font-weight:700;letter-spacing:.2px}.logo b{color:var(--blue)}
 .ver{color:var(--muted);font-size:12px}header .sp{flex:1}
+a.hdr{font-size:13px;color:var(--muted);text-decoration:none}a.hdr:hover{color:var(--ink)}
+a.btn{display:inline-block;border-radius:7px;padding:8px 14px;background:var(--blue);color:#fff;font-weight:600;text-decoration:none}
+a.btn:hover{background:var(--blue2)}
 main{max-width:980px;margin:0 auto;padding:28px 16px 64px}
 h1{font-size:30px;line-height:1.15;margin:6px 0 6px}h2{font-size:19px;margin:28px 0 10px}
 .sub{color:var(--muted);margin:0 0 22px}
@@ -64,6 +67,7 @@ ul.plain>li>.row{margin-top:6px}.stage{font-weight:600}.stage:empty{display:none
 </style></head>
 <body>
 <header><span class="logo mono"><b>_</b>freighter</span><span class="ver">{{version}}</span><span class="sp"></span>
+<a class="hdr" href="{{report}}" target="_blank" rel="noopener noreferrer" title="Opens a short form on GitHub">Report a problem</a>
 <button id="quit" title="Stop Freighter">Quit</button></header>
 <main id="view"></main>
 <script>
@@ -166,7 +170,11 @@ async function runJob(kind, params, head, render, opts) {
     if (j.state === "done") return render(j.result, id);
     box.replaceChildren(...[el("p", {class: j.state === "cancelled" ? "muted" : "err"},
       j.state === "cancelled" ? (opts.cancelled || "Stopped. Nothing was changed.") : j.error || "Something went wrong."),
-      j.crash ? el("p", {class: "muted"}, "Details were saved in " + j.crash + ". Please send that file with a bug report.") : null,
+      j.crash ? el("p", {class: "muted"}, "Details were saved in ", el("span", {class: "mono"}, j.crash),
+        ". Please report it, and drag that file into the form.") : null,
+      j.crash ? el("div", {class: "row"},
+        el("a", {class: "btn", href: document.querySelector("a.hdr").href, target: "_blank", rel: "noopener noreferrer"}, "Report this problem"),
+        el("button", {onclick: () => api(`/api/jobs/${id}/open`, {file: "crash"}).catch(() => {})}, "Show the file")) : null,
       el("div", {class: "row"}, el("button", {onclick: () => runJob(kind, params, head, render, opts)}, "Try again"),
         el("button", {onclick: home}, "Home"))].filter(Boolean));
     return;
@@ -194,8 +202,27 @@ function home() {
       card("crate", "Sort drum kits and sample packs into one library by genre, pack and sound type. Takes no extra space.",
         el("button", {class: "primary", onclick: crateStart}, "Sort my samples"))
     ),
-    here
+    here,
+    updateCheck()
   );
+}
+
+/* Never automatic: Freighter only asks GitHub when someone clicks (issue #40). */
+function updateCheck() {
+  const out = el("span", {});
+  const b = el("button", {class: "link"}, "Check for updates");
+  b.onclick = async () => {
+    b.disabled = true; out.textContent = " Asking GitHub…";
+    try {
+      const r = await api("/api/update");
+      out.replaceChildren(r.error ? el("span", {class: "err"}, " " + r.error)
+        : r.newer ? el("span", {}, ` Freighter ${r.latest} is out. `, el("a", {href: r.url, target: "_blank", rel: "noopener noreferrer"}, "Download it"))
+        : el("span", {class: "muted"}, !r.latest ? " No releases yet." : r.release_build ? ` You have the newest: ${r.latest}.` : ` The newest release is ${r.latest}.`));
+    } catch (e) { out.textContent = " " + e.message; }
+    b.disabled = false;
+  };
+  return el("p", {class: "muted small", style: "margin-top:36px"}, b, out,
+    el("span", {class: "muted"}, " · only contacts GitHub when you click"));
 }
 
 /* Unpacks that can still be repaired or undone, and rehearsals still taking up space: they outlast the app. */

@@ -179,6 +179,19 @@ class Server(unittest.TestCase):
         self.assertIn("disk on fire", view["error"])
         self.assertTrue(view["crash"] and Path(view["crash"]).is_file())
         self.assertEqual(self.request("GET", "/api/ping")[0], 200, "the server keeps running")
+        self.assertEqual(Path(self.app.jobs[started["id"]].files["crash"]), Path(view["crash"]),
+                         "the page's 'Show the file' button can open it (issue #41)")
+
+    def test_the_page_shows_the_build_and_the_report_link(self):
+        status, page = self.request("GET", f"/?t={self.app.token}", token=False)
+        self.assertIn(rm.version_label().split(" ")[0], page)
+        self.assertIn("issues/new?template=problem.yml&amp;version=", page)
+
+    def test_update_check_only_when_asked(self):
+        with mock.patch.object(rm, "fetch_releases", lambda: [{"tag_name": "v9.9.9", "html_url": "https://x"}]):
+            status, r = self.request("GET", "/api/update")
+        self.assertEqual(status, 200)
+        self.assertEqual((r["latest"], r["newer"]), ("9.9.9", True))
 
     def test_a_double_click_starts_one_job(self):
         import concurrent.futures
@@ -430,3 +443,48 @@ class Server(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportingAndUpdates(unittest.TestCase):
+    """Issues #40 and #41."""
+
+    def test_the_report_link_carries_no_names_folders_or_files(self):
+        url = rm.report_url()
+        self.assertTrue(url.startswith("https://github.com/chasubowl-creator/freighter/issues/new?template=problem.yml"))
+        self.assertNotIn(str(Path.home().name), url.replace("Freighter", ""))
+        self.assertNotIn("%2F", url)       # no paths
+        self.assertIn("version=", url)
+        self.assertIn("system=", url)
+
+    def test_versions_sort_test_builds_before_the_release(self):
+        v = rm.parse_version
+        self.assertLess(v("v0.9.0-test.1"), v("v0.9.0-test.2"))
+        self.assertLess(v("v0.9.0-test.9"), v("0.9.0"))
+        self.assertLess(v("0.9.0"), v("v0.10.0-test.1"))
+        self.assertIsNone(v("main"))
+
+    def releases(self, *tags):
+        return lambda: [{"tag_name": t, "prerelease": "-" in t, "draft": False,
+                         "html_url": f"https://github.com/x/releases/tag/{t}"} for t in tags]
+
+    def test_a_test_build_hears_about_the_next_test_build(self):
+        with mock.patch.object(rm, "BUILD", "v0.9.0-test.2"):
+            r = rm.check_for_update(self.releases("v0.9.0-test.1", "v0.9.0-test.3", "v0.9.0-test.2"))
+        self.assertTrue(r["newer"])
+        self.assertEqual(r["latest"], "0.9.0-test.3")
+        self.assertTrue(r["url"].endswith("v0.9.0-test.3"))
+        with mock.patch.object(rm, "BUILD", "v0.9.0-test.3"):
+            self.assertFalse(rm.check_for_update(self.releases("v0.9.0-test.3"))["newer"])
+
+    def test_people_on_a_release_only_hear_about_releases(self):
+        with mock.patch.object(rm, "BUILD", "v1.0.0"):
+            self.assertFalse(rm.check_for_update(self.releases("v1.0.0", "v1.1.0-test.1"))["newer"])
+            r = rm.check_for_update(self.releases("v1.0.0", "v1.1.0-test.1", "v1.1.0"))
+        self.assertEqual((r["newer"], r["latest"]), (True, "1.1.0"))
+
+    def test_no_internet_is_explained(self):
+        def offline():
+            raise OSError("no network")
+        r = rm.check_for_update(offline)
+        self.assertIn("Couldn't reach GitHub", r["error"])
+        self.assertFalse(r["newer"])

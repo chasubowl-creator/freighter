@@ -11,6 +11,7 @@ Nothing leaves your computer. Needs only Python 3.8+.
 import argparse
 import csv
 import hmac
+import html
 import http.server
 import io
 import json
@@ -83,6 +84,8 @@ class Job:
             report = rm.write_crash_report(f"app: {self.kind}")
             traceback.print_exc(file=self.router.base)
             self.crash = str(report) if report else None
+            if report:
+                self.files["crash"] = report   # the page's "Show the file" button opens it
             self.error = f"{type(e).__name__}: {e}"
             self.state = "failed"   # last: the page stops polling as soon as it sees this
         finally:
@@ -506,7 +509,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not hmac.compare_digest(given.encode(), self.app.token.encode()):
                 return self.send(403, LOCKED_PAGE, "text/html; charset=utf-8")
             self.app.last_seen = time.time()
-            return self.send(200, PAGE.replace("{{version}}", __version__), "text/html; charset=utf-8")
+            page = PAGE.replace("{{version}}", html.escape(rm.version_label())).replace(
+                "{{report}}", html.escape(rm.report_url(), quote=True))
+            return self.send(200, page, "text/html; charset=utf-8")
         if not url.path.startswith("/api/") or not self.api_ok():
             return self.send(403 if url.path.startswith("/api/") else 404, {"error": "forbidden"})
         self.app.last_seen = time.time()
@@ -516,6 +521,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # FL's browser folders are where producers keep their sample libraries
             return self.send(200, {"folders": [f for f in rm.fl_settings()["search_paths"] if Path(f).is_dir()],
                                    "library_exists": crate.default_library().exists()})
+        if url.path == "/api/update":
+            # only when the person clicks "Check for updates": asks GitHub's list of releases, nothing else (#40)
+            return self.send(200, rm.check_for_update())
         if url.path == "/api/home":
             # what's already on this computer: unpacks that can be repaired or undone, rehearsals to delete
             return self.send(200, {"unpacks": rm.earlier_unpacks(), "rehearsals": leftover_rehearsals()})
