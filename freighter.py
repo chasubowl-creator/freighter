@@ -827,7 +827,7 @@ MAC_PROGRAM_DIRS = ("/applications/", "/system/", "/library/application support/
 
 def in_program_place(path):
     """True for files that come with an installed program or plugin: inside an app or plugin bundle, Program Files,
-    ProgramData, or the Mac's system folders. They come back when the program is installed, so Freighter never
+    ProgramData, the Mac's system folders, or Live's Factory Packs folder. They come back when the program is installed, so Freighter never
     packs them as samples (issue #60: a Core Library reference used to pack the Live app itself)."""
     s = str(path).replace("\\", "/")
     parts = [x.lower() for x in s.split("/") if x]
@@ -835,6 +835,8 @@ def in_program_place(path):
         return True
     if len(parts) > 1 and re.fullmatch(r"[a-z]:", parts[0]) and parts[1] in WIN_PROGRAM_DIRS:
         return True
+    if "factory packs" in parts[:-1]:
+        return True   # Live's installed Packs: they reinstall from Ableton, like the Core Library
     return (s.lower() + ("/" if not s.endswith("/") else "")).startswith(MAC_PROGRAM_DIRS)
 
 
@@ -848,11 +850,12 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
     covered = [Path(it["source_path"]) for it in items] + [Path(e) for e in excluded]
     roots = all_user_folders(h) + [c for c in covered if c.is_dir()]
     inside_left_out = Folders(excluded).holds
-    both = find_projects(roots, (".flp", ".als"), include_backups=True)   # one walk (issue #74)
+    both = [p for p in find_projects(roots, (".flp",) + ABLETON_EXTS, include_backups=True)   # one walk (issue #74)
+            if not in_program_place(p)]   # e.g. demo sets in Live's installed Packs: they come with Live
     flps = [p for p in both if p.suffix.lower() == ".flp" and not inside_left_out(p)]
     # recent projects FL knows about, wherever they are (e.g. D:\\Projects), are found too
     flps += [p for p in extra_projects if p not in flps and not inside_left_out(p)]
-    alss = [p for p in both if p.suffix.lower() == ".als" and p.parent.name.lower() != "backup"
+    alss = [p for p in both if p.suffix.lower() in ABLETON_EXTS and p.parent.name.lower() != "backup"
             and not inside_left_out(p)]
     refs = {}   # sample -> projects that use it
     for p in flps:
@@ -924,7 +927,7 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
             if add_folder(anchor, "A project and the samples it uses"):
                 handled.add(p)
                 continue
-        if not add_folder(own, "Projects"):
+        if not add_folder(own, "Ableton racks and clips" if p.suffix.lower() in RACK_EXTS else "Projects"):
             loose.setdefault(str(own), set()).add(p.name)
 
     missing = {}
@@ -1947,10 +1950,12 @@ def find_projects(roots, ext, include_backups=False):
     return sorted(found, key=lambda p: str(p).lower())
 
 
-def all_projects(roots):
-    """FL Studio then Ableton projects under roots, from one walk of the folders instead of two (issue #74)."""
-    both = find_projects(roots, (".flp", ".als"))
-    return [p for p in both if p.suffix.lower() == ".flp"] + [p for p in both if p.suffix.lower() == ".als"]
+def all_projects(roots, racks=False):
+    """FL Studio then Ableton projects under roots, from one walk of the folders instead of two (issue #74).
+    With racks, Ableton's racks and clips (.adg, .alc) too: they point at samples like sets do (issue #32)."""
+    ableton = ABLETON_EXTS if racks else (".als",)
+    found = [p for p in find_projects(roots, (".flp",) + ableton) if not in_program_place(p)]
+    return [p for p in found if p.suffix.lower() == ".flp"] + [p for p in found if p.suffix.lower() in ableton]
 
 
 # --------------------------------------------------------------------------- Ableton
@@ -1984,6 +1989,18 @@ CREATOR_RE = re.compile(r'Creator="([^"]*)"')
 
 def xml_attr_escape(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+ABLETON_EXTS = (".als", ".adg", ".alc")   # Live sets, and the racks and clips saved in Live's browser (issue #32)
+RACK_EXTS = (".adg", ".alc")
+
+
+def backup_path(p):
+    """Where a repair keeps the original: a 'Freighter backup' folder next to it. Racks and clips get an extra
+    '.original' ending, so Live's browser doesn't list the old copy (with the old paths) next to the repaired one."""
+    p = Path(p)
+    name = p.name + ".original" if p.suffix.lower() in RACK_EXTS else p.name
+    return p.parent / "Freighter backup" / name
 
 
 def read_als(path):
@@ -2054,9 +2071,8 @@ def fix_als(path, maps, dry_run=False):
 
     new_text = SAMPLEREF_RE.sub(lambda sm: FILEREF_RE.sub(fix_ref, sm.group(0)), text)   # samples only
     if result["fixed"] and not dry_run:
-        backup_dir = proj_dir / "Freighter backup"
-        backup_dir.mkdir(exist_ok=True)
-        backup = backup_dir / Path(path).name
+        backup = backup_path(path)
+        backup.parent.mkdir(exist_ok=True)
         made = not backup.exists()
         if made:
             shutil.copy2(path, backup)
@@ -2073,8 +2089,8 @@ def repair_projects(dry_run=False):
     fl_open = fl_is_running()
     out = {"projects": 0, "repaired": 0, "samples_fixed": 0, "in_place": 0, "missing": [], "old_format": [],
            "damaged": [], "unreadable": [], "fl_open": fl_open}
-    found = all_projects(roots)
-    for p in (p for p in found if p.suffix.lower() == ".als"):
+    found = all_projects(roots, racks=True)
+    for p in (p for p in found if p.suffix.lower() in ABLETON_EXTS):
         try:
             r = fix_als(p, maps, dry_run)
         except Exception:
@@ -2109,9 +2125,9 @@ def cmd_fix_ableton(args):
     if not maps:
         print("No path map found yet (it's created by 'unpack'). Checking projects for missing samples only.")
     roots = project_search_roots(maps, args.folder)
-    print("Looking for Ableton projects in:\n  " + "\n  ".join(map(str, roots)), flush=True)
-    projects = find_projects(roots, ".als")
-    print(f"Found {len(projects)} projects.\n")
+    print("Looking for Ableton projects, racks and clips in:\n  " + "\n  ".join(map(str, roots)), flush=True)
+    projects = [p for p in find_projects(roots, ABLETON_EXTS) if not in_program_place(p)]
+    print(f"Found {len(projects)} projects, racks and clips.\n")
     totals = {"fixed": 0, "ok": 0, "missing": 0, "old": 0, "changed": 0}
     report = [f"Freighter {__version__} Ableton repair, {dt.datetime.now():%Y-%m-%d %H:%M}", ""]
     for p in projects:
@@ -2340,9 +2356,8 @@ def fix_flp(path, maps, dry_run=False):
                                           if ev[0] == FLP_TEXT_SAMPLE) if t])
     if not flp_same_except_paths(data, new_data) or new_samples != [changed.get(x, x) for x in samples]:
         raise RuntimeError(f"Freighter's FL repair didn't check out for {path}; the project was left unchanged.")
-    backup_dir = Path(path).parent / "Freighter backup"
-    backup_dir.mkdir(exist_ok=True)
-    backup = backup_dir / Path(path).name
+    backup = backup_path(path)
+    backup.parent.mkdir(exist_ok=True)
     made = not backup.exists()
     if made:
         shutil.copy2(path, backup)
@@ -2658,7 +2673,7 @@ def same_contents(a, b):
 def repaired_paths(p):
     """{path as the original project stored it: path the repaired project uses now} for a project a repair
     rewrote (empty if it wasn't), so a rehearsal can check what the DAW will actually load."""
-    src = p.parent / "Freighter backup" / p.name
+    src = backup_path(p)
     if not src.is_file():
         return {}
     try:
@@ -2673,7 +2688,7 @@ def repaired_paths(p):
 
 def project_refs(p):
     """(kind, [referenced file paths as the project stored them]) or (kind, None) if unreadable."""
-    src = p.parent / "Freighter backup" / p.name  # the original, if a repair rewrote it
+    src = backup_path(p)  # the original, if a repair rewrote it
     if p.suffix.lower() == ".flp":
         try:
             # FL's own sounds (%FLStudioFactoryData%) come with FL; the user's data (%FLStudioUserData%) is checked
@@ -2779,7 +2794,7 @@ def cmd_rehearse(args):
         roots = project_search_roots(maps, [])
         totals = {"kept": 0, "lost": 0, "already": 0, "projects": 0, "unchecked": 0}
         lost, unchecked, already = [], [], []
-        for p in all_projects(roots):
+        for p in all_projects(roots, racks=True):
             kind, refs = project_refs(p)
             if refs is None:
                 totals["unchecked"] += 1

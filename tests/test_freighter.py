@@ -1713,3 +1713,50 @@ class PluginPresets(TempDirCase):
         u = rm.LAST["unpack"]
         self.assertFalse(u["cross_os"])
         self.assertEqual([Path(p["new"]) for p in u["plugin_data"]], [new / "Documents" / "Xfer"])
+
+
+class AbletonRacks(TempDirCase):
+    """Issue #32: racks and clips saved in Live's browser point at samples too."""
+
+    def test_a_drum_rack_moves_its_samples_and_is_repaired(self):
+        old, new, drive = self.tmp / "old", self.tmp / "new", self.tmp / "drive"
+        kick = write(old / "Desktop" / "MyKicks" / "kick.wav", b"kick" * 50)
+        ul = rm.known_roots(rm.THIS_OS, old)["ableton_user_library"][1]
+        rack = make_als(ul / "Presets" / "Instruments" / "Drum Rack" / "My Kit.adg", [str(kick)])
+        clip = make_als(ul / "Clips" / "Groove.alc", [str(kick)])
+        drive.mkdir()
+        with as_home(old), quiet():
+            plan = rm.plan_move()
+            self.assertIn(str(old / "Desktop" / "MyKicks"), [it["source_path"] for it in plan["items"]],
+                          "a sample only a rack uses still moves")
+            rm.cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False))
+        bundle = next(drive.glob("Freighter-*"))
+        shutil.rmtree(old)                                   # the old computer is gone
+        new.mkdir()
+        with as_home(new), quiet(), mock.patch.object(rm, "fl_is_running", lambda: False):
+            rm.cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[], keep_together=True))
+            summary = rm.repair_projects()
+            landing_ul = Path(next(e["new"] for e in rm.LAST["unpack"]["entries"] if "User Library" in e["label"]))
+            for moved in (landing_ul / "Presets" / "Instruments" / "Drum Rack" / "My Kit.adg",
+                          landing_ul / "Clips" / "Groove.alc"):
+                ref = rm.als_sample_refs(rm.read_als(moved)[0])[0]
+                self.assertEqual(Path(ref).read_bytes(), b"kick" * 50, moved.name)
+                backup = moved.parent / "Freighter backup" / (moved.name + ".original")
+                self.assertTrue(backup.is_file(), "the original is kept, hidden from Live's browser")
+                self.assertFalse((moved.parent / "Freighter backup" / moved.name).exists())
+            self.assertEqual(summary["repaired"], 2)
+            rm.undo_unpack()                                  # undo puts nothing back wrong and leaves no clutter
+        self.assertFalse(landing_ul.exists())
+
+    def test_lives_installed_packs_never_move(self):
+        home = self.tmp / "home"
+        packs = (home / ("Music" if rm.THIS_OS == "mac" else "Documents") / "Ableton" / "Factory Packs"
+                 / "Drum Essentials")
+        write(packs / "Samples" / "Kick.wav", b"k" * 100)
+        make_als(packs / "Demo Project" / "Demo.als", [str(packs / "Samples" / "Kick.wav")])
+        make_als(packs / "Presets" / "Kit.adg", [str(packs / "Samples" / "Kick.wav")])
+        write(home / "Desktop" / "notes.txt", b"n")
+        with as_home(home), quiet():
+            plan = rm.plan_move()
+        self.assertFalse([it for it in plan["items"] if "Factory Packs" in it["source_path"]], plan["items"])
+        self.assertTrue(rm.in_program_place(packs / "Samples" / "Kick.wav"))
