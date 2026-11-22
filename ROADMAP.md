@@ -81,9 +81,9 @@ Tick the box here when the issue closes.
 
 *about 2–3 weeks.* The product promise: projects open on the new computer without hunting for samples or plugins.
 
-- [ ] Same-places restore for same-OS moves (#67) · L · Claude
-- [ ] Repair FL Studio projects: rewrite sample paths in the .flp (#68) · L · Claude
-- [ ] Read what FL Studio and Ableton already know about your folders (#69) · M · Claude
+- [x] Same-places restore for same-OS moves (#67) · L · Claude
+- [x] Repair FL Studio projects: rewrite sample paths in the .flp (#68) · L · Claude
+- [x] Read what FL Studio and Ableton already know about your folders (#69) · M · Claude
 - [ ] Plugin readiness for each project (#70) · L · Claude
 - [ ] Sample libraries and plugin content (Kontakt and friends) (#71) · L · Claude
 - [ ] Ableton: real Live 11/12 sets, Live 10 sets and racks (#72) · M · Claude
