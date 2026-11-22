@@ -87,6 +87,15 @@ The first version with a number. Everything that exists so far:
   other kits above it; sample libraries are offered with their size instead of packed whole. Projects left
   behind are listed in the bundle.
 
+- **Sound libraries** (issue #71): Kontakt / Native Instruments, Omnisphere's STEAM folder, Spitfire, UVI,
+  EastWest and Toontrack libraries are found on any drive, listed with their size, and taken only when ticked
+  (`--include` on the command line). After unpacking, each one you took comes with its maker's steps to reconnect
+  it, and the rest are listed to install again from the maker's app.
+- **Report a problem** (issue #41): in the app's header, the menu (`r`) and on any error. It opens a short GitHub
+  form with only the version and kind of computer filled in.
+- **Check for updates** (issue #40): on the app's home screen, the menu (`u`) or `freighter check-update`. It asks
+  GitHub only when clicked.
+
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account
   (issue #36). The Mac programs now keep their "executable" permission, so they start after unzipping.

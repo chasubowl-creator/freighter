@@ -43,6 +43,13 @@ on the command line, add `--since 2024-03 --until 2026-03`.
   tick one in the app (or add it with `--include "D:\Samples"`) to take all of it.
 - Your FL Studio and Ableton folders, presets and plugin presets still come, minus the old project files.
 
+### Sound libraries (Kontakt, Omnisphere, Spitfire…)
+
+Freighter lists the sound libraries it finds, with their size, but takes one only if you tick it (or add it with
+`--include`). They're big, and most makers' apps can also install them again on the new computer. If you take
+one, the results on the new computer show that maker's steps to reconnect it: for Native Instruments, Native
+Access → Refresh → Library > All → Repair → Locate; for Omnisphere, point it at the moved STEAM folder when it asks.
+
 ## 3. Before you wipe or sell the old computer
 
 Keep it as it is until your projects open and play on the new one.

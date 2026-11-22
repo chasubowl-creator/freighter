@@ -104,4 +104,6 @@ In the folder with freighter.exe, click the address bar, type `cmd`, press Enter
 
 `--virus-scan` also checks every plugin with Microsoft Defender (slower).
 
-**Stuck?** Take a photo of the window and send it. Error messages are the most useful thing.
+**Stuck?** Take a photo of the window and send it. Error messages are the most useful thing. You can also type
+**r** in the menu (or click **Report a problem** in the app) to open a short form on GitHub with Freighter's version
+already filled in; it needs a GitHub account.

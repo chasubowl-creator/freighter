@@ -85,7 +85,7 @@ Tick the box here when the issue closes.
 - [x] Repair FL Studio projects: rewrite sample paths in the .flp (#68) · L · Claude
 - [x] Read what FL Studio and Ableton already know about your folders (#69) · M · Claude
 - [x] Plugin readiness for each project (#70) · L · Claude
-- [ ] Sample libraries and plugin content (Kontakt and friends) (#71) · L · Claude
+- [x] Sample libraries and plugin content (Kontakt and friends) (#71) · L · Claude
 - [ ] Ableton: real Live 11/12 sets, Live 10 sets and racks (#72) · M · Claude
 
 **Done when:** A same-OS move needs no repair, FL projects are repaired like Ableton's, and each project shows which plugins it still needs.
@@ -118,8 +118,8 @@ Tick the box here when the issue closes.
 - [ ] A Mac build that opens on every Mac (#37) · M · Claude
 - [ ] Free Windows code signing (SignPath Foundation) (#38) · M · You apply, Claude wires CI
 - [ ] Download and first-run instructions (#39) · S · Claude
-- [ ] Check for updates button (#40) · S · Claude
-- [ ] Feedback: issue templates and a "Report a problem" link (#41) · S · Claude
+- [x] Check for updates button (#40) · S · Claude
+- [x] Feedback: issue templates and a "Report a problem" link (#41) · S · Claude
 
 **Done when:** Pushing a version tag produces downloadable Windows and Mac builds that open with documented steps.
 
