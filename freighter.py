@@ -40,6 +40,7 @@ import unicodedata
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import crate  # noqa: E402  (its sound-type words tell kit parts from kits, issue #76)
 import manifest as rs  # noqa: E402
 from freighter_version import __version__  # noqa: E402
 
@@ -404,11 +405,12 @@ def is_cloud_only(st):
     return bool(getattr(st, "st_file_attributes", 0) & CLOUD_ONLY_ATTRS)
 
 
-def walk_files(root, left_behind=None):
+def walk_files(root, left_behind=None, keep=None):
     """Yield (relative posix path, absolute path, size) for every real file under root, folder by folder in the
     same order os.walk would. With a left_behind list, programs and installers are skipped and recorded there
     instead. Uses scandir's directory entries, so links are spotted without asking the disk again, and on Windows
-    sizes come free with the listing (issue #74)."""
+    sizes come free with the listing (issue #74). keep(path, name, is_dir, stat) can leave out a file or a whole
+    folder (a time-range move leaves old projects out, issue #76)."""
     root = Path(root)
     stack = [(long_path(root), "")]   # walk the long form so deep folders on Windows aren't skipped
     while stack:
@@ -427,7 +429,7 @@ def walk_files(root, left_behind=None):
             except OSError:
                 continue
             if is_dir:
-                if skip_dir(cur, e.name):
+                if skip_dir(cur, e.name) or (keep is not None and not keep(e.path, e.name, True, None)):
                     continue
                 if left_behind is not None and is_program(e.path):   # app and plugin bundles are folders
                     left_behind.append(short_path(e.path))
@@ -443,6 +445,8 @@ def walk_files(root, left_behind=None):
             try:
                 st = e.stat()
             except OSError:
+                continue
+            if keep is not None and not keep(e.path, fn, False, st):
                 continue
             rel = prefix + fn
             ap = root.joinpath(*rel.split("/"))
@@ -647,10 +651,13 @@ def item_id(prefix, path):
     return f"{prefix}-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:8]}"
 
 
-def pack_items(includes, skips, missing=None, installed=None, needed=None, big=None):
+def pack_items(includes, skips, missing=None, installed=None, needed=None, big=None, rng=None, offered=None,
+               stats=None):
     """What a move packs. If `missing` is a dict, it is filled with {project: [samples it uses that are
     already missing on this computer]}; if `installed` is a set, with samples that come with installed programs;
-    if `big` is a list, with plugin-data folders too big to pack unless asked for (probably sound libraries)."""
+    if `big` is a list, with plugin-data folders too big to pack unless asked for (probably sound libraries).
+    With a time range (rng, issue #76), FL's browser folders (sample libraries) aren't packed whole: only the kits
+    in-range projects use come, and the libraries go into `offered` (a list) so they can be ticked."""
     items = []
     for rid, (label, path) in known_roots(THIS_OS, home()).items():
         if path.is_dir() and rid not in skips:
@@ -666,10 +673,17 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None, big=N
     fold = THIS_OS == "windows"
     inside = lambda p, roots: any(norm(str(p), fold) == norm(str(r), fold) or
                                   norm(str(p), fold).startswith(norm(str(r), fold) + "/") for r in roots)
+    libraries = []
     for sp in fl["search_paths"]:
         # FL's browser folders are the user's sample libraries: they move on purpose, used by a project or not
         sp = Path(sp)
         if not sp.is_dir() or in_program_place(sp) or inside(sp, [it["source_path"] for it in items]):
+            continue
+        if rng is not None:   # a time-range move takes only the kits it needs from them (issue #76)
+            libraries.append(sp)
+            if offered is not None:
+                offered.append({"path": str(sp), "label": f"FL Studio browser folder: {sp.name}",
+                                "bytes": folder_bytes(sp)})
             continue
         iid = item_id("search", sp)
         if iid not in skips:
@@ -689,7 +703,7 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None, big=N
     left_out = [str(path) for rid, (_l, path) in known_roots(THIS_OS, home()).items() if rid in skips and path.is_dir()]
     recent = [Path(r) for r in fl["recent"] if r.lower().endswith(".flp") and Path(r).is_file()
               and not in_program_place(r)]
-    folders, loose, gone = project_sample_folders(items, installed, left_out, needed, recent)
+    folders, loose, gone = project_sample_folders(items, installed, left_out, needed, recent, rng, libraries, stats)
     if missing is not None:
         missing.update(gone)
     for folder, label in folders.items():
@@ -703,6 +717,209 @@ def pack_items(includes, skips, missing=None, installed=None, needed=None, big=N
             items.append({"id": iid, "label": f"Loose files your projects use from {landing_name(folder)}",
                           "source_path": folder, "kind": "extra", "only": sorted(files)})
     return items
+
+
+# --------------------------------------------------------------------------- a time range of projects (issue #76)
+
+MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+               "november", "december"]
+
+
+def parse_month(text, end=False):
+    """'2024-03', '2024-03-15', 'Mar 2024', 'March 2024' or '03/2024' -> (datetime, normalized text). The start of
+    that month (or day), or with end=True its last moment. Raises ValueError with a message for people."""
+    s = text.strip().lower().rstrip(".")
+    day = None
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})(?:-(\d{1,2}))?", s)
+    if m:
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3)) if m.group(3) else None
+    elif re.fullmatch(r"(\d{1,2})/(\d{4})", s):
+        month, year = (int(x) for x in s.split("/"))
+    else:
+        m = re.fullmatch(r"([a-z]+)\.?,?\s*(\d{4})", s)
+        names = [n for n in MONTH_NAMES if m and len(m.group(1)) >= 3 and n.startswith(m.group(1))]
+        if not names:
+            raise ValueError(f"\"{text.strip()}\" isn't a month Freighter understands. Try 2024-03 or Mar 2024.")
+        month, year = MONTH_NAMES.index(names[0]) + 1, int(m.group(2))
+    if not (1 <= month <= 12 and 1970 <= year <= 2100):
+        raise ValueError(f"\"{text.strip()}\" isn't a real month.")
+    try:
+        start = dt.datetime(year, month, day or 1)
+    except ValueError:
+        raise ValueError(f"\"{text.strip()}\" isn't a real date.") from None
+    norm_text = f"{year:04d}-{month:02d}" + (f"-{day:02d}" if day else "")
+    if not end:
+        return start, norm_text
+    after = start + dt.timedelta(days=1) if day else dt.datetime(year + month // 12, month % 12 + 1, 1)
+    return after - dt.timedelta(microseconds=1), norm_text
+
+
+class ProjectRange:
+    """Projects last saved from `since` to `until` (either may be open)."""
+
+    def __init__(self, since=None, until=None):
+        self.since, self.since_text = parse_month(since) if since else (None, None)
+        self.until, self.until_text = parse_month(until, end=True) if until else (None, None)
+        if not (self.since or self.until):
+            raise ValueError("A time range needs a start, an end, or both.")
+        if self.since and self.until and self.until < self.since:
+            raise ValueError("The end of the time range comes before its start.")
+        self._lo = self.since.timestamp() if self.since else float("-inf")
+        self._hi = self.until.timestamp() if self.until else float("inf")
+
+    def contains(self, mtime):
+        return self._lo <= mtime <= self._hi
+
+    def label(self):
+        def show(d, text):
+            return d.strftime("%-d %b %Y" if len(text) > 7 and os.name != "nt" else
+                              "%#d %b %Y" if len(text) > 7 else "%b %Y")
+        if self.since and self.until:
+            return f"{show(self.since, self.since_text)} – {show(self.until, self.until_text)}"
+        return f"since {show(self.since, self.since_text)}" if self.since else f"until {show(self.until, self.until_text)}"
+
+    def as_dict(self):
+        return {"since": self.since_text, "until": self.until_text, "label": self.label()}
+
+
+def parse_range(text):
+    """'2024-03 to 2026-03', 'Mar 2024 - Mar 2026', 'since 2024-03', 'until 2026-03' -> ProjectRange."""
+    s = text.strip()
+    m = re.fullmatch(r"(?i)(since|from|after)\s+(.+)", s)
+    if m:
+        return ProjectRange(m.group(2), None)
+    m = re.fullmatch(r"(?i)(until|to|before|up to)\s+(.+)", s)
+    if m:
+        return ProjectRange(None, m.group(2))
+    parts = re.split(r"(?i)\s+(?:to|-|until)\s+|\s*[–—]\s*", s, maxsplit=1)
+    if len(parts) != 2:
+        raise ValueError("Type a range like 2024-03 to 2026-03 (or since 2024-03, or until 2026-03).")
+    return ProjectRange(parts[0] or None, parts[1] or None)
+
+
+def range_from_args(args):
+    """The ProjectRange that --since/--until ask for, or None. Stops with a message when they're not months."""
+    since, until = getattr(args, "since", None), getattr(args, "until", None)
+    if not (since or until):
+        return None
+    try:
+        return ProjectRange(since, until)
+    except ValueError as e:
+        sys.exit(str(e))
+
+
+def project_in_range(p, rng):
+    """Racks and clips are presets, and templates are templates: they always come. Other projects come when they
+    were last saved in the range."""
+    if rng is None:
+        return True
+    p = Path(p)
+    if p.suffix.lower() in RACK_EXTS or "templates" in (x.lower() for x in p.parts[:-1]):
+        return True
+    try:
+        return rng.contains(os.stat(long_path(p)).st_mtime)
+    except OSError:
+        return False
+
+
+def range_keep(rng):
+    """A walk_files filter for a time-range move: project files saved outside the range stay behind, and so do
+    Ableton project folders whose sets are all outside it (with their audio)."""
+    def keep(path, name, is_dir, st):
+        low = name.lower()
+        if is_dir:
+            if not low.endswith(" project"):
+                return True
+            try:
+                with os.scandir(path) as listing:
+                    sets = [e for e in listing if e.name.lower().endswith(".als") and e.is_file()]
+                return not sets or any(rng.contains(e.stat().st_mtime) for e in sets)
+            except OSError:
+                return True
+        if not low.endswith((".flp", ".als")):
+            return True
+        if re.search(r"[\\/]templates[\\/]", path.lower()):
+            return True
+        return rng.contains(st.st_mtime)
+    return keep
+
+
+# Kits (issue #76): with a time range, a used sample brings the whole kit it belongs to, and nothing above it.
+# A folder whose name is only sound-type words ("US_DG_One_Shots", "Kicks", "MIDI") is part of a kit; a folder
+# with two or more subfolders that aren't is a container of kits (a library, a genre folder, a maker's folder).
+KIT_PART_WORDS = (set().union(*(w for _c, w, _p in crate.ONE_SHOT_RULES), *(w for _c, w in crate.LOOP_RULES),
+                              crate.LOOP_WORDS, crate.ONE_SHOT_WORDS)
+                  | {"one", "shot", "shots", "loop", "loops", "drum", "drums", "hit", "hits", "kit", "kits", "open",
+                     "closed", "construction", "midi", "preset", "presets", "patch", "patches", "format", "formats",
+                     "ableton", "live", "fl", "flstudio", "logic", "serum", "vital", "massive", "wav", "wavs", "aif",
+                     "aiff", "rex", "rx2", "sample", "samples", "sound", "sounds", "stem", "stems", "bonus", "extra",
+                     "extras", "processed", "dry", "wet", "fill", "fills", "chop", "chops", "phrase", "phrases",
+                     "melodies", "instrument", "instruments", "instrumental", "multisample", "multisamples", "slice",
+                     "slices", "sliced", "bit", "khz", "demo", "demos", "misc", "various", "other", "full", "mix",
+                     "song", "songs", "starter", "starters", "idea", "ideas", "progression", "progressions",
+                     "tonal", "atonal", "textures", "one-shots", "oneshot", "oneshots", "hihats", "hi", "audio"})
+KIT_CONTAINER_CACHE = {}
+
+
+def _name_words(name):
+    t = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
+    t = re.sub(r"([A-Za-z])(\d)", r"\1 \2", t)
+    t = re.sub(r"(\d)([A-Za-z])", r"\1 \2", t)
+    return [w for w in re.split(r"[^a-z0-9]+", t.lower()) if w]
+
+
+def _pack_code(word):
+    """Pack codes like "US", "DG", "CNTRL" or "UNDRGRND": short, or no vowels after the first letter."""
+    return len(word) <= 2 or word.isdigit() or not re.search(r"[aeiouy]", word[1:])
+
+
+def kit_part(name):
+    """True for a folder named only with sound-type words: a part of a kit, never a kit itself
+    ("LC_CNTRL_Bass Loops", "US_DG_One_Shots", "Kicks"). Pack codes and numbers don't count either way, so
+    "UNDRGRND Sounds - Deep Grooves - Wav" is a kit ("deep" is a real word)."""
+    vocab, other = 0, 0
+    for w in _name_words(name):
+        if w in KIT_PART_WORDS or (w.endswith("s") and w[:-1] in KIT_PART_WORDS):
+            vocab += 1
+        elif not _pack_code(w):
+            other += 1
+    return vocab > 0 and other == 0
+
+
+def is_kit_container(folder):
+    """True for a folder holding several kits: two or more subfolders that aren't kit parts."""
+    key = _key(folder)
+    if key not in KIT_CONTAINER_CACHE:
+        kits = 0
+        try:
+            with os.scandir(long_path(folder)) as listing:
+                for e in listing:
+                    try:
+                        if e.is_dir(follow_symlinks=False) and not e.name.startswith(".") \
+                                and not skip_dir(str(folder), e.name) and not kit_part(e.name):
+                            kits += 1
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+        KIT_CONTAINER_CACHE[key] = kits >= 2
+    return KIT_CONTAINER_CACHE[key]
+
+
+def kit_folder(sample, ceiling):
+    """The kit a sample belongs to: walking down from ceiling (a library, or the top folder a move would take) to
+    the sample's folder, the first folder that isn't a container of kits. None when the sample sits directly in
+    such a container: then it comes on its own."""
+    sample, ceiling = Path(sample), Path(ceiling)
+    try:
+        rel = sample.parent.relative_to(ceiling)
+    except ValueError:
+        return None
+    chain = [ceiling] + [ceiling.joinpath(*rel.parts[:i + 1]) for i in range(len(rel.parts))]
+    for d in chain:
+        if not is_kit_container(d):
+            return d
+    return None
 
 
 # --------------------------------------------------------------------------- plugin presets and data (issue #31)
@@ -877,9 +1094,13 @@ def in_program_place(path):
     return (s.lower() + ("/" if not s.endswith("/") else "")).startswith(MAC_PROGRAM_DIRS)
 
 
-def project_sample_folders(items, installed=None, excluded=(), needed=None, extra_projects=()):
+def project_sample_folders(items, installed=None, excluded=(), needed=None, extra_projects=(), rng=None,
+                           libraries=(), stats=None):
     """What a move needs beyond the packed items: projects found in Desktop, Documents and Music (even ones
     that use no outside samples), and every sample folder FL/Ableton projects use.
+    With a time range (rng, issue #76), only projects last saved in it count, and a sample brings the kit it
+    belongs to (never the library or genre folder above it); libraries are FL's browser folders left out.
+    stats, if a dict, gets {total, in_range, left_out, years} for the projects found.
     Returns ({folder: label}, {folder: set of file names to take loose},
              {project path: [samples it uses that are already missing]})."""
     h = home()
@@ -894,6 +1115,24 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
     flps += [p for p in extra_projects if p not in flps and not inside_left_out(p)]
     alss = [p for p in both if p.suffix.lower() in ABLETON_EXTS and p.parent.name.lower() != "backup"
             and not inside_left_out(p)]
+    if stats is not None:
+        real = [p for p in flps + alss if p.suffix.lower() in (".flp", ".als") and p.parent.name.lower() != "backup"
+                and "templates" not in (x.lower() for x in p.parts[:-1])]   # people's projects, not templates
+        saved = {}
+        for p in real:
+            try:
+                saved[p] = os.stat(long_path(p)).st_mtime
+            except OSError:
+                pass
+        inside = [p for p in real if project_in_range(p, rng)]
+        years = sorted(dt.datetime.fromtimestamp(t).year for t in saved.values())
+        stats.update(total=len(real), in_range=len(inside), years=[years[0], years[-1]] if years else [],
+                     left_out=sorted((str(p) for p in real if p not in set(inside)), key=str.lower))
+    if rng is not None:   # projects saved outside the range stay behind, and so do the samples only they use
+        flps = [p for p in flps if project_in_range(p, rng)]
+        alss = [p for p in alss if project_in_range(p, rng)]
+    KIT_CONTAINER_CACHE.clear()
+    libs = sorted((Path(x) for x in libraries), key=lambda x: -len(str(x)))
     refs = {}   # sample -> projects that use it
     for p in flps:
         try:
@@ -918,6 +1157,15 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
     def take(path, label):
         """Add the folder that should carry this file, or the file alone when it sits loose."""
         f = folder_to_move(path, h, bases, cov)
+        if rng is not None:
+            # a time-range move takes the kit the sample belongs to, under its library or top folder (issue #76)
+            ceiling = next((lib for lib in libs if Folders([lib]).holds(path)), None) or f
+            kit = kit_folder(path, ceiling) if ceiling is not None else None
+            if kit is None or kit == h:
+                loose.setdefault(str(path.parent), set()).add(path.name)
+            elif kit.is_dir():
+                folders.setdefault(kit, "Kit")
+            return
         if f is None:
             loose.setdefault(str(path.parent), set()).add(path.name)
         elif f.is_dir() and f != h:
@@ -1070,7 +1318,7 @@ def folder_to_move(path, h, bases, covered):
     return f
 
 
-def measure_item(it, left_behind):
+def measure_item(it, left_behind, keep=None):
     if "only" in it:
         files = []
         for name in it["only"]:
@@ -1080,20 +1328,20 @@ def measure_item(it, left_behind):
                 files.append((name, ap, size))
     else:
         # DAW user-data folders move whole; sample folders leave programs and installers behind
-        files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None))
+        files = list(walk_files(it["source_path"], left_behind if it["kind"] != "known" else None, keep))
     it["_files"] = files
     it["files"] = len(files)
     it["bytes"] = sum(f[2] for f in files)
 
 
-def measure_items(items, include_programs=False):
+def measure_items(items, include_programs=False, keep=None):
     """List every file each item would pack (it["_files"], it["files"], it["bytes"]). Fills CLOUD_ONLY.
     Returns (total bytes, programs left behind, or None when they're kept)."""
     del CLOUD_ONLY[:]
     left_behind = None if include_programs else []
     for i, it in enumerate(items):
         report_progress(f"Measuring {it['label']}", i, len(items))
-        measure_item(it, left_behind)
+        measure_item(it, left_behind, keep)
     return sum(it["bytes"] for it in items), left_behind
 
 
@@ -1120,16 +1368,18 @@ def cover_stragglers(items, needed):
     return len(stray)
 
 
-def plan_move(includes=(), skips=(), include_programs=False):
+def plan_move(includes=(), skips=(), include_programs=False, rng=None):
     """Everything a pack (or the app's move list) needs to know, decided once. Returns a dict with items (measured),
     total, left_behind, missing, installed, cloud_only and stragglers (files the safety net added)."""
-    missing, installed, needed, big = {}, set(), set(), []
-    items = pack_items(list(includes), set(skips), missing, installed, needed, big)
-    total, left_behind = measure_items(items, include_programs) if items else (0, None)
+    missing, installed, needed, big, offered, stats = {}, set(), set(), [], [], {}
+    items = pack_items(list(includes), set(skips), missing, installed, needed, big, rng, offered, stats)
+    keep = range_keep(rng) if rng is not None else None
+    total, left_behind = measure_items(items, include_programs, keep) if items else (0, None)
     added = cover_stragglers(items, needed) if items else 0
     return {"items": items, "total": sum(it["bytes"] for it in items), "left_behind": left_behind,
             "missing": missing, "installed": installed, "cloud_only": list(CLOUD_ONLY), "stragglers": added,
-            "big_plugin_data": big}
+            "big_plugin_data": big, "offered_libraries": offered, "projects": stats,
+            "range": rng.as_dict() if rng is not None else None}
 
 
 def say_big_plugin_data(big):

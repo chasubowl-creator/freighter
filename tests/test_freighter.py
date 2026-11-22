@@ -5,6 +5,7 @@ Needs only Python. Every test works in its own temporary folders and never touch
 """
 import argparse
 import contextlib
+import datetime as dt
 import gzip
 import hashlib
 import html
@@ -1841,3 +1842,87 @@ class BlockedWrites(TempDirCase):
         self.assertEqual(u["blocked_hint"], rm.blocked_hint())
         self.assertIn("Controlled folder access", rm.blocked_hint("windows"))
         self.assertIn("Privacy & Security", rm.blocked_hint("mac"))
+
+
+class TimeRange(TempDirCase):
+    """Issue #76: bring only the projects saved in a time range, and the whole kits they use."""
+
+    @staticmethod
+    def saved(p, year, month):
+        t = dt.datetime(year, month, 15).timestamp()
+        os.utime(p, (t, t))
+        return p
+
+    def test_ranges_people_type(self):
+        r = rm.parse_range("Mar 2024 - Mar 2026")
+        self.assertEqual((r.since_text, r.until_text), ("2024-03", "2026-03"))
+        self.assertTrue(r.contains(dt.datetime(2024, 3, 1).timestamp()))
+        self.assertTrue(r.contains(dt.datetime(2026, 3, 31, 23, 59).timestamp()))
+        self.assertFalse(r.contains(dt.datetime(2026, 4, 1).timestamp()))
+        self.assertFalse(r.contains(dt.datetime(2024, 2, 29, 12).timestamp()))
+        self.assertEqual(rm.parse_range("2024-03 to 2026-03").label(), "Mar 2024 – Mar 2026")
+        self.assertEqual(rm.parse_range("since 2025-01").until, None)
+        self.assertEqual(rm.parse_range("until March 2026").until_text, "2026-03")
+        for bad in ("2026-03 to 2024-03", "banana", "2024-13 to 2025-01", "2024-02-30 to 2024-03"):
+            with self.assertRaises(ValueError):
+                rm.parse_range(bad)
+
+    def test_kit_parts_and_kits(self):
+        for part in ("US_DG_One_Shots", "LC_CNTRL_Bass Loops", "Kicks", "808s", "Hi Hats", "FX", "MIDI", "Kit 01"):
+            self.assertTrue(rm.kit_part(part), part)
+        for kit in ("UNDRGRND Sounds - Deep Grooves - Wav", "Loop Cult - CONTROL - Sample Pack", "House", "OPIUM",
+                    "Ultimate Drums Vol 1"):
+            self.assertFalse(rm.kit_part(kit), kit)
+
+    def test_a_used_sample_brings_its_kit_and_nothing_above_it(self):
+        lib = self.tmp / "Library"
+        a = write(lib / "House" / "UndrGrndSounds Tech House" / "US_TH_One_Shots" / "Kicks" / "kick.wav", b"k")
+        write(lib / "House" / "Another House Kit" / "Snares" / "snare.wav", b"s")
+        write(lib / "Trap" / "Opium Kit" / "808s" / "808.wav", b"8")
+        write(lib / "Trap" / "Rage Kit" / "Hats" / "hat.wav", b"h")
+        loose = write(lib / "House" / "stray.wav", b"x")                       # sits in a genre folder
+        rm.KIT_CONTAINER_CACHE.clear()
+        self.assertEqual(rm.kit_folder(a, lib), lib / "House" / "UndrGrndSounds Tech House")
+        self.assertIsNone(rm.kit_folder(loose, lib), "a sample in a genre folder comes on its own")
+        one = self.tmp / "DrumKits"                                            # one kit laid out by sound type
+        k = write(one / "Kicks" / "kick.wav", b"k")
+        write(one / "Snares" / "snare.wav", b"s")
+        self.assertEqual(rm.kit_folder(k, one), one)
+
+    def test_a_time_range_move(self):
+        home = self.tmp / "home"
+        lib = home / "Desktop" / "Samples Library"
+        used = write(lib / "House" / "Tech House Kit" / "One Shots" / "Kicks" / "kick.wav", b"k" * 100)
+        write(lib / "House" / "Tech House Kit" / "Loops" / "groove.wav", b"g" * 100)   # same kit: comes too
+        write(lib / "House" / "Other House Kit" / "Kicks" / "kick2.wav", b"o" * 100)  # another kit: stays
+        old_only = write(lib / "Trap" / "Old Kit" / "Kicks" / "old.wav", b"x" * 100)
+        write(lib / "Trap" / "Rage Kit" / "Hats" / "hat.wav", b"h" * 100)
+        projects = home / "Documents" / "Image-Line" / "FL Studio" / "Projects"
+        new = self.saved(make_flp(projects / "New Song.flp", [str(used)]), 2025, 6)
+        old = self.saved(make_flp(projects / "Old Song.flp", [str(old_only)]), 2021, 2)
+        tmpl = self.saved(make_flp(projects / "Templates" / "Start.flp", []), 2019, 1)
+        ul = rm.known_roots(rm.THIS_OS, home)["ableton_user_library"][1]
+        old_set = self.saved(make_als(ul.parent / "Projects" / "Old Jam Project" / "Old Jam.als", []), 2020, 5)
+        write(old_set.parent / "Samples" / "Recorded" / "take.wav", b"r" * 100)
+        with as_home(home), quiet(), mock.patch.object(rm, "fl_settings",
+                                                       lambda: {"user_data": None, "search_paths": [str(lib)], "recent": []}):
+            plan = rm.plan_move(rng=rm.parse_range("2024-03 to 2026-03"))
+            whole = rm.plan_move()
+        paths = {it["source_path"]: it for it in plan["items"]}
+        kit = lib / "House" / "Tech House Kit"
+        self.assertIn(str(kit), paths, "the kit a project uses comes whole")
+        self.assertEqual(paths[str(kit)]["label"], "Kit: Tech House Kit")
+        self.assertEqual(paths[str(kit)]["files"], 2)
+        for not_packed in (lib, lib / "House", lib / "Trap" / "Old Kit", lib / "House" / "Other House Kit"):
+            self.assertNotIn(str(not_packed), paths)
+        self.assertEqual([o["path"] for o in plan["offered_libraries"]], [str(lib)], "the library is offered")
+        fl = paths[str(home / "Documents" / "Image-Line")]
+        names = {Path(ap).name for _rel, ap, _n in fl["_files"]}
+        self.assertIn("New Song.flp", names)
+        self.assertIn("Start.flp", names, "templates always come")
+        self.assertNotIn("Old Song.flp", names, "a project saved before the range stays behind")
+        self.assertFalse([1 for it in plan["items"] for _rel, ap, _n in it["_files"] if "Old Jam" in str(ap)],
+                         "an Ableton project folder saved before the range stays behind")
+        self.assertEqual((plan["projects"]["in_range"], plan["projects"]["total"]), (1, 3))
+        self.assertEqual(plan["range"]["label"], "Mar 2024 – Mar 2026")
+        self.assertLess(plan["total"], whole["total"])
