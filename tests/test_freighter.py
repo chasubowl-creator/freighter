@@ -1328,7 +1328,7 @@ class CrossOSMove(TempDirCase):
         new = self.tmp / "new"
         new.mkdir()
         with as_home(new), quiet():
-            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=[]))
+            rm.cmd_unpack(argparse.Namespace(bundle=str(b), dest_for=[], keep_together=True))
             rm.cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
             song = rm.known_roots(rm.THIS_OS, new)["ableton_user_library"][1] / "Song Project" / "Song.als"
         landing = new / "Music" / "Freighter" / "OLDWINDOWS"
