@@ -43,6 +43,8 @@ Type **2** and press Enter. It lists everything Freighter would move, with a **t
 - Read any notes under the list:
   - **"already missing"**: samples your projects use that aren't on the PC any more (maybe an unplugged drive).
   - **OneDrive**: files that only live in the cloud and would download while packing.
+  - **"come with installed programs"**: samples from FL Studio's or Ableton's own sounds. These are fine;
+    they come back when you install the program on the new computer.
   Take a photo of these notes.
 
 ## Step 5: Rehearse the move (5–20 min)
@@ -60,14 +62,16 @@ version" below): `freighter.exe rehearse --to E:\`
 ## Step 6: Send the results back
 
 Send these back (Google Drive or email both work). The window shows where each one was saved:
-- `rehearsal-report.txt`, in `C:\Users\<you>\Music\Freighter\Rehearsal`
+- `rehearsal-report.txt`, in `C:\Users\<you>\Music\Freighter\Rehearsal` (or in `E:\Freighter Rehearsal` if you
+  rehearsed onto another drive)
 - `plugins.csv`, in the `manifest-...` folder inside `C:\Users\<you>\Music\Freighter\Reports`
 - `freighter-crash.txt`, if Freighter saved one in `Music\Freighter`
 - a photo of anything in the window that looks like an error
 
 ## Step 7: Clean up
 
-Delete the **Rehearsal** folder in `Music\Freighter`. Your real files were never changed.
+Delete the **Rehearsal** folder in `Music\Freighter` (or `Freighter Rehearsal` on the other drive). Your real
+files were never changed.
 
 ---
 
