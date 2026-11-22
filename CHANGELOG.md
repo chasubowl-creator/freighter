@@ -82,6 +82,10 @@ The first version with a number. Everything that exists so far:
 - The computer stays awake while packing and unpacking. A rehearsal always tests the FL repair, even with FL open.
 - When Windows or macOS refuses a write, the results say what to allow.
 
+### Downloads
+- Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account
+  (issue #36). The Mac programs now keep their "executable" permission, so they start after unzipping.
+
 ### Known problems
 The fixes planned before the public beta are listed in the
 [M1 milestone](https://github.com/chasubowl-creator/freighter/milestone/2).

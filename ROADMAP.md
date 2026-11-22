@@ -113,7 +113,7 @@ Tick the box here when the issue closes.
 
 *about 1 week.* Real downloads: tagged GitHub Releases, Mac builds that open, free Windows signing, update check, feedback.
 
-- [ ] Release builds on version tags (GitHub Releases) (#36) · M · Claude
+- [x] Release builds on version tags (GitHub Releases) (#36) · M · Claude
 - [ ] A Mac build that opens on every Mac (#37) · M · Claude
 - [ ] Free Windows code signing (SignPath Foundation) (#38) · M · You apply, Claude wires CI
 - [ ] Download and first-run instructions (#39) · S · Claude
