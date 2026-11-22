@@ -99,9 +99,9 @@ Tick the box here when the issue closes.
 - [x] App: new-computer screens (unpack, repair, results) (#28) · L · Claude
 - [x] App: plugins screen with the reinstall checklist (#29) · M · Claude
 - [x] Plugin maker download links and a license-deactivation checklist (#30) · M · Claude
-- [ ] Move third-party plugin presets (#31, widened into #71) · M · Claude
-- [ ] Repair Ableton device presets and clips (.adg, .alc) (#32) · S · Claude
-- [ ] FL Studio: point it at the moved sample folders (#33, mostly replaced by #68) · M · Claude
+- [x] Move third-party plugin presets (#31) · M · Claude
+- [x] Repair Ableton device presets and clips (.adg, .alc) (#32) · S · Claude
+- [x] FL Studio: point it at the moved sample folders (#33: guided step; projects repaired by #68) · M · Claude
 - [x] App: Crate screen (#34) · S · Claude
 - [x] Unpack journal, preview and undo (#73) · M · Claude
 - [x] Speed for 500 GB moves (#74) · M · Claude

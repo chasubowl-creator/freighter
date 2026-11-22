@@ -10,7 +10,8 @@ Mac, Disk Utility → Erase → ExFAT. Formatting erases the drive.
 ## 1. Get Freighter on both computers
 
 From **https://github.com/chasubowl-creator/freighter/actions**, open the newest run with a green check and
-download **freighter-windows** (or **freighter-mac** for a Mac). No GitHub account is needed. Unzip it (on
+download **freighter-windows** (or **freighter-mac** for a Mac). Sign in to GitHub first: it only lets
+signed-in accounts download these builds. Unzip it (on
 Windows: right-click → Extract All; don't run it from inside the zip). You get `freighter` (the mover),
 `manifest` (the plugin list) and `crate` (the sample sorter). No other installs needed. Windows may say "Windows protected your PC": click **More info → Run anyway**.
 
@@ -18,14 +19,19 @@ Windows: right-click → Extract All; don't run it from inside the zip). You get
 
 Double-click **freighter**. In the menu:
 
-- **2: See what a move would take.** It finds your FL Studio and Ableton folders, plus every folder your
-  projects pull samples from, such as a drum kit folder on the Desktop. Note the total size.
+- **2: See what a move would take.** It finds your FL Studio and Ableton folders, every folder your
+  projects pull samples from (such as a drum kit folder on the Desktop), and your plugin presets (such as
+  `Documents\Xfer` for Serum). Very big plugin folders, usually sound libraries, are listed but left out
+  unless you add them. Note the total size.
 - **4: Pack for the move onto a drive.** Plug in the drive, then drag it into the window when asked.
-  If it gets interrupted, choose 4 again. It picks up where it stopped.
+  If it gets interrupted, choose 4 again. It picks up where it stopped. Freighter keeps the computer awake
+  while it copies. When it's done, **eject the drive** before unplugging it.
 
 Installers and programs found in sample folders are left behind on purpose, and listed in `left-behind.txt`.
 
 ## 3. Before you wipe or sell the old computer
+
+Keep it as it is until your projects open and play on the new one.
 
 - [ ] **Deactivate plugin licenses**, so they free up for the new computer:
   - [ ] iLok License Manager (PACE/iLok plugins)

@@ -70,6 +70,17 @@ The first version with a number. Everything that exists so far:
 - The plugin checklist links to about 75 makers' sites, and offers a web search for any other maker.
 - Faster (issue #74): on a 30,000-sample test studio, planning takes half the time, packing about 40% less, and
   unpacking again no longer re-reads files it already copied. Results are byte-for-byte the same.
+- **Plugin presets move too** (issue #31): folders in Documents and Music (and the Mac's Audio Presets folders or
+  Windows' Public Documents) named after an installed plugin's maker, or holding preset files, such as Serum's
+  `Xfer` folder. Same-OS moves put them back in place; across Windows and Mac the results say where they are.
+  Folders over 10 GB (probably sound libraries) are offered, not packed.
+- **Ableton racks and clips** (.adg, .alc) are read when packing, repaired after unpacking and checked by the
+  rehearsal (issue #32). Their originals are kept where Live's browser won't list them. Live's installed Packs
+  never move: they reinstall from Ableton.
+- On Windows, USB drives that call themselves "fixed" are no longer called the computer's own disk; a typed `E:`
+  means the top of E:, and Explorer's "Copy as path" quotes are fine.
+- The computer stays awake while packing and unpacking. A rehearsal always tests the FL repair, even with FL open.
+- When Windows or macOS refuses a write, the results say what to allow.
 
 ### Known problems
 The fixes planned before the public beta are listed in the
