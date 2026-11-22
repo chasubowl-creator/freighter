@@ -51,6 +51,7 @@ td .path{color:var(--muted);font-size:12px;word-break:break-all}
 .choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
 .choice{text-align:left;display:flex;flex-direction:column;gap:3px;padding:14px;background:var(--panel)}
 .choice:hover{border-color:var(--blue)}.choice.dim{opacity:.6}.choice-title{font-weight:600}
+select{font:inherit;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 6px}
 input[type=text]{font:inherit;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 10px;flex:1;min-width:220px}
 input[type=checkbox],input[type=radio]{accent-color:var(--blue);width:16px;height:16px;vertical-align:-3px}
 td.tick{width:28px}.actions{margin-top:18px}button.small{padding:3px 10px;font-size:12.5px}
@@ -216,18 +217,54 @@ const OLD_STEPS = ["What moves", "Pick a drive", "Pack"];
 const REH_STEPS = ["What moves", "Where", "Rehearse"];
 let move = null;   // {items, total, skip:Set, mode:"pack"|"rehearse", ...}
 
-function moveList(mode) {
+function moveList(mode, range) {   // range: {since: "2024-03", until: "2026-03"} for a time-range move (issue #76)
   const reh = mode === "rehearse";
-  runJob("move_list", {}, [backTo(home), steps(reh ? REH_STEPS : OLD_STEPS, 0), el("h1", {}, reh ? "Rehearse a move" : "What a move would take"),
-    el("p", {class: "sub"}, "Looking through your music folders and every project for the files they use…")], (r) => {
-    move = Object.assign(r, {skip: new Set(), include: new Set(), mode: reh ? "rehearse" : "pack"});
+  runJob("move_list", range || {}, [backTo(home), steps(reh ? REH_STEPS : OLD_STEPS, 0), el("h1", {}, reh ? "Rehearse a move" : "What a move would take"),
+    el("p", {class: "sub"}, range ? "Looking for the projects saved in that time, and the kits they use…" : "Looking through your music folders and every project for the files they use…")], (r) => {
+    move = Object.assign(r, {skip: new Set(), include: new Set(), mode: reh ? "rehearse" : "pack", rangeParams: range || null});
     chooseItems();
   });
 }
 
-function chosenBytes() {   // what's ticked: the items, plus any big plugin content the person chose to take
+function rangeText(label) { return /^(since|until)/.test(label) ? label : "between " + label.replace(" – ", " and "); }
+
+function rangePanel(r) {
+  const now = new Date(), lastYear = now.getFullYear();
+  const years = (r.projects && r.projects.years && r.projects.years.length) ? r.projects.years : [lastYear, lastYear];
+  const firstYear = Math.min(years[0], lastYear);
+  const cur = r.rangeParams || {};
+  const pick = (t, fallback) => t ? [Number(t.slice(0, 4)), Number(t.slice(5, 7))] : fallback;
+  const [fy, fm] = pick(cur.since, [Math.max(firstYear, lastYear - 2), now.getMonth() + 1]);
+  const [ty, tm] = pick(cur.until, [lastYear, now.getMonth() + 1]);
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthSel = (v) => el("select", {"aria-label": "Month"}, names.map((m, i) => el("option", {value: i + 1, selected: i + 1 === v}, m)));
+  const yearList = []; for (let y = Math.min(firstYear, fy); y <= Math.max(lastYear, ty); y++) yearList.push(y);
+  const yearSel = (v) => el("select", {"aria-label": "Year"}, yearList.map(y => el("option", {value: y, selected: y === v}, y)));
+  const fromM = monthSel(fm), fromY = yearSel(fy), toM = monthSel(tm), toY = yearSel(ty);
+  const all = el("input", {type: "radio", name: "which", checked: !r.rangeParams});
+  const some = el("input", {type: "radio", name: "which", checked: !!r.rangeParams});
+  [fromM, fromY, toM, toY].forEach(x => x.addEventListener("change", () => { some.checked = true; }));
+  const msg = el("span", {class: "err small"});
+  const pad = (n) => String(n).padStart(2, "0");
+  const go = el("button", {onclick: () => {
+    if (all.checked) return moveList(r.mode, null);
+    const since = `${fromY.value}-${pad(fromM.value)}`, until = `${toY.value}-${pad(toM.value)}`;
+    if (until < since) { msg.textContent = "The end comes before the start."; return; }
+    moveList(r.mode, {since, until});
+  }}, "Show this move");
+  return el("div", {class: "panel"}, el("b", {}, "Which projects?"),
+    el("label", {class: "radio"}, all, " All of them"),
+    el("label", {class: "radio"}, some, " Only projects last saved from ", fromM, " ", fromY, " to ", toM, " ", toY),
+    el("div", {class: "row"}, go, msg),
+    r.range ? el("p", {class: "muted", style: "margin:10px 0 0"},
+      `${r.projects.in_range} of ${plural(r.projects.total, "project")} ${r.projects.in_range === 1 ? "was" : "were"} saved ${rangeText(r.range.label)}. ` +
+      "The others stay on this computer. Each sample these projects use brings its whole kit, never the folder of other kits above it.") : null);
+}
+
+function optional() { return (move.big || []).concat(move.offered || []); }   // left out unless ticked
+function chosenBytes() {   // what's ticked: the items, plus any big plugin content or library the person chose to take
   return move.items.filter(it => !move.skip.has(it.id)).reduce((a, it) => a + it.bytes, 0) +
-    (move.big || []).filter(b => move.include.has(b.path)).reduce((a, b) => a + b.bytes, 0);
+    optional().filter(b => move.include.has(b.path)).reduce((a, b) => a + b.bytes, 0);
 }
 
 function chooseItems() {
@@ -239,7 +276,7 @@ function chooseItems() {
   const refresh = () => {
     const chosen = r.items.filter(it => !r.skip.has(it.id)).length + r.include.size;
     totalEl.textContent = size(chosenBytes());
-    countEl.textContent = `${plural(chosen, "folder")} of ${r.items.length + (r.big || []).length} chosen. ` +
+    countEl.textContent = `${plural(chosen, "folder")} of ${r.items.length + optional().length} chosen. ` +
       (reh ? "A rehearsal needs about twice this much free space." : "Your drive needs at least this much free space.");
     next.disabled = !chosen;
   };
@@ -250,11 +287,13 @@ function chooseItems() {
       el("td", {}, el("label", {}, it.label), el("div", {class: "path mono"}, it.path)),
       el("td", {class: "num"}, it.files.toLocaleString()), el("td", {class: "num"}, size(it.bytes)));
   });
-  const bigRows = (r.big || []).map(b => el("tr", {},
+  const optRow = (b, what) => el("tr", {},
     el("td", {class: "tick"}, el("input", {type: "checkbox", checked: r.include.has(b.path),
       onchange: (e) => { e.target.checked ? r.include.add(b.path) : r.include.delete(b.path); refresh(); }})),
-    el("td", {}, el("label", {}, `Plugin content: ${b.label}`), el("div", {class: "path mono"}, b.path)),
-    el("td", {class: "num"}, ""), el("td", {class: "num"}, size(b.bytes))));
+    el("td", {}, el("label", {}, what), el("div", {class: "path mono"}, b.path)),
+    el("td", {class: "num"}, ""), el("td", {class: "num"}, size(b.bytes)));
+  const bigRows = (r.big || []).map(b => optRow(b, `Plugin content: ${b.label}`));
+  const libRows = (r.offered || []).map(b => optRow(b, b.label.replace(/^FL Studio browser folder: /, "Sample library: ")));
   const notes = [];
   if (r.missing_count) notes.push(note("bad",
     `${plural(r.missing_count, "sample")} used by ${plural(r.missing_projects, "project")} ${r.missing_count === 1 ? "is" : "are"} already missing on this computer`,
@@ -268,6 +307,7 @@ function chooseItems() {
     el("div", {class: "muted"}, "Reinstall software from its maker. Installers tucked into sample folders are a common way malware spreads.")));
   show(backTo(home), steps(reh ? REH_STEPS : OLD_STEPS, 0), el("h1", {}, reh ? "What the rehearsal moves" : "What a move would take"),
     el("div", {class: "panel"}, totalEl, countEl),
+    rangePanel(r),
     reh ? null : el("p", {class: "muted small"}, "First time? ",
       el("button", {class: "link", onclick: () => { r.mode = "rehearse"; chooseItems(); }}, "Rehearse first"),
       ": a practice move on this computer that checks every sample, without changing your files."),
@@ -279,6 +319,9 @@ function chooseItems() {
     bigRows.length ? el("h2", {}, "Big plugin content, left out unless you tick it") : null,
     bigRows.length ? el("p", {class: "muted"}, "These are probably sound libraries. They usually come back faster by installing them again from the maker's app (Native Access, Spitfire, Arturia…). Tick one to take it anyway.") : null,
     bigRows.length ? el("table", {}, el("tbody", {}, bigRows)) : null,
+    libRows.length ? el("h2", {}, "Whole sample libraries, left out with a time range") : null,
+    libRows.length ? el("p", {class: "muted"}, "Only the kits your projects use come from these. Tick one to take all of it.") : null,
+    libRows.length ? el("table", {}, el("tbody", {}, libRows)) : null,
     el("div", {class: "row actions"}, next));
   refresh();
 }
@@ -336,7 +379,7 @@ function confirmPack(d, need) {
 }
 
 function pack(d) {
-  runJob("pack", {to: d.path, skip: [...move.skip], include: [...move.include]},
+  runJob("pack", Object.assign({to: d.path, skip: [...move.skip], include: [...move.include]}, move.rangeParams || {}),
     [steps(OLD_STEPS, 2), el("h1", {}, "Packing"), el("p", {class: "sub"}, `Copying onto ${d.name} and checking every file as it goes.`)],
     (r) => packed(r, d),
     {cancelled: "Stopped. Your files are safe; start packing again and it picks up where it stopped."});
@@ -351,6 +394,7 @@ function packed(r, d) {
   show(steps(OLD_STEPS, 3), el("h1", {}, r.errors ? "Packed, with problems" : "Packed"),
     el("div", {class: "panel"}, el("div", {class: "big"}, size(r.bytes)),
       el("div", {class: "muted"}, `${plural(r.files, "file")} in ${plural(r.items, "folder")}, each checked, on ${d.name}.`),
+      r.range ? el("div", {class: "muted"}, `Projects saved ${rangeText(r.range)}: ${r.projects.in_range} of ${r.projects.total}. The others stay on this computer (listed in projects-left-out.txt on the drive).`) : null,
       el("div", {class: "muted mono small"}, r.bundle)),
     ...notes,
     el("h2", {}, "Before you wipe or sell this computer"),
@@ -425,7 +469,7 @@ function confirmRehearse(w, need) {
 }
 
 function rehearse(w) {
-  runJob("rehearse", {to: w.to, skip: [...move.skip], include: [...move.include]},
+  runJob("rehearse", Object.assign({to: w.to, skip: [...move.skip], include: [...move.include]}, move.rangeParams || {}),
     [steps(REH_STEPS, 2), el("h1", {}, "Rehearsing"),
       el("p", {class: "sub"}, "Packing, unpacking into a pretend new computer, repairing, then checking every sample. Your real files are only read.")],
     rehearsed, {cancelled: "Stopped. Your real files weren't touched. You can delete the rehearsal's files from the home screen."});
@@ -505,6 +549,7 @@ function bundleChoice(b) {
   return el("button", {class: "choice", onclick: () => confirmUnpack(b)},
     el("div", {class: "choice-title"}, `From ${b.host}`),
     el("div", {class: "muted"}, `Packed ${when(b.created)} · ${plural(b.items, "folder")}` + (b.bytes ? ` · ${size(b.bytes)}` : "")),
+    b.range ? el("div", {class: "muted small"}, `Projects saved ${rangeText(b.range)}`) : null,
     b.problems.length ? el("div", {class: "err small"}, "Not finished packing") : el("div", {class: "okc small"}, "Complete"),
     el("div", {class: "muted mono small"}, b.path));
 }
@@ -522,6 +567,7 @@ function confirmUnpack(b) {
   };
   const go = el("button", {class: "primary", disabled: !!b.problems.length, onclick: () => unpack(b, together, anyway)}, "Unpack and repair");
   const parts = [backTo(pickBundle), steps(NEW_STEPS, 0), el("h1", {}, `Unpack from ${b.host}`),
+    b.range ? el("p", {class: "sub"}, `The projects saved ${rangeText(b.range)}, with the kits they use.`) : null,
     el("div", {class: "muted mono small"}, b.path)];
   if (b.problems.length) parts.push(note("bad", "This bundle isn't finished",
     el("ul", {}, b.problems.map(p => el("li", {}, p))),
@@ -572,7 +618,8 @@ function unpacked(r) {
   const u = r.unpack || {};
   const rows = (u.entries || []).map(e => el("tr", {}, el("td", {}, e.label, el("div", {class: "path mono"}, "from " + e.old)),
     el("td", {class: "mono path"}, e.new)));
-  const parts = [steps(NEW_STEPS, 2), el("h1", {}, (u.problems || []).length || (u.bad || []).length ? "Unpacked, with problems" : "Everything is in place")];
+  const parts = [steps(NEW_STEPS, 2), el("h1", {}, (u.problems || []).length || (u.bad || []).length ? "Unpacked, with problems" : "Everything is in place"),
+    u.range ? el("p", {class: "sub"}, `The projects saved ${rangeText(u.range)}, with the kits they use.`) : null];
   if ((u.problems || []).length) parts.push(note("bad", "The bundle wasn't complete", el("ul", {}, u.problems.map(p => el("li", {}, p)))));
   if ((u.bad || []).length) parts.push(note("bad", `${plural(u.bad.length, "file")} had a problem`,
     u.blocked_hint ? el("div", {}, u.blocked_hint) : null, el("ul", {}, u.bad.map(p => el("li", {class: "mono"}, p)))));

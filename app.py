@@ -110,9 +110,15 @@ class Job:
                     "log": self.lines[-12:], "result": self.result, "error": self.error, "crash": self.crash}
 
 
+def job_range(job):
+    p = job.params
+    return rm.ProjectRange(p.get("since"), p.get("until")) if (p.get("since") or p.get("until")) else None
+
+
 def job_move_list(job):
-    """What a move would take from this computer: the same list as `freighter pack --list`."""
-    plan = rm.plan_move()
+    """What a move would take from this computer: the same list as `freighter pack --list`. With since/until, only
+    the projects last saved in that time range, and the kits they use (issue #76)."""
+    plan = rm.plan_move(rng=job_range(job))
     items, total, left_behind = plan["items"], plan["total"], plan["left_behind"]
     missing, installed, cloud = plan["missing"], plan["installed"], plan["cloud_only"]
     gone = rm.missing_lines(missing)
@@ -125,6 +131,9 @@ def job_move_list(job):
         "installed": len(installed),
         "cloud": {"files": len(cloud), "bytes": sum(n for _, n in cloud)},
         "big": plan["big_plugin_data"],   # plugin content too big to take unless ticked (probably sound libraries)
+        "offered": plan["offered_libraries"],   # with a time range: sample libraries, taken whole only if ticked
+        "projects": {k: v for k, v in plan["projects"].items() if k != "left_out"},
+        "range": plan["range"],
     }
 
 
@@ -153,7 +162,8 @@ def job_pack(job):
     p = job.params
     rm.LAST.pop("pack", None)
     rm.cmd_pack(argparse.Namespace(to=p["to"], list=False, include=list(p.get("include", [])),
-                                   skip=list(p.get("skip", [])), include_programs=False))
+                                   skip=list(p.get("skip", [])), include_programs=False,
+                                   since=p.get("since"), until=p.get("until")))
     return rm.LAST.get("pack")
 
 
@@ -264,8 +274,34 @@ def folders_param(value):
     return [str(typed_folder(f)) for f in value]
 
 
+def range_param(body):
+    """since/until for a time-range move (issue #76): ({since, until}, None) or (None, the problem)."""
+    since, until = body.get("since"), body.get("until")
+    if since is None and until is None:
+        return {}, None
+    if not all(x is None or isinstance(x, str) for x in (since, until)):
+        return None, "bad request"
+    try:
+        r = rm.ProjectRange(since or None, until or None)
+    except ValueError as e:
+        return None, str(e)
+    return {"since": r.since_text, "until": r.until_text}, None
+
+
 def clean_params(kind, body):
     """The options a job may take, checked. Returns (params, error)."""
+    if kind in ("move_list", "pack", "rehearse"):
+        rng, problem = range_param(body)
+        if problem:
+            return None, problem
+        if kind == "move_list":
+            return rng, None
+        params, problem = clean_job_params(kind, body)
+        return (dict(params, **rng), None) if params is not None else (None, problem)
+    return clean_job_params(kind, body)
+
+
+def clean_job_params(kind, body):
     if kind == "pack":
         to = body.get("to")
         skip, include = body.get("skip", []), folders_param(body.get("include"))
@@ -365,7 +401,7 @@ def job_rehearse(job):
     p = job.params
     rm.LAST.pop("rehearse", None)
     rm.cmd_rehearse(argparse.Namespace(to=p.get("to"), include=list(p.get("include", [])),
-                                       skip=list(p.get("skip", []))))
+                                       skip=list(p.get("skip", [])), since=p.get("since"), until=p.get("until")))
     r = rm.LAST["rehearse"]
     job.files["report"] = r["report"]
     return dict(r, lost=r["lost"][:200], already=r["already"][:200], unchecked=r["unchecked"][:100])

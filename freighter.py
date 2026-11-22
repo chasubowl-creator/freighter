@@ -1606,7 +1606,7 @@ def cmd_pack(args):
                     "bytes": total, "errors": len(errors), "left_behind": len(left_behind or []),
                     "missing": len(missing_lines(missing)),
                     "range": plan["range"]["label"] if rng is not None else None,
-                    "projects": plan["projects"]}
+                    "projects": {k: v for k, v in plan["projects"].items() if k != "left_out"}}
     print("Next, on the new computer:  " + tool_cmd("freighter", f"unpack \"{bundle}\""))
     return 0
 

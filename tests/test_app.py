@@ -371,6 +371,33 @@ class Server(unittest.TestCase):
         self.assertFalse(library.exists())
         self.assertTrue((kits / "Kicks" / "kick.wav").is_file(), "originals untouched")
 
+    def test_a_time_range_move_list(self):
+        """Issue #76: the move list for the projects saved in a time range, with libraries offered."""
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_freighter import make_flp
+        home = self.tmp / "home"
+        kick = home / "Desktop" / "Kits" / "House" / "Tech House Kit" / "Kicks" / "kick.wav"
+        kick.parent.mkdir(parents=True)
+        kick.write_bytes(b"k" * 100)
+        (home / "Desktop" / "Kits" / "House" / "Other Kit").mkdir()
+        projects = home / "Documents" / "Image-Line" / "FL Studio" / "Projects"
+        new, old = make_flp(projects / "New.flp", [str(kick)]), make_flp(projects / "Old.flp", [])
+        t = time.mktime((2020, 1, 15, 12, 0, 0, 0, 0, -1))
+        os.utime(old, (t, t))
+        for bad in ({"since": "banana"}, {"since": "2026-03", "until": "2024-03"}, {"since": 5}):
+            status, r = self.request("POST", "/api/jobs", dict(kind="move_list", **bad))
+            self.assertEqual(status, 400, bad)
+        with as_home(home):
+            status, started = self.request("POST", "/api/jobs", {"kind": "move_list", "since": "2024-03"})
+            self.assertEqual(status, 200, started)
+            view = self.wait(started["id"])
+        self.assertEqual(view["state"], "done", view.get("error"))
+        r = view["result"]
+        self.assertEqual((r["projects"]["in_range"], r["projects"]["total"]), (1, 2))
+        self.assertEqual(r["range"]["label"], "since Mar 2024")
+        self.assertIn("Kit: Tech House Kit", [it["label"] for it in r["items"]])
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "pack", "to": str(self.tmp), "until": "nope"})[0], 400)
+
     def test_typed_folders(self):
         """Explorer's "Copy as path" adds quotes; a bare drive letter means the top of that drive."""
         self.assertEqual(str(app.typed_folder("E:", windows=True)), "E:\\")
