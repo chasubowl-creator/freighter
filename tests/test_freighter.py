@@ -348,6 +348,86 @@ class FLRepair(TempDirCase):
         self.assertNotEqual(beat.read_bytes(), before)
 
 
+def make_plugin_flp(path, plugins=(), natives=(), version="25.2.5.5055"):
+    """An FL project using third-party plugins the way FL stores them: 201 "Fruity Wrapper", 203 display name,
+    212 wrapper, 213 records (uint32 id, uint64 size, data) with 54 = name, 56 = maker, 55 = plugin file."""
+    enc = lambda x: x.encode("utf-16-le") + b"\0\0"
+    text = lambda eid, payload: bytes([eid]) + varint(len(payload)) + payload
+    rec = lambda rid, data: struct.pack("<IQ", rid, len(data)) + data
+    body = text(199, version.encode() + b"\0")
+    for name, maker, file in plugins:
+        state = struct.pack("<i", 12) + rec(1, b"\0" * 20) + rec(52, b"X" * 16) + rec(54, name.encode())
+        if maker:
+            state += rec(56, maker.encode())
+        if file:
+            state += rec(55, file.encode())
+        state += rec(53, b"opaque plugin state")
+        body += text(201, enc("Fruity Wrapper")) + text(212, bytes(52)) + text(203, enc(name + " #2")) + text(213, state)
+    for n in natives:
+        body += text(201, enc(n)) + text(212, bytes(52)) + text(213, b"native state")
+    return write(path, b"FLhd" + struct.pack("<I", 6) + struct.pack("<HHH", 0, 1, 96)
+                 + b"FLdt" + struct.pack("<I", len(body)) + body)
+
+
+class PluginReadiness(TempDirCase):
+    """Issue #70: which plugins each project needs, and which this computer is missing."""
+
+    def test_reads_fl_plugins_like_fl_stores_them(self):
+        f = make_plugin_flp(self.tmp / "a.flp", [("Serum 2", "Xfer Records", "/Library/Audio/Plug-Ins/VST3/Serum2.vst3"),
+                                                ("Kickstart 2", "", "")], natives=["Fruity Parametric EQ 2", "FLEX"])
+        info = rm.project_plugins(f)
+        self.assertEqual(info["daw"], "FL Studio")
+        self.assertEqual(info["version"], "25.2.5.5055")
+        self.assertEqual(info["plugins"], [{"name": "Serum 2", "vendor": "Xfer Records", "format": "VST3"},
+                                           {"name": "Kickstart 2", "vendor": "", "format": ""}],
+                         "the real name (record 54), not the display name \"Serum 2 #2\"")
+        self.assertEqual(info["native"], ["FLEX", "Fruity Parametric EQ 2"])
+
+    def test_reads_live_plugins(self):
+        text = ('<Ableton Creator="Ableton Live 12.1">'
+                '<PluginDesc><Vst3PluginInfo Id="0"><Name Value="Pro-Q 3" /></Vst3PluginInfo></PluginDesc>'
+                '<PluginDesc><AuPluginInfo Id="0"><Name Value="Valhalla Room" /><Manufacturer Value="Valhalla DSP" />'
+                '</AuPluginInfo></PluginDesc>'
+                '<PluginDesc><VstPluginInfo Id="0"><Path Value="C:/VST/Serum.dll" /><PlugName Value="Serum" />'
+                '</VstPluginInfo></PluginDesc></Ableton>')
+        self.assertEqual(rm.als_plugins(text), [{"name": "Pro-Q 3", "format": "VST3", "vendor": ""},
+                                                {"name": "Valhalla Room", "format": "AU", "vendor": "Valhalla DSP"},
+                                                {"name": "Serum", "format": "VST2", "vendor": ""}])
+
+    def info(self, *plugins, daw="FL Studio", version="25.1.0"):
+        return {"daw": daw, "version": version, "native": [],
+                "plugins": [{"name": n, "vendor": v, "format": f} for n, v, f in plugins]}
+
+    def test_missing_plugins_ranked_by_how_many_projects_they_open(self):
+        projects = {"A.flp": self.info(("Serum 2", "Xfer Records", "VST3"), ("Kickstart 2", "Nicky Romero", "VST3")),
+                    "B.flp": self.info(("Serum 2", "", "VST3")),
+                    "C.flp": self.info(version="25.2.5"),
+                    "D.flp": None}
+        r = rm.plugin_readiness(projects, [])
+        self.assertEqual(r["total"], 3)
+        self.assertEqual(r["ready"], ["C.flp"])
+        self.assertEqual([(e["name"], e["vendor"], e["opens"]) for e in r["missing"]],
+                         [("Serum 2", "Xfer Records", 1), ("Kickstart 2", "Nicky Romero", 1)])
+        self.assertEqual(r["versions"]["FL Studio"][0], "25.2.5")
+        lines = "\n".join(rm.readiness_lines(r))
+        self.assertIn("1 of 3 projects have every plugin they use.", lines)
+        self.assertIn("Serum 2 by Xfer Records: used in 2 projects -> 2 of 3 open", lines)
+        self.assertIn("Kickstart 2 by Nicky Romero: used in 1 project -> 3 of 3 open", lines)
+
+    def test_installed_plugins_match_across_names_and_formats(self):
+        projects = {"A.flp": self.info(("Serum 2", "Xfer Records", "VST3"), ("CLA-2A Stereo", "Waves", "VST3"))}
+        installed = [{"name": "Serum2", "vendor": "Xfer Records", "key": "serum2"},
+                     {"name": "WaveShell1-VST3 14.12", "vendor": "Waves", "key": "waveshell1vst31412"}]
+        r = rm.plugin_readiness(projects, installed)
+        self.assertEqual(r["ready"], ["A.flp"], "Serum2 = Serum 2, and Waves plugins live inside the WaveShell")
+
+    def test_mac_only_plugins_are_flagged_on_windows(self):
+        projects = {"Song.als": self.info(("Valhalla Room", "Valhalla DSP", "AU"), daw="Ableton Live", version="12.1")}
+        with mock.patch.object(rm, "THIS_OS", "windows"):
+            r = rm.plugin_readiness(projects, [])
+        self.assertTrue(any("AU (Mac-only)" in w for w in r["warnings"]))
+
+
 class AbletonFix(TempDirCase):
     def test_rewrites_moved_keeps_missing_and_backs_up(self):
         new = write(self.tmp / "new" / "Kicks" / "kick & co.wav", b"x")

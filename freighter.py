@@ -1295,7 +1295,8 @@ def cmd_unpack(args):
     print("\nNext:")
     print("  Repair projects: menu option 6, or " + tool_cmd("freighter", "fix-ableton") + " and "
           + tool_cmd("freighter", "fix-fl"))
-    print(f"  Plugins to reinstall: {tool_cmd('manifest', '--compare')} \"{landing / f'plugins-{src_host}.csv'}\"")
+    print("  Plugins your projects still need, most useful first: menu option 7, or " + tool_cmd("freighter", "plugins"))
+    print(f"  Everything the old computer had: {tool_cmd('manifest', '--compare')} \"{landing / f'plugins-{src_host}.csv'}\"")
     return 0
 
 
@@ -1828,6 +1829,179 @@ def cmd_fix_fl(args):
     return 0
 
 
+# --------------------------------------------------------------------------- plugin readiness (#70)
+
+FLP_TEXT_PLUGIN_INTERNAL = 201  # "Fruity Wrapper" for third-party plugins, else the FL plugin's own name
+FLP_DATA_PLUGIN = 213           # plugin state; for wrapped plugins a list of records
+FL_WRAPPER = "Fruity Wrapper"
+PLUGINDESC_RE = re.compile(r"<PluginDesc>(.*?)</PluginDesc>", re.S)
+VALUE_RE = lambda tag: re.compile(rf'<{tag} Value="([^"]*)"')
+
+
+def plugin_format(path):
+    ext = Path(str(path).replace("\\", "/")).suffix.lower()
+    return {".vst3": "VST3", ".dll": "VST2", ".vst": "VST2", ".component": "AU", ".clap": "CLAP"}.get(ext, "")
+
+
+def flp_plugins(data):
+    """Third-party plugins an FL project uses, and FL's own plugins. Third-party ones sit behind
+    "Fruity Wrapper": their state (event 213) is a list of records (uint32 id, uint64 size, data); record 54 is the
+    plugin's real name, 56 its maker and 55 the file it was loaded from (newer FL versions)."""
+    _s, _e, events = flp_events(data)
+    third, native, last = [], set(), None
+    for ev in events:
+        if ev[0] == FLP_TEXT_PLUGIN_INTERNAL:
+            last = flp_text(data, ev)
+            if last and last != FL_WRAPPER:
+                native.add(last)
+        elif ev[0] == FLP_DATA_PLUGIN and last == FL_WRAPPER:
+            b, pos, recs = data[ev[2]:ev[3]], 4, {}
+            while pos + 12 <= len(b):
+                rid, size = struct.unpack("<IQ", b[pos:pos + 12])
+                pos += 12
+                recs[rid] = b[pos:pos + size]
+                pos += size
+            name = recs.get(54, b"").decode("utf-8", "replace").strip("\0 ")
+            if name:
+                path = recs.get(55, b"").decode("utf-8", "replace").strip("\0 ")
+                third.append({"name": name, "vendor": recs.get(56, b"").decode("utf-8", "replace").strip("\0 "),
+                              "format": plugin_format(path)})
+            last = None
+    return third, sorted(native)
+
+
+def als_plugins(text):
+    """Third-party plugins a Live set uses, from each <PluginDesc>."""
+    out = []
+    for m in PLUGINDESC_RE.finditer(text):
+        block = m.group(1)
+        if "<Vst3PluginInfo" in block:
+            name, fmt = VALUE_RE("Name").search(block), "VST3"
+        elif "<AuPluginInfo" in block:
+            name, fmt = VALUE_RE("Name").search(block), "AU"
+        elif "<VstPluginInfo" in block:
+            name, fmt = VALUE_RE("PlugName").search(block), "VST2"
+        else:
+            continue
+        maker = VALUE_RE("Manufacturer").search(block)
+        if name and name.group(1):
+            out.append({"name": html.unescape(name.group(1)), "format": fmt,
+                        "vendor": html.unescape(maker.group(1)) if maker else ""})
+    return out
+
+
+def project_plugins(p):
+    """{"daw", "version", "plugins": [third-party], "native": [FL's own]} for one project, or None if unreadable."""
+    try:
+        if p.suffix.lower() == ".flp":
+            with open(long_path(p), "rb") as f:
+                data = f.read()
+            third, native = flp_plugins(data)
+            return {"daw": "FL Studio", "version": flp_samples(p)[0], "plugins": third, "native": native}
+        text, _ = read_als(p)
+        v = re.search(r'Creator="Ableton Live ([^"]+)"', text[:2000])
+        return {"daw": "Ableton Live", "version": v.group(1) if v else "", "plugins": als_plugins(text), "native": []}
+    except (ValueError, OSError, struct.error):
+        return None
+
+
+SHELL_MAKERS = {"waves": "waveshell"}   # one installed shell provides all of that maker's plugins
+
+
+def plugin_readiness(projects, installed):
+    """Which projects open with what's installed. projects: {path: project_plugins(...)}; installed: rows from the
+    plugin scan. Returns a dict for the report: missing plugins ordered by how many projects they hold back."""
+    have = set()
+    for r in installed:
+        have |= rs.match_keys(r.get("name", ""), r.get("vendor", ""), r.get("key", ""))
+    shells = {maker for maker, shell in SHELL_MAKERS.items() if any(k.startswith(shell) for k in have)}
+
+    def installed_already(pl):
+        if rs.match_keys(pl["name"], pl.get("vendor", "")) & have:
+            return True
+        return any(m in (pl.get("vendor") or "").lower() for m in shells)
+
+    missing, blocked, ready = {}, {}, []
+    versions, warnings = {}, set()
+    for path, info in projects.items():
+        if not info:
+            continue
+        v = info.get("version") or ""
+        if v:
+            best = versions.get(info["daw"])
+            nums = lambda x: [int(n) for n in re.findall(r"\d+", x)[:3]]
+            if best is None or nums(v) > nums(best[0]):
+                versions[info["daw"]] = (v, Path(path).name)
+        need = []
+        for pl in info["plugins"]:
+            if pl["format"] == "AU" and THIS_OS == "windows":
+                warnings.add(f"{pl['name']} was used as an AU (Mac-only) plugin in {Path(path).name}: install its VST3 "
+                             "version and swap it in.")
+            if not installed_already(pl):
+                key = min(rs.match_keys(pl["name"], pl.get("vendor", "")), key=len)
+                entry = missing.setdefault(key, {"name": pl["name"], "vendor": pl.get("vendor", ""), "projects": set()})
+                entry["vendor"] = entry["vendor"] or pl.get("vendor", "")
+                entry["projects"].add(path)
+                need.append(key)
+        if need:
+            blocked[path] = set(need)
+        else:
+            ready.append(path)
+    ranked = sorted(missing.values(), key=lambda e: (-len(e["projects"]), e["name"].lower()))
+    # walk the list in order: how many projects open after installing the first N plugins
+    unlocked, got, steps = 0, set(), []
+    keys_in_order = [min(rs.match_keys(e["name"], e["vendor"]), key=len) for e in ranked]
+    for key, e in zip(keys_in_order, ranked):
+        got.add(key)
+        now = sum(1 for need in blocked.values() if need <= got)
+        steps.append(now - unlocked)
+        unlocked = now
+    return {"total": sum(1 for i in projects.values() if i), "ready": sorted(ready), "blocked": blocked,
+            "missing": [dict(e, projects=sorted(e["projects"]), opens=n) for e, n in zip(ranked, steps)],
+            "versions": versions, "warnings": sorted(warnings)}
+
+
+def readiness_lines(r):
+    lines = [f"{len(r['ready'])} of {r['total']} projects have every plugin they use."]
+    if r["missing"]:
+        lines += ["", "Plugins to install, most useful first:"]
+        opened = len(r["ready"])
+        for e in r["missing"]:
+            opened += e["opens"]
+            who = f" by {e['vendor']}" if e["vendor"] else ""
+            n = len(e["projects"])
+            lines.append(f"  {e['name']}{who}: used in {n} project{'s' if n != 1 else ''}"
+                         + (f" -> {opened} of {r['total']} open" if e["opens"] else ""))
+    if r["versions"]:
+        lines += ["", "DAW versions your projects need (the newest one that saved them):"]
+        lines += [f"  {daw} {v} or newer (e.g. {name})" for daw, (v, name) in sorted(r["versions"].items())]
+    if r["warnings"]:
+        lines += ["", "Watch out:"] + [f"  {w}" for w in r["warnings"]]
+    return lines
+
+
+def cmd_plugins(args):
+    """Which plugins each project needs, and which of them this computer is missing (issue #70)."""
+    maps = load_pathmaps(None)
+    roots = project_search_roots(maps, args.folder)
+    print("Reading your projects...", flush=True)
+    projects = {str(p): project_plugins(p) for p in find_projects(roots, ".flp") + find_projects(roots, ".als")}
+    print("Scanning installed plugins...", flush=True)
+    r = plugin_readiness(projects, rs.scan(list(args.extra_dir)))
+    lines = [f"Freighter {__version__} plugin readiness, {dt.datetime.now():%Y-%m-%d %H:%M}", ""] + readiness_lines(r)
+    if r["blocked"]:
+        lines += ["", "Projects still waiting for plugins:"]
+        for path, need in sorted(r["blocked"].items()):
+            names = sorted(e["name"] for e in r["missing"] if path in e["projects"])
+            lines.append(f"  {Path(path).name}: {', '.join(names)}")
+    print("\n" + "\n".join(lines[2:]))
+    out = home() / "Music" / "Freighter" / "Reports"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "plugin-readiness.txt").write_text("\n".join(lines), encoding="utf-8")
+    print(f"\nFull list: {out / 'plugin-readiness.txt'}")
+    return 0
+
+
 def cmd_check_fl(args):
     """Report only: what fix-fl would repoint, and what's missing."""
     args.dry_run = True
@@ -2065,9 +2239,10 @@ MENU = """
   On the NEW computer
     5  Unpack a bundle from the drive
     6  Repair projects after unpacking
+    7  See which plugins my projects still need
 
   Tidy up
-    7  Sort my sample folders into one library (_Crate)
+    8  Sort my sample folders into one library (_Crate)
 
     q  Quit
 """
@@ -2111,7 +2286,7 @@ def interactive_menu():
     while True:
         print(MENU.format(version=__version__))
         try:
-            choice = input("  Choose 1-7 (or q): ").strip().lower()
+            choice = input("  Choose 1-8 (or q): ").strip().lower()
         except EOFError:   # nothing more to read (input closed): same as quitting
             return 0
         try:
@@ -2147,6 +2322,8 @@ def interactive_menu():
                 cmd_fix_ableton(argparse.Namespace(pathmap=None, folder=[], dry_run=False))
                 cmd_fix_fl(argparse.Namespace(pathmap=None, folder=[], include_backups=False, dry_run=False))
             elif choice == "7":
+                cmd_plugins(argparse.Namespace(folder=[], extra_dir=[]))
+            elif choice == "8":
                 import crate
                 folder = ask_path("  Drag a sample folder (or drum kit) into this window, then press Enter: ")
                 if folder:
@@ -2162,7 +2339,7 @@ def interactive_menu():
             elif choice in ("q", "quit", "exit", ""):
                 return 0
             else:
-                print("  Type a number from 1 to 7, or q to quit.")
+                print("  Type a number from 1 to 8, or q to quit.")
                 continue
         except SystemExit as e:  # commands exit with a message on problems; show it and keep the menu
             if e.code not in (None, 0):
@@ -2232,6 +2409,11 @@ def main():
     s.add_argument("--include-backups", action="store_true", help="also repair autosave/backup projects")
     s.add_argument("--dry-run", action="store_true", help="report only, change nothing")
     s.set_defaults(fn=cmd_fix_fl)
+
+    s = sub.add_parser("plugins", help="which plugins your projects need, and which this computer is missing")
+    s.add_argument("--folder", action="append", default=[], metavar="FOLDER", help="only look here")
+    s.add_argument("--extra-dir", action="append", default=[], metavar="FOLDER", help="also scan this plugin folder")
+    s.set_defaults(fn=cmd_plugins)
 
     s = sub.add_parser("check-fl", help="report moved and missing samples in FL Studio projects (changes nothing)")
     s.add_argument("--pathmap", metavar="FILE")

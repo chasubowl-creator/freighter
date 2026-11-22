@@ -437,7 +437,7 @@ function home() {
       card("manifest", "Scan this computer's plugins: what's installed, by which maker, and anything that looks wrong.",
         el("div", {class: "row"}, el("button", {class: "primary", onclick: plugins}, "Scan my plugins"))),
       card("crate", "Sort drum kits and sample packs into one library by genre, pack and sound type.",
-        soon("freighter menu → 7"))
+        soon("freighter menu → 8"))
     )
   );
 }

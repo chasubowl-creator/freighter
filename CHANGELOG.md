@@ -37,6 +37,17 @@ The first version with a number. Everything that exists so far:
 - Reports and rehearsals go to Music/Freighter; leftover rehearsals are never packed.
 - Ableton repairs are written safely; bundles from a newer Freighter are refused with a clear message.
 
+### Never a wrong result (milestone M1b)
+- Resuming a pack can no longer mix up folders; same-named folders land apart; bundles are checked as a whole.
+- Programs and app folders are never packed as samples; demo projects in sample packs don't pull in whole libraries.
+- A safety net checks that every sample a project uses is in the bundle; the rehearsal is stricter and compares contents.
+
+### Projects open by themselves (milestone M2b, in progress)
+- `fix-fl` repairs FL Studio projects by rewriting their sample paths (backups kept, nothing changed while FL is open).
+- Windows → Windows and Mac → Mac moves put folders back in the same places.
+- FL Studio's browser folders, user-data folder and recent projects are read and moved on purpose.
+- `freighter plugins` (menu option 7) shows which plugins your projects need and which to install first.
+
 ### Preview: Freighter in your web browser
 - `freighter app` opens a private local page with the move list and the plugin scan. More screens are coming.
 
