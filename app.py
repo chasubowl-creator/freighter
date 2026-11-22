@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import crate  # noqa: E402
 import freighter as rm  # noqa: E402
 import manifest as rs  # noqa: E402
 from freighter_version import __version__  # noqa: E402
@@ -225,12 +226,66 @@ def clean_params(kind, body):
             return None, "That isn't a Freighter bundle (it has no manifest.json)."
         return {"bundle": str(Path(b).expanduser()), "keep_together": bool(body.get("keep_together")),
                 "anyway": bool(body.get("anyway"))}, None
+    if kind in ("crate_preview", "crate_build"):
+        folders, by = body.get("folders"), body.get("by", "genre")
+        if not isinstance(folders, list) or not folders or len(folders) > 20 or \
+                not all(isinstance(f, str) and Path(f).expanduser().is_dir() for f in folders):
+            return None, "Choose one or more sample folders that exist."
+        if by not in ("genre", "type"):
+            return None, "bad request"
+        return {"folders": [str(Path(f).expanduser()) for f in folders], "by": by}, None
     if kind == "undo":
         host = body.get("host")
         if host is not None and (not isinstance(host, str) or "/" in host or "\\" in host or host in (".", "..")):
             return None, "bad request"
         return {"host": host}, None
     return {}, None
+
+
+LAST_CRATE = {}   # the last Crate plan, so building right after a preview doesn't read every file again
+
+
+def crate_items(folders):
+    key = tuple(folders)
+    if LAST_CRATE.get("key") != key:
+        LAST_CRATE.update(key=key, items=crate.plan(list(folders)))
+    return LAST_CRATE["items"]
+
+
+def job_crate_preview(job):
+    """How _Crate would sort these sample folders (issue #34). Changes nothing."""
+    LAST_CRATE.clear()
+    items = crate_items(job.params["folders"])
+    library = crate.default_library()
+    job.files["report"] = crate.write_report(items, library.parent / "Freighter Crate preview", "_Crate preview")
+    unique = [it for it in items if not it["duplicate_of"]]
+    genres, types = {}, {}
+    for it in unique:
+        g = genres.setdefault(it.get("genre") or "Other", {"packs": set(), "sounds": 0})
+        g["packs"].add(it["pack"])
+        g["sounds"] += 1
+        top = it["category"].split("/")[0]
+        types[top] = types.get(top, 0) + 1
+    return {"files": len(items), "unique": len(unique), "duplicates": len(items) - len(unique),
+            "guessed": sum(1 for it in unique if it["how"].startswith("sound:")),
+            "genres": sorted(([g, len(v["packs"]), v["sounds"]] for g, v in genres.items()), key=lambda x: -x[2]),
+            "types": sorted(types.items(), key=lambda x: -x[1]), "library": str(library),
+            "library_exists": library.exists()}
+
+
+def job_crate_build(job):
+    """Build the sorted library out of links (no extra space; originals untouched)."""
+    items = crate_items(job.params["folders"])
+    library = crate.default_library()
+    made, links, copies, skipped = crate.build(items, library, False, job.params["by"])
+    crate.write_report(items, library, "_Crate library")
+    job.files["library"] = library
+    return {"made": made, "links": links, "copies": copies, "skipped": skipped, "library": str(library)}
+
+
+def job_crate_undo(job):
+    """Remove the library Crate built; originals are never touched."""
+    return {"removed": crate.undo(crate.default_library()), "library": str(crate.default_library())}
 
 
 def job_undo(job):
@@ -245,7 +300,8 @@ def job_repair(job):
 
 
 JOBS = {"move_list": job_move_list, "plugins": job_plugins, "pack": job_pack, "unpack": job_unpack,
-        "readiness": job_readiness, "repair": job_repair, "undo": job_undo}
+        "readiness": job_readiness, "repair": job_repair, "undo": job_undo,
+        "crate_preview": job_crate_preview, "crate_build": job_crate_build, "crate_undo": job_crate_undo}
 
 
 # --------------------------------------------------------------------------- server
@@ -326,6 +382,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.app.last_seen = time.time()
         if url.path == "/api/ping":
             return self.send(200, {"version": __version__, "busy": self.app.busy()})
+        if url.path == "/api/crate-suggestions":
+            # FL's browser folders are where producers keep their sample libraries
+            return self.send(200, {"folders": [f for f in rm.fl_settings()["search_paths"] if Path(f).is_dir()],
+                                   "library_exists": crate.default_library().exists()})
         if url.path == "/api/drives":
             return self.send(200, {"drives": rm.list_drives(), "os": rm.THIS_OS})
         if url.path.startswith("/api/jobs/"):

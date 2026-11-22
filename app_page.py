@@ -172,8 +172,8 @@ function home() {
       card("plugins", "See which plugins your projects need, and which to install first on this computer.",
         el("button", {class: "primary", onclick: readiness}, "Check my plugins"),
         el("button", {onclick: pluginReport}, "Full plugin report")),
-      card("crate", "Sort drum kits and sample packs into one library by genre, pack and sound type.",
-        el("div", {class: "soon"}, "Coming to this window soon. For now: ", el("span", {class: "mono"}, "freighter menu → 8")))
+      card("crate", "Sort drum kits and sample packs into one library by genre, pack and sound type. Takes no extra space.",
+        el("button", {class: "primary", onclick: crateStart}, "Sort my samples"))
     )
   );
 }
@@ -502,6 +502,87 @@ function pluginReport() {
       el("h2", {}, "By maker"),
       el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Maker"), el("th", {class: "num"}, "Plugins"))), el("tbody", {}, makers)));
   });
+}
+
+/* ---------- crate ---------- */
+const crateState = {folders: [], by: "genre"};
+
+async function crateStart() {
+  const list = el("ul", {class: "plain"});
+  const suggest = el("div", {class: "row"});
+  const input = el("input", {type: "text", class: "mono", placeholder: "Type a sample folder, e.g. D:\\Samples or /Users/you/Desktop/DrumKits"});
+  const msg = el("div", {class: "muted small"});
+  const go = el("button", {class: "primary", onclick: cratePreview}, "Preview");
+  const redraw = () => {
+    list.replaceChildren(...crateState.folders.map(f => el("li", {class: "row"}, el("span", {class: "mono", style: "flex:1"}, f),
+      el("button", {class: "small", onclick: () => { crateState.folders = crateState.folders.filter(x => x !== f); redraw(); }}, "Remove"))));
+    if (!crateState.folders.length) list.replaceChildren(el("li", {class: "muted"}, "No folders yet."));
+    go.disabled = !crateState.folders.length;
+  };
+  const add = (f) => { if (f && !crateState.folders.includes(f)) crateState.folders.push(f); redraw(); };
+  show(backTo(home), el("h1", {}, "Sort your samples"),
+    el("p", {class: "sub"}, "Crate builds one tidy library out of your drum kits and sample packs, sorted by genre, pack and sound. It's made of links, so it takes no extra space, and your original folders stay exactly as they are."),
+    el("h2", {}, "Folders to sort"), list, suggest,
+    el("div", {class: "row"}, input, el("button", {onclick: async () => {
+      msg.textContent = "";
+      try { const f = await api("/api/folder", {path: input.value}); f.exists ? (add(f.path), input.value = "") : msg.textContent = "That folder doesn't exist."; }
+      catch (e) { msg.textContent = e.message; }
+    }}, "Add")), msg,
+    el("h2", {}, "Sort by"),
+    el("label", {class: "radio"}, el("input", {type: "radio", name: "by", checked: crateState.by === "genre", onchange: () => { crateState.by = "genre"; }}),
+      " Genre, then pack, then sound ", el("span", {class: "muted"}, "(House/UNDRGRND Deep Grooves/Drums/Kicks)")),
+    el("label", {class: "radio"}, el("input", {type: "radio", name: "by", checked: crateState.by === "type", onchange: () => { crateState.by = "type"; }}),
+      " Sound only, every pack mixed ", el("span", {class: "muted"}, "(Drums/Kicks)")),
+    el("div", {class: "row actions"}, go));
+  redraw();
+  try {
+    const s = await api("/api/crate-suggestions");
+    const fresh = s.folders.filter(f => !crateState.folders.includes(f));
+    if (fresh.length) suggest.replaceChildren(el("span", {class: "muted small"}, "FL Studio's browser folders:"),
+      ...fresh.map(f => el("button", {class: "small", onclick: (e) => { add(f); e.target.remove(); }}, "+ " + f.replace(/[\\/]+$/, "").split(/[\\/]/).pop())));
+  } catch (e) {}
+}
+
+function cratePreview() {
+  runJob("crate_preview", {folders: crateState.folders, by: crateState.by},
+    [backTo(crateStart), el("h1", {}, "Sorting preview"), el("p", {class: "sub"}, "Reading every sound, finding duplicates and working out genres. Nothing is changed.")],
+    (r, id) => show(backTo(crateStart), el("h1", {}, "Sorting preview"),
+      el("div", {class: "panel row"},
+        el("div", {style: "flex:1"}, el("div", {class: "big"}, r.unique.toLocaleString()),
+          el("div", {class: "muted"}, `sounds to sort (${plural(r.duplicates, "duplicate")} skipped, ${r.guessed.toLocaleString()} sorted by how they sound)`)),
+        el("button", {onclick: () => api(`/api/jobs/${id}/open`, {file: "report"})}, "Open the full preview")),
+      r.library_exists ? note("", "You already have a Crate library", el("div", {class: "muted"}, "Building adds these sounds to it; nothing in it is removed.")) : null,
+      el("h2", {}, "By genre"),
+      el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Genre"), el("th", {class: "num"}, "Packs"), el("th", {class: "num"}, "Sounds"))),
+        el("tbody", {}, r.genres.map(([g, p, n]) => el("tr", {}, el("td", {}, g), el("td", {class: "num"}, p), el("td", {class: "num"}, n.toLocaleString()))))),
+      el("p", {class: "muted"}, "Genres come from pack names; packs whose names don't say get a guess from their loops' tempo, marked in the full preview."),
+      el("div", {class: "row actions"}, el("button", {class: "primary", onclick: crateBuild}, "Build the library")),
+      el("p", {class: "muted small"}, "Goes to ", el("span", {class: "mono"}, r.library), ".")),
+    {noCancel: true});
+}
+
+function crateBuild() {
+  runJob("crate_build", {folders: crateState.folders, by: crateState.by},
+    [el("h1", {}, "Building your library"), el("p", {class: "sub"}, "Making links to your sounds, sorted. Your originals aren't moved.")],
+    (r, id) => show(backTo(home), el("h1", {}, "Your library is ready"),
+      el("div", {class: "panel row"},
+        el("div", {style: "flex:1"}, el("div", {class: "big"}, r.made.toLocaleString()),
+          el("div", {class: "muted"}, `sounds added (${plural(r.skipped, "duplicate")} skipped)` +
+            (r.copies ? `; ${plural(r.copies, "file")} had to be copied because ${r.copies === 1 ? "it's" : "they're"} on another drive` : "; no extra space used"))),
+        el("button", {class: "primary", onclick: () => api(`/api/jobs/${id}/open`, {file: "library"})}, "Open the library")),
+      el("p", {class: "muted mono small"}, r.library),
+      el("p", {class: "muted"}, "Tip: add this folder to FL Studio's browser (Options → File settings → Browser extra search folders) or Ableton's Places."),
+      el("h2", {}, "Changed your mind?"),
+      el("p", {class: "muted"}, "Removing the library never touches your original sample folders."),
+      el("div", {class: "row"}, el("button", {onclick: crateUndo}, "Remove the library"))),
+    {noCancel: true});
+}
+
+function crateUndo() {
+  if (!confirm("Remove the Crate library? Your original sample folders aren't touched.")) return;
+  runJob("crate_undo", {}, [el("h1", {}, "Removing the library")], (r) =>
+    show(backTo(home), el("h1", {}, "Library removed"), el("p", {class: "muted"}, `${plural(r.removed, "file")} removed. Your original folders are unchanged.`),
+      el("div", {class: "row actions"}, el("button", {onclick: home}, "Home"))), {noCancel: true});
 }
 
 home();

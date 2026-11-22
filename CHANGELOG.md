@@ -56,6 +56,8 @@ The first version with a number. Everything that exists so far:
     repair in one go, then see where everything went and which FL browser folders to add back.
   - **Plugins:** which plugins your projects need, most useful first, with each maker's website; tick them off and
     check again.
+  - **Crate:** pick sample folders (FL's browser folders are suggested), preview the sort by genre, build the library
+    of links, open it, or remove it.
 - Unpacking can be previewed (`unpack --preview`, and on the app's confirm screen) and undone (`undo-unpack`, and a
   button on the app's results page): undo removes exactly what the unpack created and puts repaired projects back,
   keeping anything changed since. Unpacking a newer bundle replaces files an earlier unpack put there, unless you

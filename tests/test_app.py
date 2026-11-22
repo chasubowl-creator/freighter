@@ -257,6 +257,29 @@ class Server(unittest.TestCase):
         self.assertFalse(beat.exists())
         self.assertFalse((new / "Desktop" / "Kits").exists())
 
+    def test_crate_preview_build_and_remove(self):
+        """Issue #34: Crate in the app. The library is links; the originals stay."""
+        kits = self.tmp / "Samples" / "UNDRGRND Sounds - Deep House Kit"
+        (kits / "Kicks").mkdir(parents=True)
+        (kits / "Kicks" / "kick.wav").write_bytes(b"k" * 100)
+        (kits / "Kicks" / "kick copy.wav").write_bytes(b"k" * 100)       # a duplicate
+        self.assertEqual(self.request("POST", "/api/jobs", {"kind": "crate_preview", "folders": []})[0], 400)
+        with as_home(self.tmp / "home"):
+            _, started = self.request("POST", "/api/jobs", {"kind": "crate_preview", "folders": [str(self.tmp / "Samples")]})
+            preview = self.wait(started["id"])
+            self.assertEqual(preview["state"], "done", preview.get("error"))
+            self.assertEqual((preview["result"]["unique"], preview["result"]["duplicates"]), (1, 1))
+            self.assertEqual(preview["result"]["genres"][0][0], "House")
+            _, started = self.request("POST", "/api/jobs", {"kind": "crate_build", "folders": [str(self.tmp / "Samples")]})
+            built = self.wait(started["id"])
+            self.assertEqual(built["result"]["made"], 1)
+            library = Path(built["result"]["library"])
+            self.assertTrue(list(library.rglob("kick*.wav")))
+            _, started = self.request("POST", "/api/jobs", {"kind": "crate_undo"})
+            self.assertEqual(self.wait(started["id"])["state"], "done")
+        self.assertFalse(library.exists())
+        self.assertTrue((kits / "Kicks" / "kick.wav").is_file(), "originals untouched")
+
     def test_drives_are_listed(self):
         status, d = self.request("GET", "/api/drives")
         self.assertEqual(status, 200)
