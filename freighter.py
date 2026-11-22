@@ -2897,9 +2897,14 @@ def cmd_rehearse(args):
                     lost.append(f"{p.name}: {r}")
 
         checked = totals["kept"] + totals["lost"]
+        old_live = sum(1 for u in unchecked if u.endswith("(Ableton (Live 10 or older))"))
+        not_checked = "" if not totals["unchecked"] else (
+            f" (+{totals['unchecked']} Ableton files saved by Live 10 or older, often demo sets and racks that came "
+            "with sample packs: Freighter can't read their sample paths yet)" if old_live == totals["unchecked"]
+            else f" (+{totals['unchecked']} that can't be checked automatically)")
         lines = [
             f"Freighter {__version__} rehearsal, {dt.datetime.now():%Y-%m-%d %H:%M}",
-            f"Projects checked: {totals['projects']} (+{totals['unchecked']} that can't be checked automatically)",
+            f"Projects checked: {totals['projects']}{not_checked}",
             f"Samples that worked before the move: {checked}",
             f"  still found after the move: {totals['kept']}",
             f"  LOST in the move: {totals['lost']}",
@@ -2922,7 +2927,7 @@ def cmd_rehearse(args):
             print(f"Note: {len(already)} samples were already missing before the move (listed in {report}).")
         print(f"Rehearsal files: {base}  (delete this folder when you're done; your real files weren't touched)")
         LAST["rehearse"] = {"passed": not totals["lost"], "totals": totals, "lost": lost, "already": already,
-                            "unchecked": unchecked, "report": str(report), "folder": str(base)}
+                            "unchecked": unchecked, "old_live": old_live, "report": str(report), "folder": str(base)}
         return 0 if not totals["lost"] else 2
     finally:
         HIDE = None

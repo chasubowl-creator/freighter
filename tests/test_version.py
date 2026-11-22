@@ -2,12 +2,35 @@
 import re
 import subprocess
 import sys
+import tempfile
+import shutil
+import os
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from freighter_version import __version__  # noqa: E402
+
+
+# Tests never touch the real home folder: everything that would write to Music/Freighter (crash reports, repair
+# journals, reports) goes to a stand-in home for this run instead. Tests that need their own use as_home().
+_REAL_HOME_GUARD = None
+
+
+def setUpModule():
+    global _REAL_HOME_GUARD
+    _REAL_HOME_GUARD = (os.environ.get("FREIGHTER_HOME"), tempfile.mkdtemp(prefix="freighter-test-home-"))
+    os.environ["FREIGHTER_HOME"] = _REAL_HOME_GUARD[1]
+
+
+def tearDownModule():
+    old, stand_in = _REAL_HOME_GUARD
+    if old is None:
+        os.environ.pop("FREIGHTER_HOME", None)
+    else:
+        os.environ["FREIGHTER_HOME"] = old
+    shutil.rmtree(stand_in, ignore_errors=True)
 
 
 class Version(unittest.TestCase):

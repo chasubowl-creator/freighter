@@ -447,8 +447,10 @@ function rehearsed(r, id) {
   if (t.already) parts.push(note("", `${plural(t.already, "sample")} ${t.already === 1 ? "was" : "were"} already missing before the move`,
     el("div", {class: "muted"}, "Not something the move did. Fix them on this computer first, for example by plugging in the drive they were on."),
     list(r.already, t.already)));
-  if (t.unchecked) parts.push(note("", `${plural(t.unchecked, "project")} couldn't be checked automatically`,
-    el("div", {class: "muted"}, "For example Ableton projects from Live 10 or older. Open them after the real move to check."),
+  if (t.unchecked) parts.push(note("", `${plural(t.unchecked, "file")} couldn't be checked automatically`,
+    el("div", {class: "muted"}, r.old_live === t.unchecked
+      ? "They're Ableton sets and racks saved by Live 10 or older, which store sample paths in a way Freighter can't read yet. Most are demo files that came with sample packs. Open your own ones after the real move to check them."
+      : "For example Ableton projects saved by Live 10 or older. Open them after the real move to check them."),
     list(r.unchecked, t.unchecked)));
   parts.push(el("div", {class: "row"}, el("button", {onclick: () => api(`/api/jobs/${id}/open`, {file: "report"}).catch(() => {})}, "Open the full report"),
       el("span", {class: "muted mono small"}, r.report)),

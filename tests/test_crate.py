@@ -15,6 +15,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import crate  # noqa: E402
 
 
+# Tests never touch the real home folder: everything that would write to Music/Freighter (crash reports, repair
+# journals, reports) goes to a stand-in home for this run instead. Tests that need their own use as_home().
+_REAL_HOME_GUARD = None
+
+
+def setUpModule():
+    global _REAL_HOME_GUARD
+    _REAL_HOME_GUARD = (os.environ.get("FREIGHTER_HOME"), tempfile.mkdtemp(prefix="freighter-test-home-"))
+    os.environ["FREIGHTER_HOME"] = _REAL_HOME_GUARD[1]
+
+
+def tearDownModule():
+    old, stand_in = _REAL_HOME_GUARD
+    if old is None:
+        os.environ.pop("FREIGHTER_HOME", None)
+    else:
+        os.environ["FREIGHTER_HOME"] = old
+    shutil.rmtree(stand_in, ignore_errors=True)
+
+
 def write(p, data=b"x"):
     p = Path(p)
     p.parent.mkdir(parents=True, exist_ok=True)
