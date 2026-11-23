@@ -29,8 +29,11 @@ New Netlify sites have form collection switched off.
 
 ## 4. Read your results
 
-**Forms → waitlist → Download as CSV.** The columns that matter for the demand test:
-- `daw`: which DAWs to support first
+**Forms → waitlist → Download as CSV.** The form asks two things, so two columns matter for the demand test:
+- `email`: how many people signed up, and who to write to when the public beta opens (issue #49)
+- `daw`: which DAWs people use (FL Studio, Ableton Live, Other; one person can tick several). Count each one:
+  the FL Studio and Ableton split says which to test hardest, and lots of "Other" makes the case for more DAWs
+  after 1.0 (issue #54)
 
 Rule of thumb: **200+ emails** means there's real demand for a 1.0.
 
@@ -48,4 +51,5 @@ Deploys tab again. Sign-ups already collected stay put.
 ## Later: your own domain
 
 Buy a domain (about $10–15/year, e.g. at Namecheap or Cloudflare), then in Netlify:
-**Domain management → Add a domain**, and follow its steps. Pick the product name first.
+**Domain management → Add a domain**, and follow its steps. The names are picked (the product is Freighter, the
+company Samplistics); check them and choose the domain in issue #47 before you buy.

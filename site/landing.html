@@ -721,12 +721,12 @@ const FORM_ENDPOINT = "";
           });
       if (!res.ok) throw new Error(String(res.status));
       form.reset();
-      show("You're on board. We'll email you when the beta opens.", true);
+      show("You're on board. We'll email you when the public beta opens.", true);
     } catch (err) {
       show("That didn't go through. Check your connection and try again.");
     } finally {
       btn.disabled = false;
-      btn.textContent = "Join the beta list";
+      btn.textContent = "Join the beta";
     }
   });
 })();
