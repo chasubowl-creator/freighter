@@ -12,8 +12,8 @@ into `Music\Freighter` in your user folder, which you can delete at the end. No 
    downloaded, choose **Keep**.
 3. In Downloads, right-click **freighter-windows.zip** → **Extract All… → Extract**.
 4. Move the extracted **freighter-windows** folder to your **Desktop**. Inside are `freighter.exe` (the mover), `manifest.exe`
-   (the plugin list), `crate.exe` (the sample sorter) and this guide. Always run them from the extracted
-   folder, not from inside the zip.
+   (the plugin list), `crate.exe` (the sample sorter), `START HERE.txt` and this guide. Always run them from the
+   extracted folder, not from inside the zip.
 
 ## Step 2: Open it (1 min)
 
@@ -79,12 +79,17 @@ below: `freighter.exe rehearse --to E:\`)
 `2024-03 to 2026-03`. Only the projects saved in that time come, with the whole kits they use (never a whole
 library). Note how much smaller the total gets.
 
-## Optional: try the new app window (5 min)
+## Optional: try the app window (5 min)
 
-Type **9** and press Enter. Freighter opens in your web browser. Choose **Start packing** to see the same list as
-Step 4 with tick boxes, or **Check my plugins**. **Rehearse first** runs the same rehearsal as Step 5, with a
-results page; you don't need to run it twice. You don't need to pack anything; close the tab and the window when
-you're done. Screenshots of anything confusing are very welcome.
+Type **9** and press Enter. Freighter opens in your web browser: a `_freighter.exe` window over a photo of hills,
+with the little courier waiting on the hill (he carries crates while Freighter works). It only runs on your PC.
+- **Start packing** shows the same list as Step 4, with tick boxes. You don't need to pack anything.
+- **Check my plugins** shows **Plugins for the new computer**: the plugins that won't come along, by brand.
+  Open a few brands. Does each show the right app to install from (Native Access, Waves Central…), and are your
+  plugins under the right brand? Plugins under **Other makers** are ones Freighter doesn't know the brand of.
+- **Rehearse first** runs the same rehearsal as Step 5, with a results page; you don't need to run it twice.
+
+Close the tab and the window when you're done. Screenshots of anything confusing or ugly are very welcome.
 
 ## Step 6: Send the results back
 
@@ -106,6 +111,7 @@ Delete the **Rehearsal** folder in `Music\Freighter` (or `Freighter Rehearsal` o
 
 In the folder with freighter.exe, click the address bar, type `cmd`, press Enter, then for example:
 
+    freighter.exe selftest      (checks this copy of Freighter works; ends with "Self-check passed.")
     freighter.exe pack --list
     freighter.exe rehearse --to E:\
     freighter.exe rehearse --skip used-3fa2b1c9      (use an ID from the pack --list output)
