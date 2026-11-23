@@ -238,7 +238,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
         <div class="win-body">
           <span class="label">Free &middot; FL Studio &amp; Ableton &middot; Windows &amp; Mac</span>
           <h1>Move your studio to a new computer.</h1>
-          <p class="lead">Your projects, samples and presets come with you, and every project opens with its sounds.</p>
+          <p class="lead">Your projects, presets and samples come with you, and Freighter repairs the links between them.</p>
           <div class="actions">
             <a class="pill pill-cargo" href="#join">Join the beta</a>
             <a class="pill pill-ghost" href="#how">How it works</a>
@@ -246,7 +246,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
         </div>
       </div>
     </div>
-    <div class="ground" id="ground" role="img" aria-label="Across the rolling hills, a pixel-art courier carries crates from an old PC to FL Studio, Ableton Live, Logic Pro and a samples folder, walking over the ridges."></div>
+    <div class="ground" id="ground" role="img" aria-label="Across the rolling hills, a pixel-art courier carries crates from an old PC to FL Studio, Ableton Live, a plugins folder and a samples folder, walking over the ridges."></div>
     <span class="photo-credit">Photo: <a href="https://unsplash.com/photos/panorama-photography-of-green-hills-L3sh5N6Lqzo" rel="noopener">Dawid Zawi&#322;a / Unsplash</a></span>
   </div>
 
@@ -262,9 +262,9 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
       <h2 id="how-h">Three steps.</h2>
     </div>
     <div class="steps">
-      <div class="step"><span class="u"><span class="us">_</span>pack</span><p>On your old computer, Freighter finds every project and every sample it uses, wherever it lives, and packs it all onto a drive.</p><span class="where">old computer</span></div>
-      <div class="step"><span class="u"><span class="us">_</span>unpack</span><p>On the new one, it puts everything where your DAW expects it.</p><span class="where">new computer</span></div>
-      <div class="step"><span class="u"><span class="us">_</span>repair</span><p>It reconnects your projects to their samples and gives you a list of plugins to reinstall.</p><span class="where">new computer</span></div>
+      <div class="step"><span class="u"><span class="us">_</span>pack</span><p>On your old computer, Freighter finds the projects in your Desktop, Documents and Music folders, every sample they use wherever it lives, and your presets. It packs them onto a drive and checks every file it copies.</p><span class="where">old computer</span></div>
+      <div class="step"><span class="u"><span class="us">_</span>unpack</span><p>On the new one, it puts your files back where they were (or in Music/Freighter, when you switch between Windows and Mac).</p><span class="where">new computer</span></div>
+      <div class="step"><span class="u"><span class="us">_</span>repair</span><p>It repairs your FL Studio and Ableton Live 11&ndash;12 projects so they find their samples, keeping a backup of each, and gives you a checklist of the plugins it couldn't bring.</p><span class="where">new computer</span></div>
     </div>
   </section>
 
@@ -300,8 +300,8 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
   <section class="wrap" id="faq" aria-labelledby="faq-h">
     <div class="sec-head"><span class="label">_faq</span><h2 id="faq-h">Questions</h2></div>
     <div class="faq">
-      <details><summary>Does it copy my plugins?</summary><p>No. Plugin licenses are tied to each computer, so you reinstall them from the maker. Freighter tells you exactly which ones, and flags tampered copies.</p></details>
-      <details><summary>Is my music uploaded anywhere?</summary><p>No. Everything stays on your computers and your own drive.</p></details>
+      <details><summary>Does it copy my plugins?</summary><p>Some of them. When you move Windows to Windows or Mac to Mac, plugins that are only files (most free and indie ones) come along and go back in their plugin folders. The rest install from their maker's app, like Native Access or Waves Central, and Freighter gives you a checklist of them by brand.</p><p>Every copied plugin is checked for malware. One that was changed after its maker signed it is never copied. On Windows, Microsoft Defender scans the rest on both computers; on a Mac, macOS checks each one the first time your DAW loads it.</p></details>
+      <details><summary>Is my music uploaded anywhere?</summary><p>No. Everything stays on your computers and your own drive. Freighter only goes online when you click Check for updates or a link.</p></details>
       <details><summary>What does it cost?</summary><p>Nothing. Freighter is free.</p></details>
     </div>
   </section>
@@ -345,6 +345,9 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
     ["...kpppk....", "...kp.pk....", "...kk.kk...."],
   ];
   const BOX = ["oooooooo", "oLLttLLo", "oOOttOOo", "oOOttOOo", "oOOttOOo", "oooooooo"];
+  const KNOB = ["................", ".....kkkkkk.....", "...kkBBBBBBkk...", "..kBBbbbbbbBBk..", "..kBbbbcbbbbBk..",
+    ".kBbbbbcbbbbbBk.", ".kBbbbbcbbbbbBk.", ".kBbbbbcbbbbbBk.", ".kBbbbbbbbbbbBk.", ".kBbbbbbbbbbbBk.", "..kBbbbbbbbbBk..",
+    "..kBBbbbbbbBBk..", "...kkBBBBBBkk...", ".....kkkkkk.....", "......kkkk......", "....kkkkkkkk...."];   // the app's plugins icon
 
   function sprite(rows, x, y, flip) {
     const w = rows[0].length;
@@ -376,11 +379,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
       const cols = ["#e3b13a", "#6fb6d9", "#e05a5a", "#7ac46b", "#26272b", "#e3b13a", "#26272b", "#6fb6d9", "#e05a5a"];
       cols.forEach((c, i) => r(x + 3 + (i % 3) * 4, y + 3 + Math.floor(i / 3) * 4, 3, 3, c));
     },
-    logic(x, y) {
-      r(x + 1, y + 1, 14, 14, "#1b1c20"); r(x + 2, y + 2, 12, 12, "#c9ced6"); r(x + 2, y + 2, 12, 2, "#e6e9ee");
-      const h = [2, 4, 7, 3, 6, 8, 4, 2, 5, 3];
-      h.forEach((v, i) => r(x + 3 + i, y + 8 - Math.floor(v / 2), 1, v, "#1f8a8a"));
-    },
+    plugins(x, y) { sprite(KNOB, x, y); },
     samples(x, y) {
       r(x + 1, y + 3, 6, 2, "#1b1c20"); r(x + 1, y + 4, 14, 11, "#1b1c20"); r(x + 2, y + 5, 12, 9, "#f4c542");
       r(x + 2, y + 4, 5, 1, "#f4c542"); r(x + 2, y + 5, 12, 1, "#ffe08a");
@@ -414,11 +413,11 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
     wide: {
       pts: [[2330,1115,1],[2220,1135,1],[2080,1140,1],[1900,1120,1],[1750,1060,1],[1800,960,1],[1850,906,1],
             [1770,960,0],[1700,835,0],[1900,700,0],[2080,560,0],[2200,488,0]],
-      stops: [[0,"pc","Old PC"],[2,"fl","FL Studio"],[4,"live","Ableton Live"],[9,"logic","Logic Pro"],[11,"samples","Samples"]],
+      stops: [[0,"pc","Old PC"],[2,"fl","FL Studio"],[4,"live","Ableton Live"],[9,"plugins","Plugins"],[11,"samples","Samples"]],
     },
     narrow: {
       pts: [[2330,1110,1],[2190,1140,1],[2040,1150,1],[1900,1175,1],[1760,1200,1],[1720,1110,1],[1800,1030,1]],
-      stops: [[0,"pc","Old PC"],[2,"fl","FL Studio"],[4,"live","Ableton Live"],[6,"logic","Logic Pro"]],
+      stops: [[0,"pc","Old PC"],[2,"fl","FL Studio"],[4,"live","Ableton Live"],[6,"plugins","Plugins"]],
     },
   };
   // y of a crest at photo x, read off its measured points
