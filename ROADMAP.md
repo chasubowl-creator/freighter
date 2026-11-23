@@ -135,11 +135,11 @@ Tick the box here when the issue closes.
 
 *about 3–5 days.* Honest, private, live site with a download button, then the public beta and 1.0.
 
-- [ ] Privacy note and self-hosted fonts (#42) · S · Claude
-- [ ] Back up or remove the "Unsubscribe anytime" promise (#43) · S · Claude
-- [ ] Download button, GitHub and contact links (#44) · S · Claude
-- [ ] Make the page's claims match what the app does (#45) · S · Claude
-- [ ] Small site copy fixes (#46) · S · Claude
+- [x] Privacy note and self-hosted fonts (#42) · S · Claude
+- [x] Back up or remove the "Unsubscribe anytime" promise (#43) · S · Claude
+- [x] Download button, GitHub and contact links (#44) · S · Claude
+- [x] Make the page's claims match what the app does (#45) · S · Claude
+- [x] Small site copy fixes (#46) · S · Claude
 - [ ] Lock in the Samplistics name and domain (#47) · S · You (Claude updates the site and app)
 - [ ] Put the site live on Netlify (#48) · S · You
 - [ ] Beta launch: email the waitlist and post to producer communities (#49) · M · You (Claude drafts)
