@@ -5,13 +5,21 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Freighter</title>
 <meta name="description" content="Move your music studio to a new computer. Projects, samples and presets come with you. Free, for FL Studio and Ableton on Windows and Mac.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
 /* Layout: dark-first product page. Big confident type and a stat row up top, mono "_names" for
    every product and section, cargo-manifest panels as the one recurring object,
    bright blue as Freighter's product colour. Single dark look by design. */
+
+/* Fonts are served with the page (the same files as the app, licences in assets/fonts/OFL-*.txt), so the page asks
+   no other site for anything. Sora 600 is drawn with the 700 file and JetBrains Mono 500 with the 400 file. */
+@font-face{font-family:"Sora";font-weight:600 700;font-display:swap;src:url(assets/fonts/sora-700.woff2) format("woff2")}
+@font-face{font-family:"Sora";font-weight:800;font-display:swap;src:url(assets/fonts/sora-800.woff2) format("woff2")}
+@font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(assets/fonts/inter-400.woff2) format("woff2")}
+@font-face{font-family:"Inter";font-weight:500;font-display:swap;src:url(assets/fonts/inter-500.woff2) format("woff2")}
+@font-face{font-family:"Inter";font-weight:600;font-display:swap;src:url(assets/fonts/inter-600.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400 500;font-display:swap;src:url(assets/fonts/jetbrains-mono-400.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:700;font-display:swap;src:url(assets/fonts/jetbrains-mono-700.woff2) format("woff2")}
+
 :root{
   --bg:#0a0b0d;
   --bg-2:#111317;
@@ -198,9 +206,14 @@ summary::-webkit-details-marker{display:none}
 summary::after{content:"+";font-family:var(--font-mono);color:var(--cargo);font-size:22px;line-height:1}
 details[open] summary::after{content:"\2212"}
 details p{margin-top:10px;color:var(--muted)}
+#privacy{padding-top:0}
+#privacy small{margin-top:2px}
 
 footer{border-top:1px solid var(--line);padding-block:36px;color:var(--dim);font-size:14px}
 footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
+footer nav{display:flex;flex-wrap:wrap;gap:6px 20px}
+footer nav a{color:var(--muted);text-decoration:none}
+footer nav a:hover{color:var(--ink)}
 
 @media (max-width:960px){
   .join,.mani-grid{grid-template-columns:minmax(0,1fr)}
@@ -299,7 +312,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
         </fieldset>
         <button class="pill pill-cargo" id="submit" type="submit" style="align-self:flex-start">Join the beta</button>
         <div id="form-msg" class="form-msg" role="status" hidden></div>
-        <p class="fine">Only Freighter news. Unsubscribe anytime.</p>
+        <p class="fine">Only Freighter news. Unsubscribe anytime. <a href="#privacy">Privacy</a></p>
       </form>
     </div>
   </section>
@@ -312,11 +325,21 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
       <details><summary>What does it cost?</summary><p>Nothing. Freighter is free.</p></details>
     </div>
   </section>
+
+  <section class="wrap" id="privacy" aria-labelledby="privacy-h">
+    <div class="sec-head"><span class="label">_privacy</span><h2 id="privacy-h">Privacy</h2></div>
+    <ul class="ticks">
+      <li><span class="mark ok" aria-hidden="true">&check;</span><span>The sign-up form keeps your email and the DAWs you tick. Nothing else.<small>Netlify, which hosts this page, stores the list. It's used only to email you Freighter news.</small></span></li>
+      <li><span class="mark ok" aria-hidden="true">&check;</span><span>No tracking.<small>No cookies, analytics or ads. The fonts and the photo come from this site, not from Google or anyone else.</small></span></li>
+      <li><span class="mark ok" aria-hidden="true">&check;</span><span>Deleted when you ask.<small>Reply to any email from us and your address is deleted.</small></span></li>
+    </ul>
+  </section>
 </main>
 
 <footer>
   <div class="wrap">
     <span class="mono">_freighter &middot; beta</span>
+    <nav aria-label="More"><a href="#privacy">Privacy</a></nav>
     <span>Made by a producer, for producers moving computers.</span>
   </div>
 </footer>
