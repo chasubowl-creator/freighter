@@ -12,7 +12,7 @@ Mac, Disk Utility → Erase → ExFAT. Formatting erases the drive.
 ## 1. Get Freighter on both computers
 
 From **https://github.com/chasubowl-creator/freighter/releases**, download **freighter-windows.zip** (or
-**freighter-mac.zip** for a Mac) from the newest release. No sign-in needed. Unzip it (on
+**freighter-mac.zip** for an Apple Silicon Mac, **freighter-mac-intel.zip** for an Intel Mac) from the newest release. No sign-in needed. Unzip it (on
 Windows: right-click → Extract All; don't run it from inside the zip). You get `freighter` (the mover),
 `manifest` (the plugin list) and `crate` (the sample sorter). No other installs needed. Windows may say "Windows protected your PC": click **More info → Run anyway**. A Mac blocks it the first
 time: open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.

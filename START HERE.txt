@@ -7,7 +7,7 @@ projects use, and plugins that are only files. Nothing you do with it leaves you
 
 1. Unzip it
    Windows: right-click the zip, choose Extract All, then open the new folder.
-   Mac:     double-click the zip, then open the "freighter-mac" folder.
+   Mac:     double-click the zip, then open the new freighter-mac folder.
 
 2. Open Freighter
    Windows: double-click freighter.exe.

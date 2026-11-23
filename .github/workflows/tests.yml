@@ -47,6 +47,8 @@ jobs:
             name: windows
           - os: macos-latest
             name: mac
+          - os: macos-15-intel   # Intel Macs (issue #37): GitHub's last Intel image, supported into 2027
+            name: mac-intel
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +80,15 @@ jobs:
       # The built program checks itself (issue #83): its bundled photo and fonts, the app page, and a small move
       # with a plugin. On Windows the runner is an administrator, so a plugin really goes into Program Files and
       # Microsoft Defender really scans it.
+      - name: The Mac build is for the right chip, and signed (ad hoc, until Freighter has an Apple account)
+        if: startsWith(matrix.name, 'mac')
+        run: |
+          for t in freighter manifest crate; do
+            lipo -archs dist/$t
+            codesign --verify dist/$t
+          done
+          want=arm64; [ "${{ matrix.name }}" = "mac-intel" ] && want=x86_64
+          lipo -archs dist/freighter | grep -qw "$want"
       - name: Self-check of the built program
         shell: bash
         run: |
@@ -90,13 +101,17 @@ jobs:
           name: freighter-${{ matrix.name }}
           path: dist/
       # The download people get from a Release. Zipped here, because GitHub's own artifact zips drop the Mac
-      # programs' "executable" permission and they wouldn't start. The Mac zip holds one folder (Archive Utility
-      # unzips it as is); the Windows zip holds the files themselves, because Extract All already makes a folder.
+      # programs' "executable" permission and they wouldn't start. The Mac zip is made with ditto, the way
+      # Finder makes them, so the programs keep their permission to run and their signature; it holds one folder
+      # (Archive Utility unzips it as is). The Windows zip holds the files themselves, because Extract All
+      # already makes a folder.
       - name: Package the download (Mac)
-        if: matrix.name == 'mac'
+        if: startsWith(matrix.name, 'mac')
         run: |
-          mkdir -p pkg && cp -R dist pkg/freighter-mac
-          cd pkg && zip -r -X -q ../freighter-mac.zip freighter-mac
+          mkdir -p pkg && cp -R dist "pkg/freighter-${{ matrix.name }}"
+          ditto -c -k --sequesterRsrc --keepParent "pkg/freighter-${{ matrix.name }}" "freighter-${{ matrix.name }}.zip"
+          mkdir -p unzip-check && ditto -x -k "freighter-${{ matrix.name }}.zip" unzip-check
+          test -x "unzip-check/freighter-${{ matrix.name }}/freighter"
       - name: Package the download (Windows)
         if: matrix.name == 'windows'
         shell: pwsh
@@ -131,5 +146,5 @@ jobs:
           python3 .github/release_notes.py "$GITHUB_REF_NAME" > notes.md
           pre=""
           case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" freighter-windows.zip freighter-mac.zip $pre \
+          gh release create "$GITHUB_REF_NAME" freighter-windows.zip freighter-mac.zip freighter-mac-intel.zip $pre \
             --title "Freighter ${GITHUB_REF_NAME#v}" --notes-file notes.md

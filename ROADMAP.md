@@ -122,7 +122,7 @@ Tick the box here when the issue closes.
 
 - [x] Release builds on version tags (GitHub Releases) (#36) · M · Claude
 - [x] Self-check of the built program, run by CI on Windows and Mac (#83) · S · Claude
-- [ ] A Mac build that opens on every Mac (#37) · M · Claude
+- [x] A Mac build that opens on every Mac (#37: Apple Silicon and Intel; notarizing needs an Apple account) · M · Claude
 - [ ] Free Windows code signing (SignPath Foundation) (#38) · M · You apply, Claude wires CI
 - [x] Download and first-run instructions (#39) · S · Claude
 - [x] Check for updates button (#40) · S · Claude

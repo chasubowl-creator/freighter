@@ -135,6 +135,9 @@ The first version with a number. Everything that exists so far:
 - **First-run steps** (issue #39): every download has a `START HERE.txt` (unzip, get past "Windows protected your
   PC" or macOS's first-run block, open the menu or the app), and the README has the same steps plus what Freighter
   touches and what it never does.
+- **Intel Macs** (issue #37): releases now have `freighter-mac-intel.zip` next to the Apple Silicon download. Both
+  Mac zips are made the way Finder makes them, so the programs keep their permission to run; the build checks
+  each one is for the right chip and signed (ad hoc: notarizing needs an Apple developer account).
 
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account

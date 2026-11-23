@@ -27,9 +27,10 @@ def notes(tag):
         "- **Windows:** download **freighter-windows.zip**, right-click it, choose **Extract All**, then double-click "
         "**freighter.exe** in the extracted folder. If Windows says \"Windows protected your PC\", click "
         "**More info → Run anyway** (Freighter isn't code-signed yet).",
-        "- **Mac:** download **freighter-mac.zip**, double-click it to unzip, then double-click **freighter**. The "
-        "first time, macOS blocks it: open **System Settings → Privacy & Security**, scroll down and click "
-        "**Open Anyway**.",
+        "- **Mac:** download **freighter-mac.zip** for an Apple Silicon Mac (M1 or newer), or "
+        "**freighter-mac-intel.zip** for an Intel Mac (Apple menu → About This Mac: \"Chip\" means Apple Silicon, "
+        "\"Processor … Intel\" means Intel). Double-click it to unzip, then double-click **freighter**. The first time, "
+        "macOS blocks it: open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.",
         "",
         "If your browser warns that the file isn't commonly downloaded, choose **Keep**. Nothing to install and no "
         "Python needed. Each download holds `freighter` (the mover), `manifest` (the plugin list), `crate` (the "
