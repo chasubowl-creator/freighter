@@ -124,7 +124,7 @@ Tick the box here when the issue closes.
 - [x] Self-check of the built program, run by CI on Windows and Mac (#83) · S · Claude
 - [ ] A Mac build that opens on every Mac (#37) · M · Claude
 - [ ] Free Windows code signing (SignPath Foundation) (#38) · M · You apply, Claude wires CI
-- [ ] Download and first-run instructions (#39) · S · Claude
+- [x] Download and first-run instructions (#39) · S · Claude
 - [x] Check for updates button (#40) · S · Claude
 - [x] Feedback: issue templates and a "Report a problem" link (#41) · S · Claude
 

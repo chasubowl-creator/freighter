@@ -1,0 +1,35 @@
+_freighter: start here
+======================
+
+Freighter moves your FL Studio and Ableton studio to a new computer: projects, presets, every sample your
+projects use, and plugins that are only files. Nothing you do with it leaves your computer.
+
+
+1. Unzip it
+   Windows: right-click the zip, choose Extract All, then open the new folder.
+   Mac:     double-click the zip, then open the "freighter-mac" folder.
+
+2. Open Freighter
+   Windows: double-click freighter.exe.
+            If "Windows protected your PC" appears, click More info, then Run anyway.
+            (Freighter isn't code-signed yet, so Windows doesn't know it.)
+   Mac:     double-click freighter.
+            The first time, macOS says it can't open it. Open System Settings > Privacy & Security,
+            scroll down, click Open Anyway, then double-click freighter again.
+
+3. Use it
+   A window opens with a numbered menu: type a number and press Enter.
+   Type 9 to open Freighter in your web browser instead (a private page on your own computer).
+   Keep the window open while you use Freighter. Closing it stops Freighter.
+
+
+What's in this folder
+   freighter        moves your studio (start here)
+   manifest         lists the plugins on this computer
+   crate            sorts drum kits and sample packs into one library
+   WINDOWS-TEST.md  a step-by-step test, for test builds
+   CHANGELOG.md     what's new
+   LICENSE          free software (GPL-3.0)
+
+Something wrong or confusing?
+   Type r in the menu, or open https://github.com/chasubowl-creator/freighter/issues/new/choose

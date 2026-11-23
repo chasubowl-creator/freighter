@@ -8,7 +8,25 @@ through their maker's app, **_Manifest**, the free plugin scan, gives you a rein
 
 FL Studio and Ableton Live. Windows and Mac, in any direction. Free, and everything runs locally.
 
-## Try it
+## Install
+
+1. Download the newest zip from **[Releases](https://github.com/chasubowl-creator/freighter/releases)**: `freighter-windows.zip`,
+   or `freighter-mac.zip` (Apple Silicon) / `freighter-mac-intel.zip` (Intel Mac).
+2. Unzip it. Windows: right-click → **Extract All**. Mac: double-click.
+3. Open it.
+   - **Windows:** double-click `freighter.exe`. If "Windows protected your PC" appears, click **More info → Run anyway**
+     (Freighter isn't code-signed yet).
+   - **Mac:** double-click `freighter`. The first time, macOS blocks it: **System Settings → Privacy & Security**,
+     scroll down, **Open Anyway**, then double-click it again.
+4. A numbered menu opens; **9** opens the app in your browser. The same steps are in `START HERE.txt` inside the zip.
+
+**What Freighter touches:** it only reads your music folders and projects on the old computer, and writes only to the
+drive you pick. On the new computer it puts your files back where they were (or in `Music/Freighter`), repairs
+projects after keeping a backup of each, and puts copied plugins in their plugin folders (asking Windows first for
+Program Files). Everything it creates can be undone. Nothing is uploaded: it only goes online when you click
+"Check for updates" or a link.
+
+## Try it from source
 
     python3 manifest.py              # _Manifest: plugin report (use "py" on Windows)
     python3 freighter.py pack --list    # what a move would take, and how big

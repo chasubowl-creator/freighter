@@ -132,6 +132,9 @@ The first version with a number. Everything that exists so far:
 - **`freighter selftest`** (issue #83): checks a copy of Freighter works as built (its photo and fonts, the app
   page, and a small move with a plugin, then undo). The build runs it on Windows and Mac; on Windows it also
   puts a plugin into Program Files and back out, and times a Microsoft Defender scan.
+- **First-run steps** (issue #39): every download has a `START HERE.txt` (unzip, get past "Windows protected your
+  PC" or macOS's first-run block, open the menu or the app), and the README has the same steps plus what Freighter
+  touches and what it never does.
 
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account

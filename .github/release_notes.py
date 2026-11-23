@@ -33,7 +33,7 @@ def notes(tag):
         "",
         "If your browser warns that the file isn't commonly downloaded, choose **Keep**. Nothing to install and no "
         "Python needed. Each download holds `freighter` (the mover), `manifest` (the plugin list), `crate` (the "
-        "sample sorter), the test guide, the license and the changelog.",
+        "sample sorter), **START HERE.txt** with these steps, the test guide, the license and the changelog.",
         "",
         f"## What's in {base}",
         "",

@@ -82,9 +82,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.name }}" = "windows" ]; then ./dist/freighter selftest --program-files; else ./dist/freighter selftest; fi
-      - name: Add the Windows test guide, license and changelog
+      - name: Add the first-run steps, Windows test guide, license and changelog
         shell: bash
-        run: cp WINDOWS-TEST.md LICENSE CHANGELOG.md dist/
+        run: cp "START HERE.txt" WINDOWS-TEST.md LICENSE CHANGELOG.md dist/
       - uses: actions/upload-artifact@v4
         with:
           name: freighter-${{ matrix.name }}
