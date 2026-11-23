@@ -4677,7 +4677,10 @@ def cmd_selftest(args):
         repair_projects()
         moved_song = new / "Desktop" / "Selftest Project" / "Song.als"
         text = gz.decompress(moved_song.read_bytes()).decode("utf-8") if moved_song.is_file() else ""
-        check(html.escape(str(here)) in text, "the project was repaired to the moved sample")
+        points = [html.unescape(v) for v in re.findall(r'<Path Value="([^"]*)"', text)]
+        # the same file, however the path is spelled (Windows may give a temp folder's short name, RUNNER~1)
+        check(bool(points) and all(os.path.isfile(v) and os.path.samefile(v, here) for v in points),
+              f"the project was repaired to the moved sample ({points[0] if points else 'no sample path'})")
         r = undo_unpack()
         check(not (new / "Plugins" / "VST3" / plugin.name).exists() and not here.exists(), "undo removed what it put there")
         if pf_root:
