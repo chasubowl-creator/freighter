@@ -594,18 +594,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def send(self, code, body, ctype="application/json; charset=utf-8"):
+    def send(self, code, body, ctype="application/json; charset=utf-8", cache=False):
         data = body if isinstance(body, bytes) else (
             json.dumps(body) if ctype.startswith("application/json") else body).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; "
-                         "style-src 'unsafe-inline'; img-src data:; connect-src 'self'; frame-ancestors 'none'; "
+                         "style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+                         "frame-ancestors 'none'; "
                          "base-uri 'none'; form-action 'none'")
         self.end_headers()
         self.wfile.write(data)
@@ -631,6 +632,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             page = PAGE.replace("{{version}}", html.escape(rm.version_label())).replace(
                 "{{report}}", html.escape(rm.report_url(), quote=True))
             return self.send(200, page, "text/html; charset=utf-8")
+        if url.path.startswith("/assets/"):   # the photo and fonts, bundled with Freighter: never fetched online
+            data = asset(url.path[len("/assets/"):])
+            if data is None:
+                return self.send(404, {"error": "not found"})
+            return self.send(200, data, ASSETS[url.path[len("/assets/"):]], cache=True)
         if not url.path.startswith("/api/") or not self.api_ok():
             return self.send(403 if url.path.startswith("/api/") else 404, {"error": "forbidden"})
         self.app.last_seen = time.time()
@@ -730,6 +736,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.app.stopped.set()   # before answering, so whoever sees the answer sees Freighter stopping
             return self.send(200, {"ok": True})
         return self.send(404, {"error": "not found"})
+
+
+# the app's look (see assets/CREDITS.md): a photo and the website's fonts, served only from Freighter's own files
+ASSETS = {"hills.jpg": "image/jpeg", **{f"fonts/{n}.woff2": "font/woff2" for n in (
+    "sora-700", "sora-800", "inter-400", "inter-500", "inter-600", "jetbrains-mono-400", "jetbrains-mono-700")}}
+_ASSET_CACHE = {}
+
+
+def asset(name):
+    """One of the bundled files by its name in ASSETS (None for anything else): next to app.py, or inside the
+    built program."""
+    if name not in ASSETS:
+        return None
+    if name not in _ASSET_CACHE:
+        base = Path(getattr(sys, "_MEIPASS", "") or Path(__file__).resolve().parent) / "assets"
+        try:
+            _ASSET_CACHE[name] = (base / name).read_bytes()
+        except OSError:
+            return None
+    return _ASSET_CACHE[name]
 
 
 def serve(app=None, port=0):

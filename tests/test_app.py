@@ -617,3 +617,29 @@ class ChecklistApi(unittest.TestCase):
             self.assertEqual(status, 400)
             status, _ = self.request("POST", "/api/checklist", {"key": "massive", "state": "done"}, token=False)
             self.assertEqual(status, 403)
+
+
+class BundledLook(unittest.TestCase):
+    """The app's photo and fonts come from Freighter's own files, never from the internet."""
+    setUp, tearDown, request = Server.setUp, Server.tearDown, Server.request
+
+    def test_photo_and_fonts_are_served_from_freighter_itself(self):
+        for name, ctype in app.ASSETS.items():
+            data = app.asset(name)
+            self.assertTrue(data, name)
+            self.assertTrue(data[:4] in (b"wOF2", b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xe1", b"\xff\xd8\xff\xdb"), name)
+        c = http.client.HTTPConnection("127.0.0.1", self.app.port, timeout=10)
+        c.request("GET", "/assets/fonts/sora-800.woff2", headers={"Host": f"127.0.0.1:{self.app.port}"})
+        r = c.getresponse()
+        self.assertEqual((r.status, r.getheader("Content-Type")), (200, "font/woff2"))
+        self.assertIn("font-src 'self'", r.getheader("Content-Security-Policy"))
+        r.read()
+        for bad in ("/assets/../app.py", "/assets/app.py", "/assets/hills.jpg/../../freighter.py"):
+            c.request("GET", bad, headers={"Host": f"127.0.0.1:{self.app.port}"})
+            r = c.getresponse()
+            self.assertEqual(r.status, 404, bad)
+            r.read()
+
+    def test_page_names_where_the_photo_is_from(self):
+        self.assertIn("unsplash.com/photos/eNjvb3dAtnY", app.PAGE)
+        self.assertNotIn("https://fonts.", app.PAGE, "fonts are bundled, never fetched")

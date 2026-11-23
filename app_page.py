@@ -9,8 +9,8 @@ PAGE = r"""<!doctype html>
 <title>Freighter</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171a1f'/%3E%3Crect x='6' y='20' width='20' height='5' rx='2.5' fill='%233d8bff'/%3E%3C/svg%3E">
 <style>
-:root{--bg:#ffffff;--panel:#f4f7fd;--panel2:#e6edf9;--line:#c2d0e8;--ink:#14233c;--muted:#556683;--blue:#1c5bd6;
---blue2:#1648ae;--warn:#b86b00;--bad:#c4302b;--ok:#2c8a2c;--xp:#0b55d9;--edge:#7f9db9}
+:root{--bg:#121418;--panel:#171a20;--panel2:#1e2229;--line:#2a2f37;--line2:#363c46;--ink:#f1f2f4;--muted:#a1a7b1;
+--dim:#6f7682;--blue:#3d8bff;--blue2:#2f85ff;--fill:#1671f0;--warn:#f0b44b;--bad:#ff6b6b;--ok:#62d38f;color-scheme:dark}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
@@ -68,7 +68,7 @@ label.radio{display:block;margin:8px 0}.note details,.plugin details{margin-top:
 .brand{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:border-color .25s}
 .brand.open{border-color:color-mix(in srgb,var(--c) 45%,var(--line))}
 .bh{all:unset;box-sizing:border-box;display:grid;grid-template-columns:40px 1fr auto 14px;gap:12px;align-items:center;width:100%;padding:12px 14px;cursor:pointer}
-.bh:hover .bn{color:var(--blue2)}.bh:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;border-radius:12px}
+.bh:hover .bn{color:#fff}.bh:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;border-radius:12px}
 .tile{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:14px;letter-spacing:.3px;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);border:1px solid color-mix(in srgb,var(--c) 38%,transparent)}
 .bn{font-weight:650;transition:color .2s}.bs{font-size:12.5px;color:var(--muted)}
 .pill{font-size:12px;padding:3px 10px;border-radius:20px;background:var(--panel2);white-space:nowrap}.pill.ok{color:var(--ok)}
@@ -108,114 +108,87 @@ ul.checks{list-style:none;padding:0}ul.checks li{padding:4px 0}a{color:var(--blu
 ul.plain>li>.row{margin-top:6px}.stage{font-weight:600}.stage:empty{display:none}
 .choice,.mono.small{min-width:0;overflow-wrap:anywhere}
 @media (max-width:600px){h1{font-size:24px}.big{font-size:28px}}
-/* ---------- the Windows XP feel, kept clean: sky, hill, window, glossy controls ---------- */
-html,body{background:#3b80dc}
-body{font:14px/1.55 Tahoma,Verdana,"Segoe UI",Geneva,sans-serif;color:var(--ink);min-height:100vh}
-.scene{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;
-  background:linear-gradient(180deg,#1d5fcf 0%,#3c86e6 26%,#79b4f2 52%,#c3e0fb 72%,#e4f2ff 84%)}
-.scene .clouds{position:absolute;inset:0;width:100%;height:70%}
-.scene .hill{position:absolute;left:0;right:0;bottom:0;width:100%;height:36vh;min-height:190px}
-.mate{position:absolute;right:7vw;bottom:calc(9vh + 18px);width:78px;height:98px;transform-origin:50% 100%;animation:idle 3s ease-in-out infinite}
-@keyframes idle{50%{transform:translateY(-2px)}}
-body.busy .mate{animation:trot .5s ease-in-out infinite}
-@keyframes trot{50%{transform:translateY(-4px) rotate(-1.5deg)}}
-.mate .l1,.mate .l2{transform-box:fill-box;transform-origin:50% 0}
-body.busy .mate .l1{animation:step .5s ease-in-out infinite alternate}
-body.busy .mate .l2{animation:step .5s ease-in-out infinite alternate-reverse}
-@keyframes step{from{transform:rotate(14deg)}to{transform:rotate(-14deg)}}
-@media (prefers-reduced-motion:reduce){.mate,.mate *{animation:none!important}}
-.win{position:relative;z-index:1;max-width:1000px;margin:26px auto 150px;background:var(--bg);border:1px solid #0831d9;
-  border-top:0;border-radius:9px 9px 5px 5px;box-shadow:0 18px 50px rgba(8,34,92,.35),0 2px 0 rgba(255,255,255,.4) inset;overflow:hidden}
-header.titlebar{border:0;padding:7px 8px 7px 14px;gap:10px;color:#fff;
-  background:linear-gradient(180deg,#0a5ce0 0%,#3d8ef7 6%,#2a7af0 14%,#0d5fe6 45%,#0a52d4 88%,#0846c2 100%);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 -1px 0 rgba(0,0,0,.25)}
-.titlebar .logo{color:#fff;font-size:15px;text-shadow:1px 1px 0 rgba(0,0,0,.35)}.titlebar .logo b{color:#9fe36a}
-.titlebar .ver{color:#d6e5ff}.titlebar a.hdr{color:#e6efff}.titlebar a.hdr:hover{color:#fff;text-decoration:underline}
-.titlebar .crate{width:18px;height:16px;border-radius:2px;background:linear-gradient(#e0a560,#b67634);border:1px solid #7b4a1d;
-  box-shadow:inset 0 5px 0 -3px #8a5a2b,inset 0 -5px 0 -3px #8a5a2b;flex:none}
-#quit{background:linear-gradient(#f39a7a,#e2582f 45%,#c9401b);border:1px solid #fff;border-radius:4px;color:#fff;font-weight:bold;
-  padding:3px 12px;box-shadow:0 0 0 1px #9b2a0c;text-shadow:0 1px 0 rgba(0,0,0,.3)}
-#quit:hover{background:linear-gradient(#f7ad92,#ea6a43 45%,#d24a24)}
-main{padding:26px 26px 40px}
-h1{font-family:"Trebuchet MS","Segoe UI",Tahoma,sans-serif;color:#0f3fa8;font-size:28px;letter-spacing:-.2px}
-h2{font-family:"Trebuchet MS","Segoe UI",Tahoma,sans-serif;color:#1c4fb8;font-size:18px}
-button{border-radius:4px;border:1px solid #6f8fbf;background:linear-gradient(#ffffff 0%,#f1f5fc 55%,#dce6f5 100%);
-  color:var(--ink);padding:6px 14px;box-shadow:inset 0 1px 0 #fff;transition:box-shadow .15s}
-button:hover:not(:disabled){box-shadow:inset 0 0 0 1px #fde39a,0 0 0 1px #f2a733}
-button:active:not(:disabled){background:linear-gradient(#dce6f5,#f1f5fc)}
-button:focus-visible{outline:1px dotted #000;outline-offset:-4px}
-button.primary{background:linear-gradient(#6bcf64 0%,#43ad3f 48%,#33962f 52%,#2c8a29 100%);border-color:#1d6a1b;color:#fff;
-  font-weight:bold;text-shadow:0 1px 0 rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.45)}
-button.primary:hover:not(:disabled){background:linear-gradient(#7bdb73 0%,#4cba47 48%,#3aa235 52%,#30932c 100%);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 0 0 1px #f2a733}
-button.link{background:none;border:none;box-shadow:none!important;color:var(--blue);padding:0}button.link:hover{text-decoration:underline}
-a.btn{border-radius:4px;background:linear-gradient(#6bcf64,#2c8a29);border:1px solid #1d6a1b;font-weight:bold;text-shadow:0 1px 0 rgba(0,0,0,.3)}
-input[type=text],select{background:#fff;border:1px solid var(--edge);border-radius:3px}
-input[type=text]:focus,select:focus{outline:none;border-color:#3a77d8;box-shadow:0 0 0 2px #cfe0fb}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px}
-.card{padding:0;gap:0;border:1px solid #9bb5e2;border-radius:6px;background:#fff;overflow:hidden}
-.card h3{padding:9px 14px;background:linear-gradient(90deg,#ffffff 0%,#d7e3fb 100%);color:#1c4fb8;font-family:"Trebuchet MS",Tahoma,sans-serif;
-  border-bottom:1px solid #c5d5f3}.card h3 b{color:#2c8a29}
-.card>p{padding:10px 14px 0}.card>.row{padding:12px 14px 14px}
-.bar{height:16px;background:#fff;border:1px solid #8b9fc4;border-radius:3px;padding:2px}
-.bar i{border-radius:1px;background:repeating-linear-gradient(90deg,transparent 0 8px,#fff 8px 10px),linear-gradient(#6fe86f,#25a625 60%,#1f8f1f)}
-.bar.indef i{width:24%}
-.note{background:#ffffe1;border:1px solid #d8c97c;border-left:3px solid var(--warn);border-radius:4px}
+/* ---------- the website's look, with an early-internet feel (fonts and photo bundled: assets/CREDITS.md) ---------- */
+@font-face{font-family:"Sora";font-weight:700;font-display:swap;src:url(/assets/fonts/sora-700.woff2) format("woff2")}
+@font-face{font-family:"Sora";font-weight:800;font-display:swap;src:url(/assets/fonts/sora-800.woff2) format("woff2")}
+@font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(/assets/fonts/inter-400.woff2) format("woff2")}
+@font-face{font-family:"Inter";font-weight:500;font-display:swap;src:url(/assets/fonts/inter-500.woff2) format("woff2")}
+@font-face{font-family:"Inter";font-weight:600;font-display:swap;src:url(/assets/fonts/inter-600.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400;font-display:swap;src:url(/assets/fonts/jetbrains-mono-400.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:700;font-display:swap;src:url(/assets/fonts/jetbrains-mono-700.woff2) format("woff2")}
+html,body{background:#3d86c6}
+body{font:15px/1.6 "Inter",-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);min-height:100vh;padding:30px 16px 170px}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
+::selection{background:var(--fill);color:#fff}
+.desk{position:fixed;inset:0;z-index:0;background:#3d86c6 url(/assets/hills.jpg) center 70%/cover no-repeat}
+#yard{position:fixed;left:0;right:0;bottom:0;width:100%;height:150px;z-index:0;pointer-events:none;image-rendering:pixelated}
+.win{position:relative;z-index:1;max-width:1000px;margin:0 auto;background:rgba(13,15,18,.9);
+  border:1px solid rgba(255,255,255,.14);border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.45);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);overflow:hidden}
+.win-bar{display:flex;align-items:center;gap:14px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);
+  font:13px "JetBrains Mono",ui-monospace,Menlo,monospace;color:var(--muted)}
+.win-bar .logo{color:var(--ink);font-weight:500;font-size:13.5px}.win-bar .ver{color:var(--dim);font-size:12px}
+.us{color:var(--blue)}.win-bar .logo .us{animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.win-bar .sp{flex:1}.win-bar>*{white-space:nowrap}.win-bar a.hdr{color:var(--muted);font-size:12px;text-decoration:none}.win-bar a.hdr:hover{color:var(--ink)}
+#quit{font:12px "JetBrains Mono",ui-monospace,monospace;border-radius:4px;padding:3px 10px;background:transparent;border:1px solid var(--line2);color:var(--muted)}
+#quit:hover{color:#fff;border-color:var(--bad);background:rgba(255,107,107,.12)}
+.win-dots{display:flex;gap:6px}.win-dots i{width:11px;height:11px;border-radius:3px;background:var(--line2);display:block}
+.win-dots i:last-child{background:var(--blue)}
+main{padding:28px 30px 34px}
+.statusbar{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:7px 14px;border-top:1px solid rgba(255,255,255,.08);
+  font:11.5px "JetBrains Mono",ui-monospace,monospace;color:var(--dim);background:rgba(255,255,255,.02)}
+.statusbar .sp{flex:1}.statusbar a{color:var(--dim)}.statusbar a:hover{color:var(--muted)}
+.statusbar .st::before{content:"";display:inline-block;width:7px;height:7px;margin-right:7px;background:var(--ok);vertical-align:0}
+.statusbar .busy-t{display:none}body.busy .statusbar .ready-t{display:none}body.busy .statusbar .busy-t{display:inline}
+body.busy .statusbar .st::before{background:var(--blue);animation:blink .8s steps(1) infinite}
+h1,h2,h3{font-family:"Sora","Segoe UI",system-ui,sans-serif}
+h1{font-weight:800;font-size:clamp(30px,4.2vw,44px);letter-spacing:-.025em;line-height:1.05;margin:8px 0 10px}
+h2{font-weight:700;font-size:20px;letter-spacing:-.01em;margin:30px 0 10px}
+.sub{font-size:16px;color:var(--muted)}
+a{color:var(--blue);text-underline-offset:3px}
+button{font:600 14px/1.2 "Inter",-apple-system,"Segoe UI",sans-serif;border-radius:999px;padding:9px 18px;background:transparent;
+  border:1px solid var(--line2);color:var(--ink);transition:border-color .15s,background .15s}
+button:hover:not(:disabled){border-color:var(--muted)}
+button.primary{background:var(--fill);border-color:var(--fill);color:#fff}
+button.primary:hover:not(:disabled){background:var(--blue2);border-color:var(--blue2)}
+button.small{padding:4px 12px;font-size:12.5px}
+button.link{border:0;padding:0;border-radius:0;color:var(--blue);font-weight:500;text-decoration:underline;text-underline-offset:3px}
+button.link:hover{color:#7fb2ff}
+a.btn{border-radius:999px;background:var(--fill);padding:9px 18px}a.btn:hover{background:var(--blue2)}
+input[type=text],select{background:#0d0f12;border:1px solid var(--line2);border-radius:8px}
+input[type=text]:focus,select:focus{outline:none;border-color:var(--blue)}
+.panel{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px}
+.card{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:12px;padding:16px 16px 14px}
+.card h3{display:flex;align-items:center;gap:10px;font:500 16px "JetBrains Mono",ui-monospace,monospace;color:var(--ink)}
+.card h3 b{color:var(--blue);font-weight:500}.card h3 canvas{width:32px;height:32px;image-rendering:pixelated;flex:none}
+.steps li{font:11.5px "JetBrains Mono",ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;border-radius:6px}
+.steps li.now{border-color:var(--blue);color:var(--ink)}
+.bar{height:18px;background:#0b0d10;border:1px solid var(--line2);border-radius:4px;padding:3px}
+.bar i{border-radius:1px;background:repeating-linear-gradient(90deg,var(--blue) 0 9px,transparent 9px 12px)}
+.bar.indef i{width:22%}
+.big{font-family:"Sora","Segoe UI",sans-serif;font-weight:800;letter-spacing:-.02em}
+.note{background:rgba(255,255,255,.03);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:6px}
 .note.bad{border-left-color:var(--bad)}
-.steps li{background:#fff}.steps li.now{border-color:var(--xp);color:var(--xp);font-weight:bold}
-.choice{background:#fff;border:1px solid #9bb5e2}.choice:hover{border-color:#f2a733}
-ul.plain>li{border-bottom-color:var(--line)}
-th{color:var(--muted)}td,th{border-bottom-color:var(--line)}
-/* plugins page in the same skin: task-pane headers */
-.pi-hero{background:linear-gradient(180deg,#ffffff,#eef4fd);border:1px solid #9bb5e2}
-.ring{background:conic-gradient(#2fbf2f calc(var(--p) * 1%),#dde6f5 0)}.ring>span{background:#f7faff;color:#0f3fa8}
-.brand{background:#fff;border:1px solid #9bb5e2;border-radius:6px}
-.brand.open{border-color:#6c93d8}
-.bh{background:linear-gradient(90deg,#ffffff 0%,#dce7fb 100%)}
-.brand.open .bh{background:linear-gradient(90deg,#ffffff 0%,#c6d7f7 100%)}
-.bn{color:#1c4fb8;font-weight:bold;font-family:"Trebuchet MS",Tahoma,sans-serif}
-.chev{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:13px;color:#1c4fb8;
-  background:linear-gradient(#fff,#c9d8f5);border:1px solid #8fa9d9}
-.tile{color:color-mix(in srgb,var(--c) 55%,#000);background:color-mix(in srgb,var(--c) 24%,#fff);border:1px solid color-mix(in srgb,var(--c) 55%,#fff)}
-.pill{background:#eef3fc;border:1px solid #c9d7f0;color:#28406b}.pill.ok{background:#e8f6e8;border-color:#b5dfb5;color:var(--ok)}
-.how li{background:#f3f7fe;border:1px solid #d6e2f6}
-.how li::before{color:color-mix(in srgb,var(--c) 55%,#000);background:color-mix(in srgb,var(--c) 28%,#fff)}
-.bp{background:#edf2fb}
-.tickc{border-color:#7f9db9;background:#fff}.tickc.on{background:#2fbf2f;border-color:#1f8a1f}.tickc.on::after{border-color:#fff}
-.chip{background:#fff}
-.bchip{background:#fff;border:1px solid #c2d0e8}
-@media (max-width:700px){.win{margin:0 0 110px;border-radius:0;border-left:0;border-right:0}.mate{width:58px;height:74px;right:14px;bottom:24px}main{padding:20px 16px 32px}}
+.choice{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px}.choice:hover{border-color:var(--blue)}
+td.num,.log{font-family:"JetBrains Mono",ui-monospace,monospace}
+.pi-hero{background:rgba(255,255,255,.03)}.bn{font-family:"Sora","Segoe UI",sans-serif;font-weight:700}
+.bs,.pill,.how li,.chip{font-family:"JetBrains Mono",ui-monospace,monospace}.bs{font-size:12px}
+.brand{background:rgba(255,255,255,.02)}
+@media (max-width:760px){body{padding:0 0 120px}.win{border-radius:0;border-left:0;border-right:0}main{padding:22px 16px 28px}
+  .win-bar .ver,.win-dots{display:none}#yard{height:110px}}
 </style></head>
 <body>
-<div class="scene" aria-hidden="true">
-<svg class="clouds" viewBox="0 0 1440 600" preserveAspectRatio="xMidYMid slice"><defs><filter id="soft"><feGaussianBlur stdDeviation="9"/></filter></defs>
-<g fill="#fff" filter="url(#soft)" opacity=".75"><ellipse cx="210" cy="120" rx="150" ry="34"/><ellipse cx="300" cy="100" rx="90" ry="30"/>
-<ellipse cx="1080" cy="170" rx="190" ry="36"/><ellipse cx="1190" cy="148" rx="100" ry="30"/><ellipse cx="700" cy="300" rx="160" ry="26" opacity=".7"/></g></svg>
-<svg class="hill" viewBox="0 0 1440 320" preserveAspectRatio="none"><defs>
-<linearGradient id="hb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9fd86b"/><stop offset="1" stop-color="#4f9a33"/></linearGradient>
-<linearGradient id="hf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fcd45"/><stop offset=".55" stop-color="#4f9e2c"/><stop offset="1" stop-color="#2f7a1d"/></linearGradient></defs>
-<path d="M0 170 C 260 105 560 100 860 150 S 1280 215 1440 170 L1440 320 L0 320 Z" fill="url(#hb)"/>
-<path d="M0 245 C 240 160 640 132 1000 190 S 1360 262 1440 238 L1440 320 L0 320 Z" fill="url(#hf)"/></svg>
-<svg class="mate" viewBox="0 0 80 100" aria-hidden="true">
-<ellipse cx="40" cy="95" rx="21" ry="4" fill="#1f5a14" opacity=".35"/>
-<g class="l1"><rect x="29" y="70" width="9" height="21" rx="3" fill="#24479e"/><rect x="26" y="87" width="13" height="6" rx="3" fill="#5b3a1d"/></g>
-<g class="l2"><rect x="42" y="70" width="9" height="21" rx="3" fill="#24479e"/><rect x="41" y="87" width="13" height="6" rx="3" fill="#5b3a1d"/></g>
-<rect x="25" y="41" width="30" height="34" rx="10" fill="#f08a24"/>
-<path d="M28 58h24v13a5 5 0 0 1-5 5H33a5 5 0 0 1-5-5z" fill="#2f6fd6"/>
-<circle cx="40" cy="29" r="13" fill="#f6c89f"/>
-<path d="M27 27c0-9 6-15 13-15s13 6 13 15z" fill="#d93a2b"/><rect x="38" y="23" width="21" height="4.5" rx="2.2" fill="#b02c1f"/>
-<circle cx="35.5" cy="31" r="1.7" fill="#2b2b2b"/><circle cx="45" cy="31" r="1.7" fill="#2b2b2b"/>
-<circle cx="32.5" cy="35" r="2.4" fill="#f08a7a" opacity=".55"/><circle cx="48" cy="35" r="2.4" fill="#f08a7a" opacity=".55"/>
-<path d="M36.5 36.2q3.7 3 7.5 0" stroke="#7a3b1e" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-<g><rect x="21" y="47" width="38" height="25" rx="2" fill="#cf9455" stroke="#86562a" stroke-width="2"/>
-<path d="M21 55.5h38M21 63.5h38" stroke="#86562a" stroke-width="1.4"/><path d="M24 49l32 21" stroke="#86562a" stroke-width="1.3" opacity=".5"/></g>
-<circle cx="21" cy="58" r="4" fill="#f6c89f"/><circle cx="59" cy="58" r="4" fill="#f6c89f"/></svg>
-</div>
+<div class="desk" aria-hidden="true"></div>
+<canvas id="yard" aria-hidden="true"></canvas>
 <div class="win">
-<header class="titlebar"><span class="crate" aria-hidden="true"></span><span class="logo mono"><b>_</b>freighter</span><span class="ver">{{version}}</span><span class="sp"></span>
-<a class="hdr" href="{{report}}" target="_blank" rel="noopener noreferrer" title="Opens a short form on GitHub">Report a problem</a>
-<button id="quit" title="Stop Freighter">Quit</button></header>
+<div class="win-bar"><span class="logo"><span class="us">_</span>freighter.exe</span><span class="ver">{{version}}</span><span class="sp"></span>
+<a class="hdr" href="{{report}}" target="_blank" rel="noopener noreferrer" title="Opens a short form on GitHub">report a problem</a>
+<button id="quit" title="Stop Freighter">quit</button><span class="win-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
 <main id="view"></main>
+<div class="statusbar"><span class="st"><span class="ready-t">Ready</span><span class="busy-t">Working…</span></span>
+<span>nothing leaves this computer</span><span class="sp"></span>
+<a href="https://unsplash.com/photos/eNjvb3dAtnY" target="_blank" rel="noopener noreferrer">photo: Shai Pal / Unsplash</a></div>
 </div>
 <script>
 "use strict";
@@ -294,7 +267,7 @@ async function runJob(kind, params, head, render, opts) {
   const cancel = el("button", {}, "Cancel");
   const box = el("div", {class: "panel"}, stage, label, bar, log, opts.noCancel ? null : el("div", {class: "row"}, cancel));
   show(...head, box);
-  document.body.classList.add("busy");   // the Freighter man carries the crate while this runs
+  document.body.classList.add("busy");   // the courier carries crates while this runs
   try { return await watchJob(kind, params, head, render, opts, {bar, stage, label, log, cancel, box}); }
   finally { document.body.classList.remove("busy"); }
 }
@@ -335,10 +308,98 @@ async function watchJob(kind, params, head, render, opts, ui) {
   }
 }
 
+/* ---------- the courier and pixel icons: the same pixel art as the website ---------- */
+const PX = {k: "#1b1c20", c: "#2f8cff", C: "#1659c7", s: "#f2c39b", S: "#d79c74", e: "#1b1c20", b: "#eef1f5", B: "#c3cad3",
+  p: "#3a3b46", o: "#7a4c22", O: "#c98c4f", L: "#e2ae6e", t: "#f1e4bb"};
+const COURIER = ["...kkkkk....", "..kcccccck..", "..kccccccCCk", "..ksssssk...", "..ksssesk...", "..kSssssk...",
+  "...kkkkk....", "..kbbbbbk...", ".kbbbbbbbk..", ".kbBbbbbbk..", ".kbbbbbbbk..", "..kpppppk..."];
+const COURIER_LEGS = [["..kpk.kpk...", ".kpk...kpk..", ".kkk...kkk.."], ["...kpppk....", "...kp.pk....", "...kk.kk...."]];
+const CRATE = ["oooooooo", "oLLttLLo", "oOOttOOo", "oOOttOOo", "oOOttOOo", "oooooooo"];
+const KNOB = ["................", ".....kkkkkk.....", "...kkBBBBBBkk...", "..kBBbbbbbbBBk..", "..kBbbbcbbbbBk..",
+  ".kBbbbbcbbbbbBk.", ".kBbbbbcbbbbbBk.", ".kBbbbbcbbbbbBk.", ".kBbbbbbbbbbbBk.", ".kBbbbbbbbbbbBk.", "..kBbbbbbbbbBk..",
+  "..kBBbbbbbbBBk..", "...kkBBBBBBkk...", ".....kkkkkk.....", "......kkkk......", "....kkkkkkkk...."];
+
+function pixels(c, rows, x, y, flip, scale) {
+  const w = rows[0].length, n = scale || 1;
+  rows.forEach((row, j) => { for (let i = 0; i < w; i++) {
+    const ch = row[i];
+    if (ch === ".") continue;
+    c.fillStyle = PX[ch];
+    c.fillRect((flip ? x + (w - 1 - i) * n : x + i * n), y + j * n, n, n);
+  } });
+}
+function px(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(x, y, w, h); }
+const PIXEL_ICONS = {   // 16x16, Freighter's own drawings
+  pc(c) {
+    px(c, 1, 1, 14, 10, "#1b1c20"); px(c, 2, 2, 12, 8, "#d8d1bc"); px(c, 3, 3, 10, 6, "#3d86c6"); px(c, 3, 7, 10, 2, "#4c9a3a");
+    px(c, 5, 4, 2, 1, "#fff"); px(c, 6, 11, 4, 2, "#b9b19a"); px(c, 2, 13, 12, 2, "#1b1c20"); px(c, 3, 13, 10, 1, "#d8d1bc");
+  },
+  newpc(c) {
+    px(c, 0, 2, 16, 10, "#1b1c20"); px(c, 1, 3, 14, 8, "#3d86c6"); px(c, 1, 3, 14, 2, "#7fb8ff"); px(c, 1, 8, 14, 3, "#4c9a3a");
+    px(c, 3, 8, 6, 1, "#62b24a"); px(c, 11, 4, 2, 1, "#fff"); px(c, 7, 12, 2, 2, "#2a2d33"); px(c, 4, 14, 8, 1, "#2a2d33");
+  },
+  knob(c) { pixels(c, KNOB, 0, 0); },
+  crate(c) { pixels(c, CRATE, 0, 2, false, 2); },
+};
+function iconCanvas(name) {
+  const cv = document.createElement("canvas");
+  cv.width = 16; cv.height = 16;
+  PIXEL_ICONS[name](cv.getContext("2d"));
+  return cv;
+}
+
+/* The yard at the bottom of the screen: the courier carries crates from the old computer to the new one while
+   Freighter works, and stands by when it doesn't. He walks behind the window. */
+const yard = (() => {
+  const cv = document.getElementById("yard"), S = 4, still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!cv || !cv.getContext) return {};
+  const c = cv.getContext("2d");
+  const st = {x: null, dir: 1, carrying: true, frame: 0, timer: null};   // waits by the new computer, crate in hand
+  const spots = () => {
+    const w = cv.clientWidth, edge = Math.max(70, w * 0.07);
+    return {from: edge, to: w - edge};
+  };
+  function draw() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.imageSmoothingEnabled = false; c.clearRect(0, 0, w, h);
+    const {from, to} = spots(), ground = h - 26, I = 3;
+    [[from, "pc", "Old computer"], [to, "newpc", "New computer"]].forEach(([x, name, label]) => {
+      c.save(); c.translate(Math.round(x - 8 * I), ground - 16 * I); c.scale(I, I); PIXEL_ICONS[name](c); c.restore();
+      c.font = "600 11.5px Inter, -apple-system, Segoe UI, sans-serif"; c.textAlign = "center";
+      c.fillStyle = "rgba(0,0,0,.55)"; c.fillText(label, x + 1, ground + 15);
+      c.fillStyle = "#fff"; c.fillText(label, x, ground + 14);
+    });
+    if (st.x == null) st.x = to - 70;
+    const moving = !!st.timer, flip = st.dir < 0, x = Math.round(st.x), y = ground - 16 * S;
+    pixels(c, COURIER, flip ? x + 4 * S : x, y, flip, S);
+    pixels(c, COURIER_LEGS[moving ? st.frame : 1], flip ? x + 4 * S : x, y + 12 * S, flip, S);
+    if (st.carrying) { pixels(c, CRATE, flip ? x : x + 7 * S, y + 6 * S, false, S); px(c, (flip ? x + 8 * S : x + 7 * S), y + 9 * S, S, S, PX.s); }
+    else px(c, flip ? x + 6 * S : x + 8 * S, y + (8 + (moving ? st.frame : 0)) * S, S, 2 * S, PX.s);
+  }
+  function step() {
+    const {from, to} = spots();
+    st.x += st.dir * 7; st.frame = 1 - st.frame;
+    if (st.dir > 0 && st.x >= to - 70) { st.carrying = false; st.dir = -1; }      // crate delivered
+    if (st.dir < 0 && st.x <= from + 30) { st.carrying = true; st.dir = 1; }      // picks up the next one
+    draw();
+  }
+  function busy(on) {
+    if (on && !st.timer && !still) { st.dir = st.carrying ? 1 : -1; st.timer = setInterval(step, 120); }
+    if (!on && st.timer) { clearInterval(st.timer); st.timer = null; draw(); }
+  }
+  new MutationObserver(() => busy(document.body.classList.contains("busy"))).observe(document.body, {attributes: true, attributeFilter: ["class"]});
+  addEventListener("resize", draw);
+  if (document.fonts) document.fonts.ready.then(draw);
+  draw();
+  return {draw};
+})();
+
 /* ---------- home ---------- */
 function home() {
+  const ICON = {"old computer": "pc", "new computer": "newpc", "plugins": "knob", "crate": "crate"};
   const card = (name, text, ...actions) => el("div", {class: "card"},
-    el("h3", {}, el("b", {}, "_"), name), el("p", {}, text), el("div", {class: "row"}, ...actions));
+    el("h3", {}, iconCanvas(ICON[name]), el("span", {}, el("b", {}, "_"), name)), el("p", {}, text), el("div", {class: "row"}, ...actions));
   const here = el("div");
   api("/api/home").then(r => here.replaceChildren(...onThisComputer(r))).catch(() => {});
   show(
@@ -991,7 +1052,7 @@ function piRow(p, b) {
   const st = piState(p), old = pi.r.mode === "old";
   const hue = TYPE_HUE[p.type];
   const meta = el("div", {class: "meta"},
-    hue ? el("span", {class: "chip", style: `color:color-mix(in srgb,${hue} 58%,#000);border-color:color-mix(in srgb,${hue} 50%,#fff);background:color-mix(in srgb,${hue} 10%,#fff)`}, p.type) : null,
+    hue ? el("span", {class: "chip", style: `color:${hue};border-color:color-mix(in srgb,${hue} 40%,transparent)`}, p.type) : null,
     el("span", {}, p.used_in ? `Used in ${plural(p.used_in, "project")}` : "Not in your projects"),
     !b.app && p.maker ? el("span", {}, p.maker) : null,
     p.found ? el("span", {class: "found"}, "Found on this computer") : null,

@@ -63,7 +63,7 @@ jobs:
           cat freighter_build.py
       - name: Build freighter and manifest
         run: |
-          pyinstaller --onefile --name freighter freighter.py
+          pyinstaller --onefile --name freighter --add-data "assets:assets" freighter.py
           pyinstaller --onefile --name manifest manifest.py
           pyinstaller --onefile --name crate crate.py
       - name: The built programs run
