@@ -2123,14 +2123,14 @@ class ProjectHealth(TempDirCase):
         self.assertEqual(by["Lost.flp"]["status"], "attention")
         self.assertEqual(by["Lost.flp"]["missing_samples"], [str(home / "Downloads" / "gone.wav")])
         self.assertEqual(by["Synth.flp"]["plugins_needed"], ["Serum 2"])
-        self.assertEqual(by["Old.als"]["status"], "unchecked")
-        self.assertEqual((h["ready"], h["total"], h["unchecked"]), (2, 4, 1))
+        self.assertEqual(by["Old.als"]["status"], "ready", "Live 10 sets are checked too (issue #53)")
+        self.assertEqual((h["ready"], h["total"], h["unchecked"]), (3, 5, 0))
         self.assertIn(h["projects"][0]["name"], ("Lost.flp", "Synth.flp"), "problems first")
         with as_home(home):
             serum = [{"name": "Serum 2", "vendor": "Xfer Records", "key": "serum2"}]
             self.assertEqual({e["name"]: e["status"] for e in rm.project_health(installed=serum)["projects"]}["Synth.flp"],
                              "ready", "once the plugin is installed")
-        self.assertIn("2 of 4 projects are ready", "\n".join(rm.health_lines(h)))
+        self.assertIn("3 of 5 projects are ready", "\n".join(rm.health_lines(h)))
 
 
 class CopiedPlugins(TempDirCase):
@@ -2541,3 +2541,88 @@ class SelfTest(unittest.TestCase):
         self.assertEqual(code, 0, out.getvalue()[-3000:])
         self.assertIn("Self-check passed.", out.getvalue())
         self.assertEqual(os.environ.get("FREIGHTER_HOME"), _REAL_HOME_GUARD[1], "puts the stand-in home back")
+
+
+
+def mac_alias(posix, mount="/"):
+    """A Mac alias record (version 2) as Live 10 stores it in <Data>: a 150-byte header, then tags 18 (the path
+    from the volume's top) and 19 (where the volume is mounted)."""
+    def tag(n, b):
+        return struct.pack(">hH", n, len(b)) + b + (b"\0" if len(b) & 1 else b"")
+    body = tag(18, posix.lstrip("/").encode()) + tag(19, mount.encode()) + struct.pack(">hH", -1, 0)
+    head = bytearray(150)
+    head[4:6] = struct.pack(">H", 150 + len(body))
+    head[6:8] = struct.pack(">H", 2)
+    return bytes(head) + body
+
+
+def old_data(path):
+    """What Live 10 on this kind of computer stores for a full path."""
+    if os.name == "nt":
+        return str(path).encode("utf-16-le") + b"\0\0"
+    parts = Path(path).parts
+    if len(parts) > 2 and parts[1] == "Volumes":
+        return mac_alias("/".join(parts[3:]), "/Volumes/" + parts[2])
+    return mac_alias(str(path))
+
+
+def make_old_als(path, refs, creator="Ableton Live 10.1.9"):
+    """A Live 10 set: each sample is a FileRef with <RelativePath> elements, <Name> and binary <Data>.
+    refs: (full path, [project-relative folders] or None, relative type)."""
+    def fr(full, dirs, kind, pack=""):
+        name = Path(full).name
+        rel = "".join(f'<RelativePathElement Id="{i}" Dir="{d}" />' for i, d in enumerate(dirs or []))
+        return (f'<SampleRef><FileRef><HasRelativePath Value="{"true" if dirs is not None else "false"}" />'
+                f'<RelativePathType Value="{kind}" /><RelativePath>{rel}</RelativePath><Name Value="{name}" />'
+                f'<Type Value="2" /><Data>{old_data(full).hex().upper()}</Data><LivePackName Value="{pack}" />'
+                f'</FileRef></SampleRef>')
+    xml = (f'<?xml version="1.0" encoding="UTF-8"?>\n<Ableton Creator="{creator}">'
+           + "".join(fr(*r) for r in refs) + fr("/Core/Library/x.wav", None, 0, "Core Library") + "</Ableton>")
+    return write(path, gzip.compress(xml.encode()))
+
+
+class OldAbletonSets(TempDirCase):
+    """Issue #53: sets saved by Live 10 and older are read (never rewritten), so moves and checks cover them."""
+
+    def test_full_paths_come_out_of_live_10_data(self):
+        self.assertEqual(rm.alias_path(mac_alias("Kits/kick.wav", "/Volumes/Drive")), "/Volumes/Drive/Kits/kick.wav")
+        self.assertEqual(rm.alias_path(mac_alias("/Users/me/kick.wav")), "/Users/me/kick.wav")
+        self.assertEqual(rm.alias_path("D:\\Samples\\kick.wav".encode("utf-16-le") + b"\0\0"), "D:\\Samples\\kick.wav")
+        self.assertIsNone(rm.alias_path(b"\x01\x02junk"))
+
+    def test_samples_are_found_through_the_project_or_the_full_path(self):
+        home = self.tmp / "home"
+        proj = home / "Music" / "Old Project"
+        inside = write(proj / "Samples" / "Imported" / "clap.wav", b"c")
+        outside = write(home / "Desktop" / "Kits" / "kick.wav", b"k")
+        gone = home / "Desktop" / "Kits" / "gone.wav"
+        als = make_old_als(proj / "Old.als", [(f"/elsewhere/{inside.name}", ["Samples", "Imported"], 3),
+                                              (outside, None, 0), (gone, None, 0)])
+        text, _ = rm.read_als(als)
+        refs = rm.als_old_sample_refs(text, als)
+        self.assertEqual(len(refs), 3, "installed Pack content is left out")
+        self.assertEqual(refs[0][1], inside)
+        with as_home(home):
+            checked, missing = rm.samples_now(als)
+            self.assertEqual((checked, missing), (3, [str(gone)]))
+            kind, paths = rm.project_refs(als)
+        self.assertEqual(paths[:2], [str(inside), str(outside)])
+
+    def test_user_library_samples_and_old_racks(self):
+        home = self.tmp / "home"
+        lib = rm.known_roots(rm.THIS_OS, home)["ableton_user_library"][1]
+        mine = write(lib / "Samples" / "Imported" / "snare.wav", b"s")
+        als = make_old_als(home / "Music" / "P" / "Set.als", [("/maker/Samples/Imported/snare.wav", ["Samples", "Imported"], 6)])
+        rack = make_old_als(home / "Music" / "P" / "Kit.adg", [("/maker/Samples/Imported/x.wav", ["Samples", "Imported"], 6)])
+        with as_home(home):
+            self.assertEqual(rm.als_old_sample_refs(rm.read_als(als)[0], als)[0][1], mine)
+            self.assertIsNone(rm.project_refs(rack)[1], "racks that old usually come with packs: left unchecked")
+
+    def test_a_move_brings_the_samples_an_old_set_uses(self):
+        old = self.tmp / "old"
+        kick = write(old / "Desktop" / "Drum Kits" / "kick.wav", os.urandom(500))
+        make_old_als(old / "Music" / "Beat Project" / "Beat.als", [(kick, None, 0)])
+        with as_home(old), quiet():
+            plan = rm.plan_move()
+        packed = {Path(it["source_path"]).name for it in plan["items"]}
+        self.assertIn("Drum Kits", packed, "found through the Live 10 set's full path")

@@ -776,7 +776,7 @@ function rehearsed(r, id) {
     list(r.already, t.already)));
   if (t.unchecked) parts.push(note("", `${plural(t.unchecked, "file")} couldn't be checked automatically`,
     el("div", {class: "muted"}, r.old_live === t.unchecked
-      ? "They're Ableton sets and racks saved by Live 10 or older, which store sample paths in a way Freighter can't read yet. Most are demo files that came with sample packs. Open your own ones after the real move to check them."
+      ? "They're Ableton racks and clips saved by Live 10 or older. Most came with sample packs and point at their maker's own library. Freighter checks sets that old, but not racks: open your own ones in Live after the real move."
       : "For example Ableton projects saved by Live 10 or older. Open them after the real move to check them."),
     list(r.unchecked, t.unchecked)));
   parts.push(el("div", {class: "row"}, el("button", {onclick: () => api(`/api/jobs/${id}/open`, {file: "report"}).catch(() => {})}, "Open the full report"),

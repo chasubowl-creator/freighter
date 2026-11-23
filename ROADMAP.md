@@ -152,7 +152,7 @@ Tick the box here when the issue closes.
 
 - [ ] Network transfer: move computer to computer without a drive (1.1) (#51) · L · Claude
 - [ ] Samples loaded inside FL plugins (FPC, Slicex, DirectWave) (#52) · L · Claude
-- [ ] Ableton Live 10 and older projects (#53) · M · Claude
+- [x] Ableton Live 10 and older projects (#53: read and checked; not rewritten) · M · Claude
 - [ ] More DAWs, picked by the waitlist (#54) · L · Claude
 - [ ] Desktop app (Tauri) (#55) · L · Claude
 - [ ] Decide on optional paid extras (#56) · S · You

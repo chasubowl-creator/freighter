@@ -138,6 +138,11 @@ The first version with a number. Everything that exists so far:
 - **Intel Macs** (issue #37): releases now have `freighter-mac-intel.zip` next to the Apple Silicon download. Both
   Mac zips are made the way Finder makes them, so the programs keep their permission to run; the build checks
   each one is for the right chip and signed (ad hoc: notarizing needs an Apple developer account).
+- **Ableton Live 10 and older sets** (issue #53): their samples are read (the path through the project or User
+  Library, and the full path inside each sample's record), so a move packs them, the rehearsal checks them and
+  Check my projects covers them. On this Mac that's 9 more sets checked, all 523 samples found. They aren't
+  rewritten: a same-OS move puts their samples back where they were. Racks and clips that old (usually from sample
+  packs) are still left unchecked.
 
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account

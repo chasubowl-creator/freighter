@@ -1392,7 +1392,10 @@ def project_sample_folders(items, installed=None, excluded=(), needed=None, extr
     for p in alss:
         try:
             text, _ = read_als(p)
-            for ref in als_sample_refs(text):
+            sample_paths = als_sample_refs(text) if als_new_format(text) else \
+                [old_ref_path(f, r) for f, r in als_old_sample_refs(text, p)] if p.suffix.lower() == ".als" \
+                else []   # Live 10 and older sets (#53); racks and clips that old are left alone
+            for ref in sample_paths:
                 refs.setdefault(ref, set()).add(p)
         except Exception:
             pass
@@ -3081,6 +3084,88 @@ def als_sample_refs(text, unique=True):
 REL_RE = re.compile(r'<RelativePath Value="([^"]*)"')
 CREATOR_RE = re.compile(r'Creator="([^"]*)"')
 
+# Live 10 and older (issue #53): a FileRef holds the sample's path relative to the project as <RelativePath> elements
+# plus its <Name>, and the full path inside <Data>: a Mac alias record, or on Windows the path as UTF-16 text.
+OLD_REL_BLOCK_RE = re.compile(r"<RelativePath>(.*?)</RelativePath>", re.S)
+OLD_REL_DIR_RE = re.compile(r'<RelativePathElement[^>]*\sDir="([^"]*)"')
+OLD_NAME_RE = re.compile(r'<Name Value="([^"]*)"')
+OLD_DATA_RE = re.compile(r"<Data>(.*?)</Data>", re.S)
+OLD_HAS_REL_RE = re.compile(r'<HasRelativePath Value="true"')
+OLD_REL_TYPE_RE = re.compile(r'<RelativePathType Value="(\d+)"')
+
+
+def alias_path(data):
+    """The full path held in a Live 10 FileRef's <Data>, or None. On a Mac that's an alias record: its POSIX path
+    and the volume it's on (tags 18 and 19), else its old colon-separated path (tag 2). On Windows it's the path
+    itself as UTF-16 text."""
+    if len(data) >= 8 and struct.unpack(">H", data[6:8])[0] in (2, 3) and struct.unpack(">H", data[4:6])[0] <= len(data):
+        tags, i = {}, 150 if struct.unpack(">H", data[6:8])[0] == 2 else 58
+        while i + 4 <= len(data):
+            tag, ln = struct.unpack(">hH", data[i:i + 4])
+            if tag == -1:
+                break
+            tags[tag] = data[i + 4:i + 4 + ln]
+            i += 4 + ln + (ln & 1)
+        try:
+            if 18 in tags:
+                mount = tags.get(19, b"/").decode("utf-8").rstrip("/")
+                return mount + "/" + tags[18].decode("utf-8").lstrip("/")
+            if 2 in tags:   # "Macintosh HD:Users:me:kick.wav" or "/:Users:me:kick.wav" (the startup disk)
+                parts = tags[2].decode("utf-8", "replace").split(":")
+                return "/" + "/".join(parts[1:]) if parts[0] in ("/", "") else "/Volumes/" + "/".join(parts)
+        except UnicodeDecodeError:
+            return None
+        return None
+    if len(data) >= 6 and len(data) % 2 == 0:
+        try:
+            s = data.decode("utf-16-le").split("\x00")[0]
+        except UnicodeDecodeError:
+            return None
+        if re.match(r"^([A-Za-z]:\\|\\\\)", s):
+            return s
+    return None
+
+
+def als_old_sample_refs(text, set_path):
+    """The samples a Live 10 (or older) set uses (issue #53): [(full path or None, path through its project or User
+    Library, or None)], without installed Pack content. Live tries the full path, then the relative one."""
+    out, set_dir, library = [], Path(set_path).parent, None
+    for sm in SAMPLEREF_RE.finditer(text):
+        for fm in FILEREF_RE.finditer(sm.group(1)):
+            block = fm.group(1)
+            pack = PACK_NAME_RE.search(block)
+            if pack and pack.group(1):
+                continue
+            full = None
+            d = OLD_DATA_RE.search(block)
+            if d:
+                try:
+                    full = alias_path(bytes.fromhex(re.sub(r"\s", "", d.group(1))))
+                except ValueError:
+                    full = None
+            rel, name, kind = None, OLD_NAME_RE.search(block), OLD_REL_TYPE_RE.search(block)
+            rb = OLD_REL_BLOCK_RE.search(block)
+            if name and name.group(1) and OLD_HAS_REL_RE.search(block) and kind and kind.group(1) in ("1", "3", "6"):
+                dirs = [html.unescape(x) for x in OLD_REL_DIR_RE.findall(rb.group(1) if rb else "")]
+                if kind.group(1) == "6":   # relative to the User Library (this computer's)
+                    library = library or known_roots(THIS_OS, home())["ableton_user_library"][1]
+                    base = library
+                else:                      # relative to the set's project
+                    base = set_dir
+                rel = base.joinpath(*dirs, html.unescape(name.group(1)))
+            if full or rel:
+                out.append((full, rel))
+    return out
+
+
+def old_ref_path(full, rel):
+    """The one path to report for a Live 10 sample: the one that's there now (the full path first, like Live)."""
+    if full and exists(full):
+        return full
+    if rel is not None and exists(rel):
+        return str(rel)
+    return full or str(rel)
+
 
 def xml_attr_escape(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
@@ -3671,8 +3756,10 @@ def samples_now(p):
         missing = [r for r in refs if not in_program_place(r) and not exists(r)]
         return len(refs), missing
     text, _ = read_als(p)
-    if not als_new_format(text):
-        return None
+    if not als_new_format(text):   # Live 10 and older (#53): found by its full path, or through its project
+        refs = [(f, r) for f, r in als_old_sample_refs(text, p) if not (f and in_program_place(f))]
+        missing = [old_ref_path(f, r) for f, r in refs if not ((f and exists(f)) or (r is not None and exists(r)))]
+        return len(refs), list(dict.fromkeys(missing))
     checked, missing = 0, []
     for sm in SAMPLEREF_RE.finditer(text):
         for fm in FILEREF_RE.finditer(sm.group(1)):
@@ -4274,8 +4361,10 @@ def project_refs(p):
         text, _ = read_als(src if src.is_file() else p)
     except Exception:
         return "Ableton", None
-    if not als_new_format(text):
-        return "Ableton (Live 10 or older)", None
+    if not als_new_format(text):   # Live 10 and older sets (#53): read, never rewritten. Racks and clips that old
+        if p.suffix.lower() != ".als":   # usually came with sample packs and point at their maker's User Library
+            return "Ableton (Live 10 or older)", None
+        return "Ableton (Live 10 or older)", list(dict.fromkeys(old_ref_path(f, r) for f, r in als_old_sample_refs(text, p)))
     return "Ableton", als_sample_refs(text)
 
 
@@ -4407,8 +4496,8 @@ def cmd_rehearse(args):
         checked = totals["kept"] + totals["lost"]
         old_live = sum(1 for u in unchecked if u.endswith("(Ableton (Live 10 or older))"))
         not_checked = "" if not totals["unchecked"] else (
-            f" (+{totals['unchecked']} Ableton files saved by Live 10 or older, often demo sets and racks that came "
-            "with sample packs: Freighter can't read their sample paths yet)" if old_live == totals["unchecked"]
+            f" (+{totals['unchecked']} Ableton racks and clips saved by Live 10 or older, usually from sample packs: "
+            "Freighter checks sets that old, not racks)" if old_live == totals["unchecked"]
             else f" (+{totals['unchecked']} that can't be checked automatically)")
         lines = [
             f"Freighter {__version__} rehearsal, {dt.datetime.now():%Y-%m-%d %H:%M}",
