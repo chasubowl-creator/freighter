@@ -130,6 +130,8 @@ def job_move_list(job):
                    "files": it["files"], "kind": it["kind"], "plugin_files": bool(it.get("plugin_files"))}
                   for it in items],
         "plugin_install": [p["name"] for p in plan["plugin_files"]["install"]],   # install from their maker (#80)
+        "plugin_safety": [{"name": p["name"], "why": rm.safety_reason(p["why"])}   # not copied, for safety (#81)
+                          for p in plan["plugin_files"]["safety"]],
         "total": total,
         "missing": gone[:200], "missing_count": len(gone), "missing_projects": len(missing),
         "left_behind": len(left_behind or []),

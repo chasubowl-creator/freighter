@@ -353,9 +353,10 @@ function chooseItems() {
     el("table", {}, el("thead", {}, el("tr", {}, el("th", {}), el("th", {}, "What"), el("th", {class: "num"}, "Files"), el("th", {class: "num"}, "Size"))),
       el("tbody", {}, rows)),
     pluginRows.length ? el("h2", {}, "Plugins that come along") : null,
-    pluginRows.length ? el("p", {class: "muted"}, "These plugins are just files, so they go back in their plugin folders on the new computer: nothing to download. Some ask for their serial again the first time.") : null,
+    pluginRows.length ? el("p", {class: "muted"}, "These plugins are just files, so they go back in their plugin folders on the new computer: nothing to download. Your virus scanner checks them before packing, and the new computer checks them again. Some ask for their serial again the first time.") : null,
     pluginRows.length ? el("table", {}, el("tbody", {}, pluginRows)) : null,
     others.length ? el("p", {class: "muted small"}, `${plural(others.length, "other plugin")} install${others.length === 1 ? "s" : ""} from ${others.length === 1 ? "its" : "their"} maker on the new computer, because ${others.length === 1 ? "its" : "their"} app sets up licenses and sounds: ${others.join(", ")}.`) : null,
+    (r.plugin_safety || []).length ? el("p", {class: "muted small"}, "Not copied, for safety (install a fresh copy from the maker): " + r.plugin_safety.map(x => `${x.name}: ${x.why}`).join("; ") + ".") : null,
     bigRows.length ? el("h2", {}, "Big plugin content, left out unless you tick it") : null,
     bigRows.length ? el("p", {class: "muted"}, "These are probably sound libraries. They usually come back faster by installing them again from the maker's app (Native Access, Spitfire, Arturia…). Tick one to take it anyway.") : null,
     bigRows.length ? el("table", {}, el("tbody", {}, bigRows)) : null,
@@ -439,7 +440,11 @@ function packed(r, d) {
       el("div", {class: "muted"}, `${plural(r.files, "file")} in ${plural(r.items, "folder")}, each checked, on ${d.name}.` +
         (r.plugins_copied ? ` That includes ${plural(r.plugins_copied, "plugin")}, so the new computer needs no download for ${r.plugins_copied === 1 ? "it" : "them"}.` : "")),
       r.range ? el("div", {class: "muted"}, `Projects saved ${rangeText(r.range)}: ${r.projects.in_range} of ${r.projects.total}. The others stay on this computer (listed in projects-left-out.txt on the drive).`) : null,
+      r.plugin_scan ? el("div", {class: "muted small"}, r.plugin_scan) : null,
       el("div", {class: "muted mono small"}, r.bundle)),
+    (r.plugins_not_copied || []).length ? note("", `${plural(r.plugins_not_copied.length, "plugin")} not copied, for safety`,
+      el("div", {class: "muted"}, "Install a fresh copy of each from its maker on the new computer."),
+      el("ul", {}, r.plugins_not_copied.map(x => el("li", {}, x)))) : null,
     ...notes,
     el("h2", {}, "Check the drive"),
     el("p", {class: "muted"}, "Freighter reads every file back from the drive and compares it with the original, to catch a bad drive or cable while this computer still has your files. For the best check, eject the drive, plug it back in, then:"),
@@ -698,7 +703,7 @@ function unpacked(r) {
     el("ul", {class: "plain"}, u.plugin_data.map(p => el("li", {class: "row"},
       el("span", {}, p.label.replace(/^Plugin presets and data: /, "")), el("span", {class: "mono small muted"}, p.new),
       u.cross_os ? copyButton(p.new) : null))));
-  const pl = u.plugins || {placed: [], waiting: [], already: [], other_os: []};
+  const pl = u.plugins || {placed: [], waiting: [], already: [], other_os: [], flagged: [], asks: []};
   const plugNames = (list) => list.flatMap(x => x.names);
   if (pl.placed.length) parts.push(el("h2", {}, "Plugins copied over"),
     el("p", {class: "muted"}, `${plural(plugNames(pl.placed).length, "plugin")} went back in ${pl.placed.length === 1 ? "its plugin folder" : "their plugin folders"}, with nothing to download. Let your DAW find them: in FL Studio, Options → Manage plugins → Find installed plugins; in Ableton Live, Settings → Plug-Ins → Rescan. If one asks for its serial or to sign in, enter it again; if one won't load, install it from its maker.`),
@@ -706,8 +711,16 @@ function unpacked(r) {
   if (pl.waiting.length) parts.push(note("warn", `${plural(plugNames(pl.waiting).length, "plugin")} waiting to go in a plugin folder`,
     el("div", {class: "muted"}, pl.declined
       ? "Windows didn't get permission to put them in Program Files. Unpack again and choose Yes when Windows asks."
+      : pl.waiting.some(x => x.final) ? "Freighter couldn't put them in their plugin folders. Copy each one into the folder it belongs in, or install them from each maker."
       : "This computer has no such plugin folder. Add the folder below to your DAW's plugin folders (FL Studio: Options → Manage plugins → Plugin search paths), or install them from each maker."),
     el("ul", {class: "plain"}, pl.waiting.map(x => el("li", {class: "row"}, el("span", {}, x.names.join(", ")), el("span", {class: "mono small muted"}, x.where), copyButton(x.where))))));
+  if ((pl.asks || []).length) parts.push(note("", `macOS checks ${plural(pl.asks.length, "plugin")} the first time your DAW loads ${pl.asks.length === 1 ? "it" : "them"}`,
+    el("div", {class: "muted"}, "Apple hasn't checked these before, so macOS scans each one for malware first. When it says it can't open one, go to System Settings → Privacy & Security and click Open Anyway (once for each)."),
+    el("ul", {}, pl.asks.map(n => el("li", {}, n)))));
+  if ((pl.flagged || []).length) parts.push(note("", `${plural(plugNames(pl.flagged).length, "plugin")} not copied, for safety`,
+    el("div", {class: "muted"}, "This computer's virus scanner flagged them, so they never reached a plugin folder. Install a fresh copy of each from its maker."),
+    el("ul", {}, pl.flagged.map(x => el("li", {}, `${x.names.join(", ")} (${x.threat})`)))));
+  if (pl.scan && (pl.placed.length || (pl.flagged || []).length) && !((pl.asks || []).length && pl.scan.startsWith("macOS"))) parts.push(el("p", {class: "muted small"}, pl.scan));
   if (pl.already.length) parts.push(el("p", {class: "muted small"}, `Already installed here, so they weren't copied (yours were kept): ${plugNames(pl.already).join(", ")}.`));
   if ((pl.other_os || []).length) parts.push(el("p", {class: "muted small"}, `Plugins from the old computer that only run on ${u.source_os === "windows" ? "Windows" : "a Mac"}, so they weren't copied: ${pl.other_os.join(", ")}. Install their versions for this computer from each maker.`));
   const moved = (u.libraries || []).filter(l => l.moved), notMoved = (u.libraries || []).filter(l => !l.moved);

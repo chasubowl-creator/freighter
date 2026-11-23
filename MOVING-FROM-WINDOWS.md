@@ -100,8 +100,10 @@ created and puts repaired projects back. Files you've changed since are kept.
 
 ## 5. Reinstall plugins
 
-Plugins that came along are already back in their plugin folders. Putting them in Program Files needs
-permission, so **Windows asks once while unpacking: choose Yes**. (If you choose No, they wait in
+Plugins that came along are already back in their plugin folders. Windows Security checked them on both
+computers first; any it flagged were left out ("not copied, for safety"): install a fresh copy of those
+from the maker. Putting them in Program Files needs permission, so **Windows asks once while unpacking:
+choose Yes**. (If you choose No, they wait in
 `Music\Freighter\<old computer>\Plugins`; unpack again and choose Yes.) Then let FL Studio find them:
 **Options → Manage plugins → Find installed plugins**. If one asks for its serial or to sign in, enter it
 again; if one won't load, install it from its maker.

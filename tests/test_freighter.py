@@ -14,8 +14,10 @@ import json
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -2134,6 +2136,12 @@ class ProjectHealth(TempDirCase):
 class CopiedPlugins(TempDirCase):
     """Issue #80: plugins that are only files come along, so the new computer needs no download for them."""
 
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(rm.rs, "find_virus_scanner", lambda: (None, "No virus scanner found."))
+        p.start()
+        self.addCleanup(p.stop)
+
     def row(self, path, name, vendor, fmt="VST2", flags=()):
         return {"name": name, "vendor": vendor, "format": fmt, "path": str(path), "flags": list(flags),
                 "_check": None}
@@ -2187,8 +2195,8 @@ class CopiedPlugins(TempDirCase):
         self.assertIn("Waves Central", rm.plugin_copy_reason(dict(r, vendor="Waves")))
         self.assertIn("copy protection", rm.plugin_copy_reason(dict(r, vendor="Soundtoys")))
         self.assertIn("Pro Tools", rm.plugin_copy_reason(dict(r, format="AAX")))
-        self.assertIn("Signature broken", rm.plugin_copy_reason(dict(r, flags=[rs.FLAG_BROKEN])),
-                      "a cracked copy is never carried over")
+        self.assertIn("Changed after its maker signed it", rm.plugin_copy_reason(dict(r, flags=[rs.FLAG_BROKEN])),
+                      "files changed after signing are never carried over")
         self.assertIsNotNone(rm.plugin_copy_reason(dict(r, vendor="Image-Line")), "FL's own come with FL Studio")
 
     def test_a_makers_folder_comes_whole_unless_it_holds_a_plugin_that_doesnt_copy(self):
@@ -2375,3 +2383,149 @@ class CopiedPlugins(TempDirCase):
         self.assertEqual([Path(r["path"]).name for r in rows], ["Fake.vst3"])
         with as_home(self.tmp), mock.patch.dict(os.environ, {"FREIGHTER_PLUGIN_ROOTS": ""}):
             self.assertEqual(rm.plugin_roots(), [])
+
+
+class SafetyCheckpoints(CopiedPlugins):
+    """Issue #81: copied plugins are scanned on both computers; what a scanner flags never reaches a plugin folder."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(rm.rs, "find_virus_scanner", lambda: ("Test scanner", "test-scanner"))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def flag(self, *names):
+        """A stand-in virus scanner that flags any path containing one of `names`."""
+        def scan(paths, clean=False):
+            hits = {}
+            for p in paths:
+                for root, _dirs, files in os.walk(p):
+                    for f in files:
+                        if any(n in os.path.join(root, f) for n in names):
+                            hits[os.path.join(root, f)] = "Trojan:Test/Example"
+                if os.path.isfile(p) and any(n in p for n in names):
+                    hits[p] = "Trojan:Test/Example"
+            self.scans.append((list(paths), clean))
+            return {"scanner": "Test scanner", "hits": hits, "errors": [], "note": "scanned"}
+        self.scans = []
+        return mock.patch.object(rm.rs, "scan_files", scan)
+
+    def test_a_flagged_plugin_is_never_packed(self):
+        old = self.old_computer()
+        with self.flag("OTT_x64"):
+            _plan, bundle = self.pack(old, self.tmp / "drive")
+        self.assertTrue(self.scans and not self.scans[0][1], "the old computer's originals are never touched")
+        labels = [it["label"] for it in json.loads((bundle / "manifest.json").read_text())["items"]]
+        self.assertNotIn("Plugins from Xfer: OTT, Serum", labels)
+        self.assertIn("Plugins: Loose Synth", labels)
+        self.assertFalse(list((bundle / "data").rglob("OTT_x64.dll")))
+        text = (bundle / "plugins-not-copied.txt").read_text()
+        self.assertIn("OTT (VST2)", text)
+        self.assertIn("Install a fresh copy", text)
+        self.assertNotIn("crack", text.lower())
+        self.assertEqual(len(rm.LAST["pack"]["plugins_not_copied"]), 1)
+
+    def test_a_scan_that_fails_still_packs(self):
+        old = self.old_computer()
+        failed = lambda paths, clean=False: {"scanner": "Test scanner", "hits": {}, "errors": list(paths), "note": ""}
+        with mock.patch.object(rm.rs, "scan_files", failed):
+            _plan, bundle = self.pack(old, self.tmp / "drive")
+        labels = [it["label"] for it in json.loads((bundle / "manifest.json").read_text())["items"]]
+        self.assertIn("Plugins from Xfer: OTT, Serum", labels, "the new computer checks it again")
+        self.assertIn("couldn't be checked", rm.LAST["pack"]["plugin_scan"])
+
+    def test_the_new_computer_scans_before_anything_reaches_a_plugin_folder(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        new = self.tmp / "new"
+        with self.flag("Loose Synth"):
+            p = self.unpack(new, bundle)
+        self.assertTrue(self.scans[0][1], "on the new computer the scanner may quarantine what it finds")
+        self.assertFalse((new / "Plugins" / "VST" / "Loose Synth.dll").exists())
+        self.assertTrue((new / "Plugins" / "VST" / "Xfer" / "Serum_x64.dll").is_file())
+        self.assertEqual([r["names"] for r in p["flagged"]], [["Loose Synth (VST2)"]])
+        landing = new / "Music" / "Freighter" / rm.rs.host_name()
+        self.assertFalse(list(landing.rglob("Loose Synth.dll")), "the flagged copy doesn't wait around either")
+        self.assertIn("Not copied, for safety", (landing / "plugins-copied.txt").read_text())
+
+    def test_the_holding_folder_is_used_for_every_plugin(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        new = self.tmp / "new"
+        with self.flag():
+            self.unpack(new, bundle)
+        landing = new / "Music" / "Freighter" / rm.rs.host_name()
+        scanned = [Path(x) for x in self.scans[0][0]]
+        self.assertTrue(scanned and all(landing / "Plugins" in x.parents for x in scanned), scanned)
+        self.assertFalse((landing / "Plugins").exists(), "emptied once everything is in place")
+
+    @unittest.skipUnless(rm.THIS_OS == "mac", "the 'from elsewhere' mark is a Mac thing")
+    def test_mac_plugins_apple_hasnt_checked_are_marked_for_macos_to_check(self):
+        old = self.old_computer()
+        _plan, bundle = self.pack(old, self.tmp / "drive")
+        new = self.tmp / "new"
+        with mock.patch.object(rm.rs, "mac_notarized", lambda p: Path(p).name == "Pro-Q 4.vst3"), self.flag():
+            p = self.unpack(new, bundle)
+        mark = lambda path: subprocess.run(["xattr", "-p", "com.apple.quarantine", str(path)],
+                                           capture_output=True, text=True).stdout
+        self.assertTrue(mark(new / "Plugins" / "VST" / "Loose Synth.dll").startswith("0083"))
+        self.assertEqual(mark(new / "Plugins" / "VST3" / "Pro-Q 4.vst3"), "", "Apple-checked: no prompt")
+        self.assertIn("Loose Synth.dll", p["asks"])
+        self.assertNotIn("Pro-Q 4.vst3", p["asks"])
+
+    def test_wording_is_calm(self):
+        self.assertNotIn("crack", rs.FLAG_BROKEN.lower())
+        self.assertEqual(rm.safety_reason(rs.FLAG_BROKEN), "its files changed after its maker signed them")
+        self.assertEqual(rm.safety_reason("Your virus scanner flagged it (Trojan:X): install a fresh copy"),
+                         "your virus scanner flagged it (Trojan:X)")
+
+
+class VirusScanner(unittest.TestCase):
+    """Issue #81: reading Microsoft Defender's answers correctly."""
+
+    def run_defender(self, code, stdout, state=True):
+        result = mock.Mock(returncode=code, stdout=stdout)
+        with mock.patch.object(rs, "find_virus_scanner", lambda: ("Microsoft Defender", "MpCmdRun.exe")), \
+                mock.patch.object(rs, "defender_state", lambda: state), \
+                mock.patch.object(rs.subprocess, "run", return_value=result) as run:
+            return rs.scan_files([r"C:\Holding\Plugin.vst3"], clean=False), run
+
+    def test_exit_code_2_without_a_threat_is_a_failed_scan_not_a_threat(self):
+        r, run = self.run_defender(2, "CmdTool: Failed with hr = 0x80508023")
+        self.assertEqual(r["hits"], {})
+        self.assertEqual(r["errors"], [r"C:\Holding\Plugin.vst3"])
+        self.assertIn("-DisableRemediation", run.call_args[0][0], "originals are never touched")
+
+    def test_a_named_threat_is_a_hit(self):
+        out = ("Scanning C:\\Holding\\Plugin.vst3 found 1 threats.\n"
+               "Threat                  : Trojan:Win32/Example\n"
+               "    file                : C:\\Holding\\Plugin.vst3\\Contents\\x64\\Plugin.vst3\n")
+        r, _run = self.run_defender(2, out)
+        self.assertEqual(r["hits"], {"C:\\Holding\\Plugin.vst3\\Contents\\x64\\Plugin.vst3": "Trojan:Win32/Example"})
+
+    def test_defender_switched_off_for_another_antivirus_isnt_used(self):
+        r, run = self.run_defender(0, "", state=False)
+        self.assertIsNone(r["scanner"])
+        self.assertIn("Another antivirus", r["note"])
+        run.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "Microsoft Defender runs on Windows")
+    def test_real_defender_finds_the_standard_test_file(self):
+        if rs.defender_state() is not True:
+            self.skipTest("Microsoft Defender isn't the active antivirus here")
+        folder = Path(tempfile.mkdtemp(prefix="freighter-eicar-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        sample = folder / "eicar.com"
+        # EICAR: the industry's harmless test file. Built here so this source file never looks like it.
+        text = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$" + "EICAR-STANDARD-ANTIVIRUS" + "-TEST-FILE!$H+H*"
+        try:
+            sample.write_text(text)
+            time.sleep(2)
+            present = sample.is_file()
+        except OSError:
+            present = False
+        if not present:
+            self.skipTest("Defender removed the test file as soon as it was written (real-time protection is on)")
+        r = rs.scan_files([folder])
+        self.assertEqual(r["scanner"], "Microsoft Defender")
+        self.assertTrue(any("EICAR" in t for t in r["hits"].values()), r)

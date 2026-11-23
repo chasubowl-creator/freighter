@@ -387,11 +387,11 @@ SIG_LABEL = {
     "adhoc": "Self-signed (no maker ID)",
     "unsigned": "Not signed",
     "untrusted": "Signed, not trusted",
-    "broken": "SIGNATURE BROKEN",
+    "broken": "Changed after signing",
     "unknown": "Couldn't check",
 }
-FLAG_BROKEN = ("Signature broken: its files were changed after the maker signed it, which is what "
-               "cracked plugins look like. Don't carry it over; reinstall from the maker.")
+FLAG_BROKEN = ("Changed after its maker signed it: install a fresh copy from its maker rather than carrying "
+               "this one over.")
 
 
 def parse_codesign(display_err, verify_rc, verify_err):
@@ -509,32 +509,107 @@ def parse_clamscan(output):
     return hits
 
 
-def virus_scan(paths):
-    """{plugin path: threat name} for plugins a virus scanner flags, plus a one-line status."""
+def parse_defender(output, scanned):
+    """{file: threat name} from MpCmdRun's report: each "Threat : name" block lists its "file : path" lines.
+    A threat with no file line belongs to the path that was scanned."""
+    hits, threat = {}, None
+    for line in output.splitlines():
+        key, _, value = line.partition(":")
+        key, value = key.strip().lower(), value.strip()
+        if key == "threat" and value:
+            threat = value
+            continue
+        if threat and key == "file" and value:
+            hits[value.split("->")[0].strip()] = threat
+    if threat and not hits:
+        hits[str(scanned)] = threat
+    return hits
+
+
+def defender_state():
+    """Whether Microsoft Defender is the antivirus in charge here: True, False (switched off because another
+    antivirus is in charge), or None (couldn't tell)."""
+    if not IS_WIN:
+        return False
+    env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                            "$s = Get-MpComputerStatus; \"$($s.AMRunningMode)|$($s.AntivirusEnabled)\""],
+                           capture_output=True, text=True, timeout=120, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    mode, _, enabled = r.stdout.strip().partition("|")
+    if r.returncode != 0 or not mode:
+        return None
+    return enabled.strip().lower() == "true" and mode.strip().lower() != "not running"
+
+
+def scan_files(paths, clean=False):
+    """Scan files or folders with the virus scanner this computer already has (Microsoft Defender, or ClamAV if
+    it's installed). clean=True lets Defender quarantine what it finds (Windows Security can restore a file it
+    got wrong); otherwise nothing is touched. Returns {"scanner": name or None, "hits": {path: threat},
+    "errors": [paths that couldn't be scanned], "note": one line for people}."""
+    out = {"scanner": None, "hits": {}, "errors": [], "note": ""}
+    paths = [str(p) for p in paths]
+    if not paths:
+        return out
     name, how = find_virus_scanner()
+    if name == "Microsoft Defender" and defender_state() is False:
+        name, how = None, "Another antivirus is in charge on this PC; it checks files as they're copied."
     if not name:
-        return {}, how
-    hits = {}
+        out["note"] = how
+        return out
+    out["scanner"] = name
     if name == "Microsoft Defender":
         for p in paths:
+            args = [how, "-Scan", "-ScanType", "3", "-File", p] + ([] if clean else ["-DisableRemediation"])
             try:
-                r = subprocess.run([how, "-Scan", "-ScanType", "3", "-File", str(p), "-DisableRemediation"],
-                                   capture_output=True, text=True, timeout=600)
+                r = subprocess.run(args, capture_output=True, text=True, timeout=1800)
             except (OSError, subprocess.SubprocessError):
+                out["errors"].append(p)
                 continue
-            if r.returncode == 2:
-                m = re.search(r"Threat\s*:\s*(.+)", r.stdout)
-                hits[str(p)] = m.group(1).strip() if m else "threat found"
+            found = parse_defender(r.stdout, p) if r.returncode == 2 else {}
+            if found:
+                out["hits"].update(found)
+            elif r.returncode != 0:   # 2 also means "the scan failed": only a named threat counts as one
+                out["errors"].append(p)
     else:
         try:
-            r = subprocess.run([how, "-r", "--infected", "--no-summary"] + [str(p) for p in paths],
+            r = subprocess.run([how, "-r", "--infected", "--no-summary"] + paths,
                                capture_output=True, text=True, timeout=3600)
+            out["hits"] = parse_clamscan(r.stdout)
+            if r.returncode not in (0, 1):   # clamscan: 0 clean, 1 found, 2 error
+                out["errors"] = [p for p in paths if not any(h == p or h.startswith(p + os.sep) for h in out["hits"])]
         except (OSError, subprocess.SubprocessError):
-            return {}, "ClamAV couldn't run."
-        for f, threat in parse_clamscan(r.stdout).items():
-            owner = next((str(p) for p in paths if f == str(p) or f.startswith(str(p) + os.sep)), f)
-            hits[owner] = threat
-    return hits, f"{name} scanned {len(paths)} plugins"
+            out["errors"] = list(paths)
+    n = len(paths)
+    out["note"] = f"{name} scanned {n} item{'s' if n != 1 else ''}" + \
+        (f"; {len(out['errors'])} couldn't be scanned" if out["errors"] else "")
+    return out
+
+
+def virus_scan(paths):
+    """{plugin path: threat name} for plugins a virus scanner flags, plus a one-line status."""
+    r = scan_files(paths)
+    hits = {}
+    for f, threat in r["hits"].items():
+        owner = next((str(p) for p in paths if os.path.normcase(f) == os.path.normcase(str(p)) or
+                      os.path.normcase(f).startswith(os.path.normcase(str(p)) + os.sep)), f)
+        hits[owner] = threat
+    return hits, r["note"] if r["scanner"] else r["note"] or "No virus scanner found."
+
+
+def mac_notarized(path):
+    """True when Apple notarized this plugin (Apple scanned it for malware before its maker shipped it), False
+    when it isn't, None when it couldn't be checked. Apple's recommended check for plug-in bundles."""
+    if not IS_MAC:
+        return None
+    try:
+        r = subprocess.run(["codesign", "-v", "-R=notarized", "--check-notarization", str(path)],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return True if r.returncode == 0 else False if r.returncode == 3 else None
 
 
 def apply_safety(plugins, virus=False):
@@ -561,7 +636,8 @@ def apply_safety(plugins, virus=False):
         hits, status_line = virus_scan([p["path"] for p in plugins])
         for p in plugins:
             if p["path"] in hits:
-                p["flags"].append(f"Virus scanner flagged it ({hits[p['path']]}). Delete it; don't reinstall this copy.")
+                p["flags"].append(f"Your virus scanner flagged it ({hits[p['path']]}): install a fresh copy from its "
+                                  "maker rather than carrying this one over.")
     return status_line
 
 
@@ -866,9 +942,9 @@ def build_report(plugins, daws, folders, cmp_result, cmp_name, host, title, safe
         order = ["signed", "adhoc", "untrusted", "unsigned", "broken", "unknown"]
         chips = " ".join(f"<span class=chip>{e(SIG_LABEL[k])}: {counts[k]}</span>" for k in order if counts.get(k))
         h.append("<h2>Safety check</h2><p class=sub>A maker's digital signature proves a plugin came from them and "
-                 "hasn't been changed since. <b>Signature broken</b> is the warning sign: cracked plugins have "
-                 "their files altered. Plenty of honest free plugins, and anything you built yourself, simply "
-                 f"aren't signed.</p><p>{chips}</p><p class=sub>{e(safety_line)}</p>")
+                 "hasn't been changed since. <b>Changed after signing</b> is the one to act on: changed files can "
+                 "carry malware, so install a fresh copy from the maker. Plenty of honest free plugins, and "
+                 f"anything you built yourself, simply aren't signed.</p><p>{chips}</p><p class=sub>{e(safety_line)}</p>")
 
     groups = {}
     for p in plugins:

@@ -108,6 +108,16 @@ The first version with a number. Everything that exists so far:
   so the new computer needs no download for them. Plugins that install through an app, use iLok, or look cracked
   stay on the install list. Program Files needs Windows' permission once; a plugin already installed is never
   replaced, and undo removes them.
+- **Copied plugins are checked for malware** (issue #81), in four checkpoints:
+  1. Installers and programs found in sample folders stay behind (as before). That's how most malware in
+     cracked software travels.
+  2. On the old computer, a plugin whose files changed after its maker signed them isn't copied, and Microsoft
+     Defender (or ClamAV, if installed) scans the rest before packing. Originals are never touched.
+  3. On the new computer, copied plugins wait in a holding folder until the virus scanner there has checked
+     them. Anything it flags never reaches a plugin folder. On a Mac, plugins Apple hasn't checked are marked
+     like a download, so macOS scans each one the first time a DAW loads it (Open Anyway once).
+  4. Calm wording: "not copied, for safety", with the reason and "install a fresh copy from its maker". The
+     plugin report says "Changed after signing" instead of "Signature broken".
 
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account
