@@ -2529,3 +2529,15 @@ class VirusScanner(unittest.TestCase):
         r = rs.scan_files([folder])
         self.assertEqual(r["scanner"], "Microsoft Defender")
         self.assertTrue(any("EICAR" in t for t in r["hits"].values()), r)
+
+
+class SelfTest(unittest.TestCase):
+    """Issue #83: `freighter selftest`, which the build runs on the built program, passes from source too."""
+
+    def test_selftest_passes(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = rm.cmd_selftest(argparse.Namespace(program_files=False))
+        self.assertEqual(code, 0, out.getvalue()[-3000:])
+        self.assertIn("Self-check passed.", out.getvalue())
+        self.assertEqual(os.environ.get("FREIGHTER_HOME"), _REAL_HOME_GUARD[1], "puts the stand-in home back")

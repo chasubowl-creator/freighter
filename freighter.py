@@ -4573,6 +4573,131 @@ def check_for_update(fetch=None):
     return out
 
 
+def cmd_selftest(args):
+    """Check this copy of Freighter works as built (issue #83): its bundled photo and fonts load, the app page
+    renders, and a small move with a plugin works end to end in a stand-in home (pack, unpack, repair, undo).
+    --program-files also puts a plugin into Program Files for real (the Windows build check, which runs as an
+    administrator). The real home folder is never touched."""
+    import gzip as gz
+    import tempfile
+    from urllib.request import urlopen
+    import app
+    problems = []
+
+    def check(ok, what):
+        print(("ok    " if ok else "FAIL  ") + what, flush=True)
+        if not ok:
+            problems.append(what)
+
+    print("== The look: bundled photo, fonts, page and plugin catalog")
+    for name in app.ASSETS:
+        data = app.asset(name) or b""
+        check(data[:4] == b"wOF2" or data[:3] == b"\xff\xd8\xff", f"bundled {name} ({len(data):,} bytes)")
+    check(len(app.pcat.BRANDS) >= 20, f"plugin catalog: {len(app.pcat.BRANDS)} brands")
+    a, server, url = app.serve()
+    try:
+        page = urlopen(url, timeout=20).read().decode("utf-8")
+        check("freighter.exe" in page and "{{version}}" not in page, "the app page renders")
+        r = urlopen(f"http://127.0.0.1:{a.port}/assets/fonts/sora-800.woff2", timeout=20)
+        check(r.status == 200 and r.headers.get("Content-Type") == "font/woff2", "the app serves its fonts")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    print("\n== A small move with a plugin, in a stand-in home")
+    tmp = Path(tempfile.mkdtemp(prefix="freighter-selftest-"))
+    prev = {k: os.environ.get(k) for k in ("FREIGHTER_HOME", "FREIGHTER_PLUGIN_ROOTS")}
+    pf_root = None
+    try:
+        old, new, drive = tmp / "old", tmp / "new", tmp / "drive"
+        kick = old / "Desktop" / "Selftest Kit" / "kick.wav"
+        kick.parent.mkdir(parents=True)
+        kick_bytes = b"RIFF" + os.urandom(4000)
+        kick.write_bytes(kick_bytes)
+        song = old / "Desktop" / "Selftest Project" / "Song.als"
+        song.parent.mkdir(parents=True)
+        song.write_bytes(gz.compress(('<?xml version="1.0" encoding="UTF-8"?>\n<Ableton Creator="Ableton Live 12.1">'
+                                      '<SampleRef>\n<FileRef>\n<RelativePathType Value="0" />\n<RelativePath Value="" />\n'
+                                      f'<Path Value="{html.escape(str(kick))}" />\n<Type Value="1" />\n'
+                                      '<LivePackName Value="" />\n</FileRef>\n</SampleRef></Ableton>').encode("utf-8")))
+
+        def fake_plugin(root):
+            if THIS_OS == "windows":   # a VST3 can be a single file on Windows
+                f = root / "Selftest Synth.vst3"
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_bytes(os.urandom(6000))
+                return f
+            b = root / "Selftest Synth.vst3"
+            (b / "Contents" / "MacOS").mkdir(parents=True)
+            (b / "Contents" / "Info.plist").write_bytes(
+                b'<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleName</key>'
+                b'<string>Selftest Synth</string><key>CFBundleIdentifier</key><string>dev.selftest.synth</string>'
+                b'</dict></plist>')
+            exe = b / "Contents" / "MacOS" / "Selftest Synth"
+            exe.write_bytes(os.urandom(6000))
+            os.chmod(exe, 0o755)
+            return b
+        roots = [old / "Plugins" / "VST3"]
+        plugin = fake_plugin(roots[0])
+        if getattr(args, "program_files", False) and THIS_OS == "windows":
+            pf_root = Path(os.environ.get("CommonProgramFiles") or r"C:\Program Files\Common Files") / \
+                "Freighter Selftest" / "VST3"
+            fake_plugin(pf_root)
+            roots.append(pf_root)
+        os.environ["FREIGHTER_HOME"], os.environ["FREIGHTER_PLUGIN_ROOTS"] = str(old), os.pathsep.join(map(str, roots))
+        _PLUGIN_SCAN.clear()
+
+        t = time.time()
+        r = rs.scan_files([plugin])
+        took = time.time() - t
+        print(f"      virus scan: {r['scanner'] or 'none'} took {took:.1f} s for one plugin ({r['note']})", flush=True)
+        if r["scanner"]:
+            check(not r["hits"] and not r["errors"], "the virus scanner checked a plugin")
+
+        cmd_pack(argparse.Namespace(to=str(drive), list=False, include=[], skip=[], include_programs=False,
+                                    since=None, until=None))
+        bundle = next(drive.glob("Freighter-*"), None)
+        check(bundle is not None and (bundle / COMPLETE).is_file(), "packed a finished bundle")
+        items = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))["items"] if bundle else []
+        check(sum(1 for it in items if it.get("plugin_files")) == len(roots), f"packed {len(roots)} copied plugin item(s)")
+        shutil.rmtree(old)   # the old computer is gone: the project must now find the moved sample
+        if pf_root:
+            shutil.rmtree(pf_root)   # gone from Program Files too, as on a new computer
+
+        os.environ["FREIGHTER_HOME"] = str(new)
+        new.mkdir()
+        cmd_unpack(argparse.Namespace(bundle=str(bundle), dest_for=[]))
+        placed = (LAST.get("unpack") or {}).get("plugins", {}).get("placed", [])
+        here = new / "Desktop" / "Selftest Kit" / "kick.wav"
+        check(here.is_file() and here.read_bytes() == kick_bytes, "the sample arrived, identical")
+        check((new / "Plugins" / "VST3" / plugin.name).exists(), "the plugin went back in its plugin folder")
+        if pf_root:
+            check((pf_root / plugin.name).is_file(), f"the plugin went back into Program Files ({pf_root})")
+        check(len(placed) == len(roots), f"{len(placed)} plugin item(s) reported as placed")
+        repair_projects()
+        moved_song = new / "Desktop" / "Selftest Project" / "Song.als"
+        text = gz.decompress(moved_song.read_bytes()).decode("utf-8") if moved_song.is_file() else ""
+        check(html.escape(str(here)) in text, "the project was repaired to the moved sample")
+        r = undo_unpack()
+        check(not (new / "Plugins" / "VST3" / plugin.name).exists() and not here.exists(), "undo removed what it put there")
+        if pf_root:
+            check(not (pf_root / plugin.name).exists(), "undo removed the plugin from Program Files")
+    except Exception as e:   # a crash is a failed check, with its reason
+        check(False, f"the small move stopped: {e.__class__.__name__}: {e}")
+    finally:
+        for k, v in prev.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        _PLUGIN_SCAN.clear()
+        shutil.rmtree(tmp, ignore_errors=True)
+        if pf_root:
+            shutil.rmtree(pf_root.parent, ignore_errors=True)
+    print("\n" + (f"Self-check FAILED: {len(problems)} problem(s)." if problems else "Self-check passed."))
+    return 1 if problems else 0
+
+
 def cmd_check_update(args):
     r = check_for_update()
     if r.get("error"):
@@ -4793,6 +4918,11 @@ def main():
     s = sub.add_parser("verify", help="check the drive: read every packed file back and compare it")
     s.add_argument("bundle", metavar="DRIVE_OR_BUNDLE")
     s.set_defaults(fn=cmd_verify)
+
+    s = sub.add_parser("selftest", help="check this copy of Freighter works (its build runs this)")
+    s.add_argument("--program-files", action="store_true",
+                   help="Windows, as administrator: also put a test plugin into Program Files and take it out again")
+    s.set_defaults(fn=cmd_selftest)
 
     s = sub.add_parser("check-update", help="ask GitHub whether a newer Freighter is out")
     s.set_defaults(fn=cmd_check_update)

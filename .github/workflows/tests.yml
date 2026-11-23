@@ -75,6 +75,13 @@ jobs:
           ./dist/manifest --no-open --quick --out smoke-scan
           ./dist/crate preview tests --no-open --out smoke-crate
           printf 'q\n' | ./dist/freighter
+      # The built program checks itself (issue #83): its bundled photo and fonts, the app page, and a small move
+      # with a plugin. On Windows the runner is an administrator, so a plugin really goes into Program Files and
+      # Microsoft Defender really scans it.
+      - name: Self-check of the built program
+        shell: bash
+        run: |
+          if [ "${{ matrix.name }}" = "windows" ]; then ./dist/freighter selftest --program-files; else ./dist/freighter selftest; fi
       - name: Add the Windows test guide, license and changelog
         shell: bash
         run: cp WINDOWS-TEST.md LICENSE CHANGELOG.md dist/

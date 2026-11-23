@@ -129,6 +129,9 @@ The first version with a number. Everything that exists so far:
   pixel icons, and a segmented progress bar. The website's pixel courier waits by the new computer and carries
   crates across the hills while Freighter works. The photo and fonts are bundled (credits in assets/CREDITS.md),
   so the app still never loads anything from the internet.
+- **`freighter selftest`** (issue #83): checks a copy of Freighter works as built (its photo and fonts, the app
+  page, and a small move with a plugin, then undo). The build runs it on Windows and Mac; on Windows it also
+  puts a plugin into Program Files and back out, and times a Microsoft Defender scan.
 
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account
