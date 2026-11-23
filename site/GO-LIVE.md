@@ -34,6 +34,12 @@ New Netlify sites have form collection switched off.
 
 Rule of thumb: **200+ emails** means there's real demand for a 1.0.
 
+## When someone asks to come off the list
+
+The page promises that replying to any email takes people off the list (Netlify Forms has no unsubscribe link).
+When someone replies asking: **Forms → waitlist**, find their email, open the entry and **Delete** it. Delete it from
+any copy you downloaded as CSV too.
+
 ## Changing the page later
 
 Edit `landing.html` (or ask Claude), run `python3 build.py`, then drag the `deploy` folder onto the
