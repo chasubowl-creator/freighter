@@ -124,6 +124,10 @@ The first version with a number. Everything that exists so far:
   a link to each one on its maker's site. Tick plugins off, take ones you don't need off the list, or press Check
   again to tick off whatever is now installed. Ticks are kept in Music/Freighter. No pictures and nothing loaded
   from the internet. Slate Digital's installer is now called Complete Access Hub.
+- **A new look with a Windows XP feel**: the app sits in an XP-style window over a blue sky and green hill, with
+  glossy buttons, a green "go" button, task-pane headers and the segmented green progress bar. The little
+  Freighter man stands on the hill with his crate, and trots while Freighter is working. The layout and wording
+  are unchanged.
 
 ### Downloads
 - Each version tag publishes a GitHub Release with the Windows and Mac downloads, which need no GitHub account
