@@ -4,10 +4,19 @@ index.html, with sign-ups switched to Netlify Forms. Run after editing landing.h
 
     python3 build.py
 """
+import re
 from pathlib import Path
 
 here = Path(__file__).resolve().parent
 src = (here / "landing.html").read_text(encoding="utf-8")
+
+# The page loads nothing from other sites (issue #42): fonts and images live in assets/. Links may point anywhere.
+OUTSIDE = r"""((?:https?:)?//[^"')\s>]+)"""
+loads = (re.findall(r"""\bsrc\s*=\s*["']?\s*""" + OUTSIDE, src, re.I)
+         + re.findall(r"""<link\b[^>]*\bhref\s*=\s*["']?\s*""" + OUTSIDE, src, re.I)
+         + re.findall(r"""(?:url\(|@import)\s*["']?\s*""" + OUTSIDE, src, re.I))
+if loads:
+    raise SystemExit("landing.html loads from other sites (put the file in assets/ instead):\n  " + "\n  ".join(loads))
 
 src = src.replace('<meta name="claude:viewport-fit-sides" content="cover">\n', "")
 mode_line = 'const FORM_MODE = "preview";'
