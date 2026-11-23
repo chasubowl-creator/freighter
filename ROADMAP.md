@@ -111,6 +111,7 @@ Tick the box here when the issue closes.
 - [x] Plugins grouped by the app that installs them (#79) · S · Claude
 - [x] Copy plugins that are only files, so the new computer needs no download (#80) · M · Claude
 - [x] Check copied plugins for malware on both computers (#81) · M · Claude
+- [x] Plugins to install: a checklist by brand, with where to get each one (#82) · M · Claude
 - [ ] Usability test with a non-technical producer (#35) · S · You
 
 **Done when:** A non-technical producer completes a move without help.

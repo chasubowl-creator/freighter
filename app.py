@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crate  # noqa: E402
 import freighter as rm  # noqa: E402
 import manifest as rs  # noqa: E402
+import plugin_catalog as pcat  # noqa: E402
 from freighter_version import __version__  # noqa: E402
 
 IDLE_SECONDS = 180   # stop when the page hasn't been heard from for this long (and nothing is running)
@@ -234,38 +235,124 @@ def search_link(name, vendor):
     return "https://duckduckgo.com/?q=" + quote_plus(" ".join(x for x in (vendor, name, "plugin download") if x))
 
 
+CHECKLIST = "plugin-checklist.json"
+
+
+def checklist_path():
+    return rm.home() / "Music" / "Freighter" / CHECKLIST
+
+
+def read_checklist():
+    """Plugins ticked off or removed on the Plugins to install page: {"done": {key: when}, "removed": {...}}. Kept
+    in Music/Freighter, because the browser's own storage is lost each time the app opens on a new address."""
+    try:
+        data = json.loads(checklist_path().read_text(encoding="utf-8"))
+        return {k: dict(data.get(k) or {}) for k in ("done", "removed")}
+    except (OSError, ValueError, AttributeError):
+        return {"done": {}, "removed": {}}
+
+
+def set_checklist(key, state):
+    """Tick a plugin off ("done"), take it off the list ("removed"), or put it back ("todo")."""
+    data = read_checklist()
+    for k in ("done", "removed"):
+        data[k].pop(key, None)
+    if state in ("done", "removed"):
+        data[state][key] = time.strftime("%Y-%m-%d")
+    path = checklist_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    return data
+
+
+def plugin_key(name, vendor=""):
+    """One key per plugin, whatever the format or computer (the shortest of _Manifest's match keys)."""
+    return min(rs.match_keys(name or "", vendor or ""), key=len)
+
+
+def brand_card(b):
+    return {"id": b["id"], "name": b["name"], "initials": pcat.initials(b["name"]), "color": b["color"],
+            "app": b["app"], "url": b["url"], "steps": pcat.brand_steps(b), "tip": b.get("tip"),
+            "products": b.get("products") or pcat.plugin_link("", b).split("?")[0]}
+
+
 def job_readiness(job):
-    """Which plugins this computer's projects need, most useful first (issue #70), ready for a checklist."""
+    """The Plugins to install page (issue #82, after #70): the plugins Freighter couldn't bring, by brand, with
+    where to get each one. On the new computer: the old computer's plugins that aren't installed here (formats
+    merged, Pro Tools-only copies skipped), plus any plugin a project needs. On the old computer: the plugins
+    that won't come along, to see the list early. Projects using each plugin come from the same reading as #70."""
     maps = rm.load_pathmaps(None)
     roots = rm.project_search_roots(maps, [])
     rm.report_progress("Reading your projects", 0, 0)
     projects = {str(p): rm.project_plugins(p) for p in rm.all_projects(roots)}
     rm.report_progress("Scanning installed plugins", 0, 0)
-    r = rm.plugin_readiness(projects, rs.scan([]))
-    # makers the projects didn't name: take them from the old computer's plugin list, copied over on unpack
-    known = {}
-    for f in (rm.home() / "Music" / "Freighter").glob("*/plugins-*.csv"):
-        try:
-            with open(f, newline="", encoding="utf-8") as fh:
-                for row in csv.DictReader(fh):
-                    for k in rs.match_keys(row.get("name", ""), row.get("vendor", ""), row.get("key", "")):
-                        known.setdefault(k, row.get("vendor", ""))
-        except OSError:
-            pass
-    missing = []
-    for e in r["missing"]:
-        vendor = e["vendor"] or next((known[k] for k in rs.match_keys(e["name"], "") if known.get(k)), "")
-        missing.append({"name": e["name"], "vendor": vendor, "link": maker_link(vendor),
-                        "search": search_link(e["name"], vendor), "opens": e["opens"],
-                        "projects": [Path(x).name for x in e["projects"]]})
-    groups = rm.group_by_installer([dict(m, projects=m["projects"]) for m in missing])
-    for g in groups:   # an app's own page if we know it, else the first maker's site
-        g["link"] = g["link"] or next((m["link"] for m in missing if rm.installer_for(m["vendor"]) == g["app"]
-                                       and m["link"]), None) if g["app"] != rm.WEBSITE else None
-    return {"total": r["total"], "ready": len(r["ready"]), "missing": missing, "warnings": r["warnings"],
-            "groups": groups,
+    installed = rs.scan([])
+    r = rm.plugin_readiness(projects, installed)
+    has = rm.plugin_checker(installed)
+    on_old = not any((rm.home() / "Music" / "Freighter").glob("*/pathmap.json"))
+
+    used = {}
+    for path, info in projects.items():
+        for pl in (info or {}).get("plugins", []):
+            used.setdefault(plugin_key(pl["name"], pl.get("vendor")), set()).add(Path(path).name)
+
+    entries = {}
+
+    def add(name, vendor, fmt="", found=False, why=None):
+        k = plugin_key(name, vendor)
+        e = entries.setdefault(k, {"key": k, "name": name, "vendor": vendor or "", "formats": set(),
+                                   "found": found, "why": why})
+        e["vendor"] = e["vendor"] or vendor or ""
+        if fmt:
+            e["formats"].add(fmt)
+        e["why"] = e["why"] or why
+        return e
+
+    if on_old:
+        for row in installed:
+            if rm.plugin_copy_reason(row) is not None:
+                add(row["name"], row.get("vendor"), row.get("format", ""))
+    else:
+        rows, copied, unsafe = rm.old_computer_plugins()
+        came = {plugin_key(x.get("name"), x.get("vendor")) for x in copied}
+        for row in rows:   # everything the old computer had, except what Freighter brought along (#80)
+            if plugin_key(row.get("name"), row.get("vendor")) not in came:
+                add(row.get("name", ""), row.get("vendor"), row.get("format", ""),
+                    found=has({"name": row.get("name", ""), "vendor": row.get("vendor", "")}))
+        for m in r["missing"]:   # a project needs it, even if the old computer's list didn't have it
+            add(m["name"], m["vendor"])
+        for x in unsafe:
+            k = plugin_key(x["name"], x.get("vendor"))
+            if k in entries:
+                entries[k]["why"] = x["why"]
+            else:
+                add(x["name"], x.get("vendor"), why=x["why"])
+
+    brands, other = {}, []
+    for e in entries.values():
+        if e["formats"] and e["formats"] <= {"AAX"}:
+            continue   # Pro Tools only
+        b = pcat.brand_for(e["vendor"])
+        maker = e["vendor"] if e["vendor"] and not e["vendor"].lower().startswith("unknown") else ""
+        item = {"key": e["key"], "name": e["name"], "type": pcat.plugin_type(e["name"], b),
+                "formats": sorted(f for f in e["formats"] if f != "AAX"), "found": e["found"], "why": e["why"],
+                "projects": sorted(used.get(e["key"], ()))[:40], "used_in": len(used.get(e["key"], ())),
+                "maker": maker,
+                "link": pcat.plugin_link(e["name"], b) if b else (maker_link(maker) or search_link(e["name"], maker))}
+        if b:
+            brands.setdefault(b["id"], dict(brand_card(b), plugins=[]))["plugins"].append(item)
+        else:
+            other.append(item)
+    order = lambda items: sorted(items, key=lambda i: (i["found"], -i["used_in"], i["name"].lower()))
+    cards = sorted(({**c, "plugins": order(c["plugins"])} for c in brands.values()),
+                   key=lambda c: (-sum(i["used_in"] for i in c["plugins"] if not i["found"]),
+                                  -sum(1 for i in c["plugins"] if not i["found"]), c["name"].lower()))
+    return {"mode": "old" if on_old else "new", "brands": cards, "other": order(other),
+            "all_brands": [brand_card(b) for b in sorted(pcat.BRANDS, key=lambda b: b["name"].lower())],
+            "checklist": read_checklist(), "total": r["total"], "ready": len(r["ready"]),
+            "warnings": r["warnings"],
             "versions": [{"daw": d, "version": v, "example": n} for d, (v, n) in sorted(r["versions"].items())],
-            "on_old_computer": not any((rm.home() / "Music" / "Freighter").glob("*/pathmap.json"))}
+            "on_old_computer": on_old}
 
 
 def typed_folder(s, windows=None):
@@ -633,6 +720,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except SystemExit as e:
                 return self.send(400, {"error": str(e.code)})
             return self.send(200, {"plan": rm.LAST.get("unpack_preview", [])})
+        if path == "/api/checklist":
+            # tick a plugin off, take it off the list, or put it back (issue #82)
+            key, state = body.get("key"), body.get("state")
+            if not isinstance(key, str) or not 0 < len(key) <= 200 or state not in ("done", "removed", "todo"):
+                return self.send(400, {"error": "bad request"})
+            return self.send(200, set_checklist(key, state))
         if path == "/api/quit":
             self.app.stopped.set()   # before answering, so whoever sees the answer sees Freighter stopping
             return self.send(200, {"ok": True})

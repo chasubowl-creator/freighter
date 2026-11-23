@@ -516,3 +516,104 @@ class InstallerApps(unittest.TestCase):
                                                    {"name": "Massive X", "vendor": "Native Instruments", "projects": ["a"]}]]}))
         self.assertIn("Install by app", lines)
         self.assertIn("Native Access: Massive X", lines)
+
+
+class PluginsToInstall(unittest.TestCase):
+    """Issue #82: the plugins Freighter couldn't bring, by brand, with where to get each one and a checklist."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="freighter-plugins-page-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        landing = self.home / "Music" / "Freighter" / "OldPC"
+        landing.mkdir(parents=True)
+        (landing / "pathmap.json").write_text('{"entries": []}')   # an unpack happened: this is the new computer
+        rows = [("Massive", "Native Instruments", "VST3"), ("Massive", "Native Instruments", "AAX"),
+                ("AIR Reverb", "Avid", "AAX"), ("Serum", "Xfer Records", "VST3"), ("CLA-76", "Waves", "VST3"),
+                ("EchoBoy", "Soundtoys", "VST3"), ("Weird Thing", "Unknown maker", "VST2"),
+                ("Copied Synth", "Some Dev", "VST3"), ("Shady", "Some Dev", "VST3")]
+        (landing / "plugins-OldPC.csv").write_text("name,vendor,format,key\n" + "".join(
+            f"{n},{v},{f},{n.lower().replace(' ', '')}\n" for n, v, f in rows))
+        (landing / "plugins-copied.json").write_text(json.dumps(
+            {"placed": [{"name": "Copied Synth", "vendor": "Some Dev", "format": "VST3"}], "flagged": []}))
+        (landing / "plugins-not-copied.txt").write_text(
+            "Freighter 0.9.0\n\nPlugins on OldPC that weren't copied, for safety.\n\n"
+            "Shady (VST3): your virus scanner flagged it (Trojan:Test/Example)")
+
+    def build(self):
+        song = {"daw": "FL Studio", "version": "", "native": [],
+                "plugins": [{"name": "Massive", "vendor": "Native Instruments", "format": "VST3"}]}
+        installed = [{"name": "CLA-76", "vendor": "Waves", "key": "cla76", "format": "VST3"}]
+        with as_home(self.home), mock.patch.object(rm, "all_projects", lambda roots, racks=False: [Path("Song.flp")]), \
+                mock.patch.object(rm, "project_plugins", lambda p: song), mock.patch.object(app.rs, "scan", lambda extra: installed):
+            return app.job_readiness(None)
+
+    def test_the_list_is_the_old_computers_plugins_that_arent_here(self):
+        r = self.build()
+        self.assertEqual(r["mode"], "new")
+        cards = {b["id"]: b for b in r["brands"]}
+        self.assertEqual(r["brands"][0]["id"], "native-instruments", "the brand your projects wait on comes first")
+        massive = cards["native-instruments"]["plugins"][0]
+        self.assertEqual((massive["name"], massive["formats"], massive["used_in"], massive["type"]),
+                         ("Massive", ["VST3"], 1, "Synth"))
+        self.assertTrue(massive["link"].startswith("https://www.native-instruments.com/search?q=Massive"))
+        self.assertEqual(cards["native-instruments"]["app"], "Native Access")
+        self.assertTrue(cards["waves"]["plugins"][0]["found"], "installed here: ticked off by itself")
+        self.assertIn("soundtoys", cards)
+        others = {p["name"]: p for p in r["other"]}
+        self.assertIn("Serum", others)
+        self.assertTrue(others["Serum"]["link"].startswith("https://xferrecords.com"))
+        self.assertIn("duckduckgo.com", others["Weird Thing"]["link"])
+        self.assertIn("Trojan:Test/Example", others["Shady"]["why"])
+        names = [p["name"] for b in r["brands"] for p in b["plugins"]] + list(others)
+        self.assertNotIn("AIR Reverb", names, "Pro Tools only")
+        self.assertNotIn("Copied Synth", names, "Freighter brought it")
+        self.assertEqual(len(r["all_brands"]), len(app.pcat.BRANDS))
+
+    def test_on_the_old_computer_it_lists_what_wont_come_along(self):
+        shutil.rmtree(self.home / "Music" / "Freighter")
+        installed = [{"name": "Massive", "vendor": "Native Instruments", "format": "VST3", "flags": []},
+                     {"name": "Serum", "vendor": "Xfer Records", "format": "VST3", "flags": []}]
+        with as_home(self.home), mock.patch.object(rm, "all_projects", lambda roots, racks=False: []), \
+                mock.patch.object(app.rs, "scan", lambda extra: installed):
+            r = app.job_readiness(None)
+        self.assertEqual(r["mode"], "old")
+        self.assertEqual([p["name"] for b in r["brands"] for p in b["plugins"]], ["Massive"])
+        self.assertEqual(r["other"], [], "Serum copies, so it isn't on the list")
+
+    def test_ticks_and_removals_are_kept_in_music_freighter(self):
+        with as_home(self.home):
+            app.set_checklist("massive", "done")
+            app.set_checklist("serum", "removed")
+            self.assertEqual(set(app.read_checklist()["done"]), {"massive"})
+            app.set_checklist("serum", "todo")
+            self.assertEqual(app.read_checklist()["removed"], {})
+            self.assertTrue((self.home / "Music" / "Freighter" / "plugin-checklist.json").is_file())
+
+    def test_catalog_is_complete_and_safe(self):
+        ids = [b["id"] for b in app.pcat.BRANDS]
+        self.assertEqual(len(ids), len(set(ids)))
+        for b in app.pcat.BRANDS:
+            for link in (b["url"], b.get("products"), b.get("search")):
+                if link:
+                    self.assertTrue(link.startswith("https://"), link)
+            self.assertTrue(set(b["plugins"].values()) <= set(app.pcat.TYPES), b["id"])
+            self.assertTrue(1 <= len(app.pcat.initials(b["name"])) <= 3)
+            self.assertEqual(len(app.pcat.brand_steps(b)), 3)
+        for maker in rm.INSTALLER_APPS:   # every maker with an installer app has a card
+            self.assertIsNotNone(app.pcat.brand_for(maker.title()), maker)
+        self.assertIsNone(app.pcat.brand_for("Wavesfactory"), "not Waves")
+        self.assertEqual(app.pcat.brand_for("Native-instruments")["id"], "native-instruments")
+
+
+class ChecklistApi(unittest.TestCase):
+    setUp, tearDown, request = Server.setUp, Server.tearDown, Server.request   # the server, without its tests
+
+    def test_checklist_saves_through_the_page(self):
+        with as_home(self.tmp):
+            status, body = self.request("POST", "/api/checklist", {"key": "massive", "state": "done"})
+            self.assertEqual(status, 200)
+            self.assertIn("massive", body["done"])
+            status, _ = self.request("POST", "/api/checklist", {"key": "massive", "state": "sideways"})
+            self.assertEqual(status, 400)
+            status, _ = self.request("POST", "/api/checklist", {"key": "massive", "state": "done"}, token=False)
+            self.assertEqual(status, 403)

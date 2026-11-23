@@ -108,7 +108,9 @@ choose Yes**. (If you choose No, they wait in
 **Options → Manage plugins → Find installed plugins**. If one asks for its serial or to sign in, enter it
 again; if one won't load, install it from its maker.
 
-For the rest, unpack prints the exact command at the end. In a command window opened in Freighter's folder it looks like:
+For the rest, open the app's **Check my plugins** page: each brand shows the app or account page its plugins
+install from, with your plugins listed under it. Tick them off as you go; **Check again** ticks off whatever
+is now installed. On the command line, unpack prints the exact command at the end. In a command window opened in Freighter's folder it looks like:
 
     manifest.exe --compare "C:\Users\<you>\Music\Freighter\<old computer>\plugins-<old computer>.csv"
 

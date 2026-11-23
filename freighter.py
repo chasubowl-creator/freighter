@@ -22,6 +22,7 @@ Needs only Python 3.8+. Nothing leaves your computer. Use "py" instead of "pytho
 
 import argparse
 import contextlib
+import csv
 import datetime as dt
 import functools
 import gzip
@@ -2215,7 +2216,8 @@ def undo_unpack(host=None):
             else:
                 out["kept"].append(str(p))   # changed since the unpack: it's someone's work now
         for name in (UNPACK_JOURNAL, "pathmap.json", "unpack-report.txt", "pack-errors.txt", "already-missing.txt",
-                     "left-behind.txt", "projects-left-out.txt", "plugins-copied.txt"):
+                     "left-behind.txt", "projects-left-out.txt", "plugins-copied.txt", "plugins-copied.json",
+                     "plugins-not-copied.txt"):
             (landing / name).unlink(missing_ok=True)
         for f in landing.glob("plugins-*.csv"):
             f.unlink()
@@ -2541,7 +2543,7 @@ def put_plugins_in_place(plan, moves, landing, journal, entries, rehearsal_root=
 
     for it, dest, idx in mine:
         m = moves[it["id"]]
-        row = {"label": m["label"], "names": m["names"], "where": str(m["final"] or dest)}
+        row = {"id": it["id"], "label": m["label"], "names": m["names"], "where": str(m["final"] or dest)}
         if it["id"] in flagged:
             out["flagged"].append(dict(row, where=None, threat=flagged[it["id"]]["threat"]))
         elif it["id"] in done_items or (not idx and m["before"]):
@@ -2874,6 +2876,12 @@ def cmd_unpack(args):
     if plugins["placed"] or plugins["waiting"] or plugins["other_os"] or plugins["flagged"]:
         (landing / "plugins-copied.txt").write_text("\n".join(copied_plugin_lines(plugins, manifest["source_os"])),
                                                      encoding="utf-8")
+    # for the Plugins to install page (issue #82): what came along, and what was left out for safety
+    by_id = {it["id"]: it for it in manifest["items"]}
+    (landing / "plugins-copied.json").write_text(json.dumps({
+        "placed": [x for r in plugins["placed"] for x in by_id.get(r.get("id"), {}).get("plugins", [])],
+        "flagged": [dict(x, threat=r["threat"]) for r in plugins.get("flagged", [])
+                    for x in by_id.get(r.get("id"), {}).get("plugins", [])]}, indent=1), encoding="utf-8")
     plugin_ids = {it["id"] for it in manifest["items"] if it.get("plugin_data")}
     presets = [{"label": e["label"], "old": e["old"], "new": e["new"]} for e in entries if e.get("id") in plugin_ids]
     cross_os = manifest["source_os"] != THIS_OS
@@ -3761,7 +3769,7 @@ INSTALLER_APPS = {
     "waves": "Waves Central", "arturia": "Arturia Software Center",
     "plugin alliance": "Plugin Alliance Installation Manager", "brainworx": "Plugin Alliance Installation Manager",
     "spitfire audio": "Spitfire Audio app", "uvi": "UVI Portal", "softube": "Softube Central",
-    "slate digital": "Slate Digital Connect", "universal audio": "UA Connect", "output": "Output Hub",
+    "slate digital": "Complete Access Hub", "universal audio": "UA Connect", "output": "Output Hub",
     "toontrack": "Toontrack Product Manager", "eastwest": "EW Installation Center", "ik multimedia": "IK Product Manager",
     "kilohearts": "Kilohearts Installer", "steinberg": "Steinberg Download Assistant",
     "roland": "Roland Cloud Manager", "image-line": "the FL Studio installer",
@@ -4082,6 +4090,39 @@ def cmd_plugin_folders(args):
     copied, removed = plugin_folders_job(args.plan)
     print(f"Copied {copied} plugin files, removed {removed}.")
     return 0
+
+
+def old_computer_plugins():
+    """What unpacks left for the Plugins to install page (issue #82): the old computers' plugin lists (rows like
+    _Manifest's CSV), the plugins Freighter copied over, and those it left out for safety ({name, vendor, threat
+    or why})."""
+    base = home() / "Music" / "Freighter"
+    rows, copied, unsafe = [], [], []
+    for f in sorted(base.glob("*/plugins-*.csv")) if base.is_dir() else []:
+        try:
+            with open(f, newline="", encoding="utf-8") as fh:
+                rows += list(csv.DictReader(fh))
+        except (OSError, csv.Error):
+            pass
+    for f in sorted(base.glob("*/plugins-copied.json")) if base.is_dir() else []:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        copied += data.get("placed", [])
+        unsafe += [{"name": x.get("name", ""), "vendor": x.get("vendor", ""),
+                    "why": f"your virus scanner flagged it ({x.get('threat')})"} for x in data.get("flagged", [])]
+    for f in sorted(base.glob("*/plugins-not-copied.txt")) if base.is_dir() else []:
+        try:
+            lines = f.read_text(encoding="utf-8").split("\n\n", 2)[-1].splitlines()
+        except OSError:
+            continue
+        for line in lines:   # "Name (VST3): reason" or "Name (VST3), Other (AU): reason"
+            names, _, why = line.partition("): ")
+            for n in names.split("), "):
+                if n.strip():
+                    unsafe.append({"name": n.rsplit(" (", 1)[0].strip(), "vendor": "", "why": why.strip()})
+    return rows, copied, unsafe
 
 
 def readiness_lines(r):

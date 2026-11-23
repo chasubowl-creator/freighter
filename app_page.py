@@ -59,6 +59,50 @@ input[type=text]{font:inherit;background:var(--panel2);color:var(--ink);border:1
 input[type=checkbox],input[type=radio]{accent-color:var(--blue);width:16px;height:16px;vertical-align:-3px}
 td.tick{width:28px}.actions{margin-top:18px}button.small{padding:3px 10px;font-size:12.5px}
 label.radio{display:block;margin:8px 0}.note details,.plugin details{margin-top:6px}summary{cursor:pointer;color:var(--muted)}
+/* plugins to install (issue #82) */
+.pi-hero{display:flex;gap:18px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:6px 0 8px;flex-wrap:wrap}
+.pi-hero .t{font-size:20px;font-weight:700}.pi-ready{font-size:12.5px;color:var(--muted);margin:0 2px 18px}
+.ring{width:72px;height:72px;border-radius:50%;background:conic-gradient(var(--ok) calc(var(--p) * 1%),var(--panel2) 0);display:grid;place-items:center;flex:none}
+.ring>span{width:58px;height:58px;border-radius:50%;background:var(--panel);display:grid;place-items:center;font-weight:700;font-size:14px;font-variant-numeric:tabular-nums}
+.brands{display:flex;flex-direction:column;gap:10px}
+.brand{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:border-color .25s}
+.brand.open{border-color:color-mix(in srgb,var(--c) 45%,var(--line))}
+.bh{all:unset;box-sizing:border-box;display:grid;grid-template-columns:40px 1fr auto 14px;gap:12px;align-items:center;width:100%;padding:12px 14px;cursor:pointer}
+.bh:hover .bn{color:#fff}.bh:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;border-radius:12px}
+.tile{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:14px;letter-spacing:.3px;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);border:1px solid color-mix(in srgb,var(--c) 38%,transparent)}
+.bn{font-weight:650;transition:color .2s}.bs{font-size:12.5px;color:var(--muted)}
+.pill{font-size:12px;padding:3px 10px;border-radius:20px;background:var(--panel2);white-space:nowrap}.pill.ok{color:var(--ok)}
+.chev{color:var(--muted);font-size:18px;line-height:1;transition:transform .25s}.brand.open .chev{transform:rotate(90deg)}
+.bp{height:2px;background:var(--panel2)}.bp i{display:block;height:100%;background:var(--c);transition:width .4s}
+.bb{display:grid;grid-template-rows:0fr;transition:grid-template-rows .3s ease}.brand.open .bb{grid-template-rows:1fr}
+.bb>div{overflow:hidden}.bi{padding:6px 16px 12px}
+.how{display:flex;gap:8px;flex-wrap:wrap;list-style:none;padding:0;margin:8px 0 4px;counter-reset:h}
+.how li{counter-increment:h;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);background:var(--panel2);border-radius:20px;padding:4px 12px 4px 4px}
+.how li::before{content:counter(h);width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--c) 22%,transparent);color:var(--c);font-weight:700;font-size:11.5px}
+.how a{color:var(--ink);font-weight:600;text-decoration:none}.how a:hover{text-decoration:underline}
+.tip{font-size:12.5px;color:var(--muted);margin:8px 0 2px}
+.prow{display:grid;grid-template-columns:24px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.prow:first-of-type{margin-top:10px}
+.tickc{all:unset;cursor:pointer;width:20px;height:20px;border-radius:50%;border:1.5px solid var(--muted);display:grid;place-items:center;transition:background .2s,border-color .2s}
+.tickc:hover{border-color:var(--ok)}.tickc:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.tickc.on{background:var(--ok);border-color:var(--ok);animation:pop .25s}.tickc:disabled{cursor:default}
+.tickc.on::after{content:"";width:5px;height:9px;border:solid var(--bg);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg)}
+@keyframes pop{50%{transform:scale(1.18)}}
+.pname{font-weight:600}.prow.done .pname{color:var(--muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 55%,transparent)}
+.prow.gone{opacity:.55}
+.meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:3px;font-size:12px;color:var(--muted)}
+.chip{font-size:11px;padding:1px 8px;border-radius:20px;border:1px solid}
+.found{color:var(--ok)}.why{color:var(--warn)}
+.pa{display:flex;gap:14px;align-items:center;font-size:12.5px;white-space:nowrap}
+.pa a{color:var(--blue);text-decoration:none}.pa a:hover{text-decoration:underline}
+.pa button{all:unset;cursor:pointer;color:var(--muted)}.pa button:hover{color:var(--ink)}.pa button:focus-visible{outline:2px solid var(--blue)}
+.more{all:unset;cursor:pointer;color:var(--blue);font-size:13px;padding:10px 0 2px;display:inline-block}
+details.allb{margin-top:22px}details.allb summary{font-size:14px}
+.bchips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.bchip{all:unset;cursor:pointer;display:flex;gap:8px;align-items:center;padding:4px 12px 4px 4px;border-radius:20px;background:var(--panel);border:1px solid var(--line);font-size:13px;transition:border-color .2s}
+.bchip .tile{width:24px;height:24px;border-radius:7px;font-size:10px}.bchip:hover,.bchip.on{border-color:var(--c)}
+.pi-foot{margin-top:26px;font-size:13px;color:var(--muted)}
+@media (max-width:600px){.prow{grid-template-columns:24px 1fr}.pa{grid-column:2}.bh{grid-template-columns:36px 1fr auto}.chev{display:none}}
 ul.plain{list-style:none;padding:0;margin:8px 0}ul.plain>li{padding:10px 0;border-bottom:1px solid var(--line)}
 ul.checks{list-style:none;padding:0}ul.checks li{padding:4px 0}a{color:var(--blue)}
 ul.plain>li>.row{margin-top:6px}.stage{font-weight:600}.stage:empty{display:none}
@@ -798,42 +842,125 @@ function projectHealth() {
   });
 }
 
-/* ---------- plugins ---------- */
+/* ---------- plugins to install (issue #82) ---------- */
+const TYPE_HUE = {Synth: "#b07cff", Sampler: "#5ad1ff", Drums: "#ff7a59", Bass: "#f08a24", Keys: "#ffd166",
+  Orchestral: "#c9a46b", Guitar: "#ef6f6c", Vocal: "#ff6ad5", Mixing: "#3ec1d3", Mastering: "#4cc38a",
+  Reverb: "#6c8cff", Delay: "#8fd16a", Effect: "#9aa4b2"};
+const ROWS_SHOWN = 5;
+let pi = null;   // the page's state: the job's answer, which card is open, what's unfolded
+
 function readiness() {
-  runJob("readiness", {}, [backTo(home), el("h1", {}, "Your plugins"),
-    el("p", {class: "sub"}, "Reading which plugins each project uses, then checking what's installed here. Plugins are never loaded or run.")],
+  runJob("readiness", {}, [backTo(home), el("h1", {}, "Plugins to install"),
+    el("p", {class: "sub"}, "Reading your projects and the old computer's plugin list, then checking what's installed here. Plugins are never loaded or run.")],
     (r) => {
-      const ticked = store.get("installed", {});
-      const left = r.total - r.ready;
-      const rows = r.missing.map(m => el("li", {class: "plugin"},
-        el("label", {}, el("input", {type: "checkbox", checked: !!ticked[m.name],
-          onchange: (e) => { ticked[m.name] = e.target.checked; store.set("installed", ticked); }}),
-          " ", el("b", {}, m.name), m.vendor ? el("span", {class: "muted"}, " by " + m.vendor) : null),
-        el("div", {class: "muted small"}, `Used in ${plural(m.projects.length, "project")}` +
-          (m.opens ? ` · installing it opens ${plural(m.opens, "more project")}` : "")),
-        m.link ? el("a", {href: m.link, target: "_blank", rel: "noopener noreferrer", class: "small"}, "Get it from " + (m.vendor || "the maker"))
-          : el("a", {href: m.search, target: "_blank", rel: "noopener noreferrer", class: "small"}, "Search the web for it"),
-        el("details", {}, el("summary", {class: "small"}, "Which projects"), el("ul", {class: "small"}, m.projects.map(p => el("li", {}, p))))));
-      show(backTo(home), el("h1", {}, "Your plugins"),
-        el("div", {class: "panel"}, el("div", {class: "big"}, `${r.ready} of ${r.total}`),
-          el("div", {class: "muted"}, left ? `projects have every plugin they use. Install the ones below, most useful first.` :
-            "projects have every plugin they use. Nothing to install.")),
-        (r.groups || []).length ? el("h2", {}, "Install by app") : null,
-        (r.groups || []).length ? el("p", {class: "muted"}, "Most makers' plugins come back through one app each. Install these, then sign in and install the plugins listed:") : null,
-        (r.groups || []).length ? el("ul", {class: "plain"}, r.groups.map(g => el("li", {},
-          el("b", {}, g.app), el("span", {class: "muted"}, ` · used in ${plural(g.projects, "project")}`),
-          el("div", {class: "small"}, g.plugins.join(", ")),
-          g.link ? el("a", {href: g.link, target: "_blank", rel: "noopener noreferrer", class: "small"}, `Get ${g.app.replace(/^the /, "")}`) : null))) : null,
-        r.missing.length ? el("h2", {}, "Plugin by plugin") : null,
-        r.missing.length ? el("ul", {class: "plain"}, rows) : null,
-        r.versions.length ? el("h2", {}, "DAW versions") : null,
-        ...r.versions.map(v => el("p", {}, `${v.daw} ${v.version} or newer `, el("span", {class: "muted"}, `(the newest that saved your projects, e.g. ${v.example})`))),
-        ...r.warnings.map(w => note("", "Watch out", el("div", {class: "muted"}, w))),
-        r.on_old_computer ? el("h2", {}, "Before you wipe this computer") : null,
-        r.on_old_computer ? licenseList() : null,
-        el("div", {class: "row actions"}, el("button", {class: "primary", onclick: readiness}, "Check again"),
-          el("button", {onclick: pluginReport}, "Full plugin report")));
+      pi = {r, open: null, more: new Set(), showRemoved: false, extra: null};
+      const first = r.brands.find(b => b.plugins.some(p => piState(p) === "todo"));
+      pi.open = first ? first.id : null;
+      renderPlugins(true);
     });
+}
+
+function piState(p) {
+  const c = pi.r.checklist;
+  return c.removed[p.key] ? "removed" : (p.found || c.done[p.key]) ? "done" : "todo";
+}
+
+async function piSet(p, state) {
+  try { pi.r.checklist = await api("/api/checklist", {key: p.key, state}); } catch (e) { return; }
+  renderPlugins();
+}
+
+function piToggle(card, id) {   // one card open at a time, animated in place
+  const opening = !card.classList.contains("open");
+  document.querySelectorAll(".brand.open").forEach(c => { c.classList.remove("open"); c.querySelector(".bh").setAttribute("aria-expanded", "false"); });
+  if (opening) { card.classList.add("open"); card.querySelector(".bh").setAttribute("aria-expanded", "true"); }
+  pi.open = opening ? id : null;
+}
+
+function piRow(p, b) {
+  const st = piState(p), old = pi.r.mode === "old";
+  const hue = TYPE_HUE[p.type];
+  const meta = el("div", {class: "meta"},
+    hue ? el("span", {class: "chip", style: `color:${hue};border-color:color-mix(in srgb,${hue} 40%,transparent)`}, p.type) : null,
+    el("span", {}, p.used_in ? `Used in ${plural(p.used_in, "project")}` : "Not in your projects"),
+    !b.app && p.maker ? el("span", {}, p.maker) : null,
+    p.found ? el("span", {class: "found"}, "Found on this computer") : null,
+    p.why ? el("span", {class: "why"}, "Not copied, for safety: " + p.why) : null);
+  const tick = old ? el("span") : el("button", {class: "tickc" + (st === "done" ? " on" : ""), disabled: p.found,
+    "aria-label": p.found ? `${p.name} is installed` : st === "done" ? `Untick ${p.name}` : `Tick off ${p.name}`,
+    title: p.found ? "Found on this computer" : st === "done" ? "Untick" : "Tick it off once it's installed",
+    onclick: () => piSet(p, st === "done" ? "todo" : "done")});
+  const acts = el("div", {class: "pa"},
+    el("a", {href: p.link, target: "_blank", rel: "noopener noreferrer"}, (b.app ? "Product page" : "Maker's site") + " ↗"),
+    old ? null : st === "removed" ? el("button", {onclick: () => piSet(p, "todo")}, "Put back")
+      : p.found ? null : el("button", {title: "Take it off this list", onclick: () => piSet(p, "removed")}, "Not needed"));
+  return el("div", {class: "prow" + (st === "done" ? " done" : "") + (st === "removed" ? " gone" : "")},
+    tick, el("div", {}, el("div", {class: "pname"}, p.name), meta), acts);
+}
+
+function piCard(b, opts) {
+  opts = opts || {};
+  const old = pi.r.mode === "old";
+  const items = b.plugins.filter(p => pi.showRemoved || piState(p) !== "removed");
+  const todo = items.filter(p => piState(p) === "todo").length, done = items.filter(p => piState(p) === "done").length;
+  const open = opts.open || pi.open === b.id;
+  const card = el("section", {class: "brand" + (open ? " open" : ""), style: `--c:${b.color}`});
+  const shown = pi.more.has(b.id) ? items : items.slice(0, ROWS_SHOWN);
+  const how = b.steps ? el("ol", {class: "how"}, b.steps.map((s, i) => el("li", {},
+      i === 0 ? el("a", {href: b.url, target: "_blank", rel: "noopener noreferrer"}, s + " ↗") : s)))
+    : el("p", {class: "tip"}, "Each plugin links to its maker's website, or to a web search when Freighter doesn't know the maker.");
+  const pill = opts.info ? null : old ? el("span", {class: "pill"}, plural(items.length, "plugin"))
+    : todo ? el("span", {class: "pill"}, `${todo} to install`) : el("span", {class: "pill ok"}, "All done");
+  card.append(...[
+    el("button", {class: "bh", "aria-expanded": String(open), onclick: () => piToggle(card, b.id)},
+      el("span", {class: "tile"}, b.initials),
+      el("span", {}, el("div", {class: "bn"}, b.name), el("div", {class: "bs"}, b.app ? `via ${b.app.replace(/^(your|the) /, "")}` : "From each maker's website")),
+      pill || el("span"), el("span", {class: "chev"}, "›")),
+    old || opts.info ? null : el("div", {class: "bp"}, el("i", {style: `width:${items.length ? Math.round(100 * done / items.length) : 0}%`})),
+    el("div", {class: "bb"}, el("div", {}, el("div", {class: "bi"},
+      how, b.tip ? el("p", {class: "tip"}, b.tip) : null,
+      opts.info ? el("p", {class: "tip"}, el("a", {href: b.products, target: "_blank", rel: "noopener noreferrer", style: "color:var(--blue)"}, `${b.name}'s plugins ↗`)) : null,
+      ...shown.map(p => piRow(p, b)),
+      items.length > shown.length ? el("button", {class: "more", onclick: () => { pi.more.add(b.id); renderPlugins(); }},
+        `Show ${items.length - shown.length} more`) : null)))].filter(Boolean));   // append() would print a null
+  return card;
+}
+
+function renderPlugins(top) {
+  const r = pi.r, old = r.mode === "old", y = window.scrollY;
+  const all = r.brands.flatMap(b => b.plugins).concat(r.other);
+  const listed = all.filter(p => piState(p) !== "removed");
+  const done = listed.filter(p => piState(p) === "done").length;
+  const removed = all.length - listed.length;
+  const other = {id: "other", name: "Other makers", initials: "+", color: "#9aa1ab", app: null, steps: null, plugins: r.other};
+  const visible = (b) => b.plugins.some(p => pi.showRemoved || piState(p) !== "removed");
+  const cards = r.brands.filter(visible).map(b => piCard(b)).concat(r.other.length && visible(other) ? [piCard(other)] : []);
+  const extra = pi.extra && r.all_brands.find(b => b.id === pi.extra);
+  const title = old ? (listed.length ? `${plural(listed.length, "plugin")} to install on the new computer` : "Every plugin comes along")
+    : !listed.length ? "Nothing to install" : done === listed.length ? "Everything is installed" : `${done} of ${listed.length} installed`;
+  show(backTo(home), el("h1", {}, old ? "Plugins for the new computer" : "Plugins to install"),
+    el("div", {class: "pi-hero"},
+      old || !listed.length ? null : el("div", {class: "ring", style: `--p:${Math.round(100 * done / listed.length)}`}, el("span", {}, `${done}/${listed.length}`)),
+      el("div", {style: "flex:1;min-width:220px"}, el("div", {class: "t"}, title),
+        el("div", {class: "muted small"}, old ? "These don't come along: each one installs from its maker's app or website. Open a brand to see how."
+          : "The plugins Freighter couldn't bring. Open a brand to see where to get them, then tick each one off.")),
+      old ? null : el("button", {class: "primary", onclick: readiness}, "Check again")),
+    r.total && !old ? el("div", {class: "pi-ready"}, `${r.ready} of ${plural(r.total, "project")} already ${r.ready === 1 ? "has" : "have"} every plugin ${r.ready === 1 ? "it uses" : "they use"}.`) : null,
+    cards.length ? el("div", {class: "brands"}, cards) : el("p", {class: "muted"}, "Nothing here: every plugin from the old computer is on this one."),
+    el("details", {class: "allb", open: !!pi.extra},
+      el("summary", {}, `All major brands (${r.all_brands.length})`),
+      el("div", {class: "bchips"}, r.all_brands.map(b => el("button", {class: "bchip" + (pi.extra === b.id ? " on" : ""), style: `--c:${b.color}`,
+        onclick: () => { pi.extra = pi.extra === b.id ? null : b.id; renderPlugins(); }}, el("span", {class: "tile"}, b.initials), b.name))),
+      extra ? piCard(Object.assign({}, extra, {plugins: []}), {open: true, info: true}) : null),
+    el("div", {class: "pi-foot"},
+      removed ? el("p", {}, `${plural(removed, "plugin")} taken off the list · `,
+        el("button", {class: "link", onclick: () => { pi.showRemoved = !pi.showRemoved; renderPlugins(); }}, pi.showRemoved ? "Hide them" : "Show them")) : null,
+      ...r.versions.map(v => el("p", {}, `Needs ${v.daw} ${v.version} or newer `, el("span", {}, `(the newest that saved your projects, e.g. ${v.example})`))),
+      ...r.warnings.map(w => el("p", {class: "warnc"}, w))),
+    r.on_old_computer ? el("h2", {}, "Before you wipe this computer") : null,
+    r.on_old_computer ? licenseList() : null,
+    el("div", {class: "row actions"}, el("button", {onclick: pluginReport}, "Full plugin report"), el("button", {onclick: home}, "Home")));
+  if (!top) window.scrollTo(0, y);
 }
 
 function pluginReport() {
