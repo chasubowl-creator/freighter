@@ -2626,3 +2626,45 @@ class OldAbletonSets(TempDirCase):
             plan = rm.plan_move()
         packed = {Path(it["source_path"]).name for it in plan["items"]}
         self.assertIn("Drum Kits", packed, "found through the Live 10 set's full path")
+
+
+
+class FewerScans(TempDirCase):
+    """Issue #84: Microsoft Defender takes about 3 s a call, so plugins are scanned in as few calls as is safe."""
+
+    def defender(self):
+        return mock.patch.object(rm.rs, "find_virus_scanner", lambda: ("Microsoft Defender", "MpCmdRun.exe"))
+
+    def test_a_small_plugin_folder_is_scanned_in_one_go(self):
+        root, big = self.tmp / "VST3", self.tmp / "Big"
+        files = [str(write(root / f"{n}.vst3", b"p" * 10)) for n in "abc"] + [str(write(big / "x.vst3", b"x" * 50)),
+                                                                            str(write(big / "y.vst3", b"y" * 50))]
+        alone = str(write(self.tmp / "Elsewhere" / "z.vst3", b"z"))
+        with self.defender(), mock.patch.dict(os.environ, {"FREIGHTER_PLUGIN_ROOTS": os.pathsep.join([str(root), str(big)])}), \
+                mock.patch.object(rm, "DEFENDER_GROUP_MAX", 80):
+            targets = rm.scan_targets(files + [alone], clean=False)
+        self.assertEqual(sorted(targets), sorted([str(root)] + files[3:] + [alone]), "the big folder goes plugin by plugin")
+
+    def test_the_holding_folder_is_one_scan(self):
+        holding = self.tmp / "Music" / "Freighter" / "OldPC" / "Plugins"
+        files = [str(write(holding / n / "p.vst3", b"p").parent) for n in ("A", "B", "C")]
+        with self.defender():
+            self.assertEqual(rm.scan_targets(files, clean=True), [str(holding)])
+        with mock.patch.object(rm.rs, "find_virus_scanner", lambda: ("ClamAV", "clamscan")):
+            self.assertEqual(rm.scan_targets(files, clean=True), files, "ClamAV takes them all in one call anyway")
+
+    def test_hits_in_a_folder_scan_land_on_the_right_plugin(self):
+        root = self.tmp / "VST3"
+        items = [{"id": f"vst-{n}", "label": n, "source_path": str(write(root / f"{n}.vst3", b"p")), "plugins": []}
+                 for n in ("good", "bad")]
+        seen = []
+
+        def scan(paths, clean=False):
+            seen.append(list(paths))
+            return {"scanner": "Microsoft Defender", "hits": {str(root / "bad.vst3"): "Trojan:Test"},
+                    "errors": [], "note": ""}
+        with self.defender(), mock.patch.dict(os.environ, {"FREIGHTER_PLUGIN_ROOTS": str(root)}), \
+                mock.patch.object(rm.rs, "scan_files", scan), quiet():
+            flagged, note = rm.scan_plugin_items(items)
+        self.assertEqual(seen, [[str(root)]], "one call for the folder")
+        self.assertEqual([f["id"] for f in flagged], ["vst-bad"])

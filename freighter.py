@@ -1703,6 +1703,31 @@ def say_plugin_files(pf):
               "; ".join(f"{p['name']}: {safety_reason(p['why'])}" for p in pf["safety"]))
 
 
+DEFENDER_GROUP_MAX = 1024 ** 3   # a plugin folder up to this size is scanned in one go (issue #84)
+
+
+def scan_targets(files, clean):
+    """What to hand the virus scanner: fewer, bigger scans, because Microsoft Defender takes about 3 seconds a call
+    however little it scans (issue #84: measured by the Windows build's self-check). On the new computer, the
+    holding folder in one go; on the old one, each plugin folder in one go when it holds several of the plugins and
+    isn't big, else each plugin on its own. (ClamAV takes every path in one call anyway.)"""
+    files = list(files)
+    if len(files) < 2 or rs.find_virus_scanner()[0] != "Microsoft Defender":
+        return files
+    fold = THIS_OS == "windows"
+    if clean:
+        common = os.path.commonpath(files)
+        return [common] if len(Path(common).parts) >= 3 and os.path.isdir(long_path(common)) else files
+    targets, rest = [], files
+    for root in plugin_roots():
+        r = norm(str(root), fold)
+        inside = [f for f in rest if norm(f, fold).startswith(r + "/")]
+        if len(inside) >= 2 and folder_bytes(root, DEFENDER_GROUP_MAX) <= DEFENDER_GROUP_MAX:
+            targets.append(str(root))
+            rest = [f for f in rest if f not in inside]
+    return targets + rest
+
+
 def scan_plugin_items(items, clean=False):
     """Scan plugin items with this computer's virus scanner (issue #81). Returns ([{id, label, names, threat}]
     for the flagged items, a line for people, or "" when there was nothing to scan)."""
@@ -1719,8 +1744,10 @@ def scan_plugin_items(items, clean=False):
                     "hasn't checked the first time your DAW loads it.")
     print("\nChecking the copied plugins with this computer's virus scanner..." if clean else
           "\nChecking the plugins that come along with your virus scanner...", flush=True)
-    r = rs.scan_files(list(paths), clean=clean)
+    r = rs.scan_files(scan_targets(paths, clean), clean=clean)
     fold = THIS_OS == "windows"
+    under = lambda f, t: norm(f, fold) == norm(t, fold) or norm(f, fold).startswith(norm(t, fold) + "/")
+    unchecked = {it["id"] for f, it in paths.items() for e in r["errors"] if under(f, e)}
     flagged = {}
     for hit, threat in r["hits"].items():
         h = norm(hit, fold)
@@ -1730,8 +1757,8 @@ def scan_plugin_items(items, clean=False):
                                  "names": [f"{x['name']} ({x['format']})" for x in it.get("plugins", [])]}
     if r["scanner"]:
         note = f"Plugins checked by {r['scanner']}: {len(flagged)} flagged" + \
-            (f", {len(r['errors'])} couldn't be checked" + ("" if clean else " (the new computer checks them again)")
-             if r["errors"] else "") + "."
+            (f", {len(unchecked)} couldn't be checked" + ("" if clean else " (the new computer checks them again)")
+             if unchecked else "") + "."
     else:
         note = r["note"]
     return list(flagged.values()), note

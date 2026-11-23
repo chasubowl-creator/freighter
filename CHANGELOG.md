@@ -118,6 +118,8 @@ The first version with a number. Everything that exists so far:
      like a download, so macOS scans each one the first time a DAW loads it (Open Anyway once).
   4. Calm wording: "not copied, for safety", with the reason and "install a fresh copy from its maker". The
      plugin report says "Changed after signing" instead of "Signature broken".
+  Microsoft Defender takes about 3 seconds a scan however small, so plugins are scanned in as few calls as is safe
+  (issue #84): the holding folder in one go, and each plugin folder under 1 GB in one go.
 - **Plugins to install** (issue #82): the app's plugins page is now one clean checklist of the plugins Freighter
   couldn't bring, by brand. Each brand opens to show how its plugins install (Native Access, Waves Central,
   Arturia Software Center and 20 more, checked links), its plugins with a type and how many projects use them, and
